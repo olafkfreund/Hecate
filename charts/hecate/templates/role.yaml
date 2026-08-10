@@ -1,0 +1,46 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hecate-controller
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - hecate.dev
+  resources:
+  - beacons
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - hecate.dev
+  resources:
+  - beacons/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - hecate.dev
+  resources:
+  - bundles
+  verbs:
+  - create
+  - get
+  - list
+  - watch

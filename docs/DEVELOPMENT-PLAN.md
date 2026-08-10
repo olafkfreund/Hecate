@@ -14,7 +14,8 @@ This is the *how*.
 | `pkg/health` — Checker interface, registry, Flux checker | ✅ done |
 | `pkg/passage` — Step interface, registry, execution engine | ✅ done |
 | `pkg/passage/steps` — `flux-wait` | ✅ done |
-| Controllers | M1 |
+| `pkg/beacon` — discovery, image resolution, Beacon controller | ✅ done |
+| Gate and Passage controllers | M1 |
 | Step library (git, render, OCI) | M2 |
 | Providers (git hosts, registries) | M3 |
 | Fides evidence | M4 |
@@ -24,7 +25,7 @@ This is the *how*.
 | API server | M7 |
 | UI | M8 |
 
-33 tests, no cluster required, ~0.2s.
+54 tests, no cluster required, ~0.7s.
 
 ## 2. Technology
 
