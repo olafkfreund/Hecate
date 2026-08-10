@@ -19,7 +19,8 @@ This is the *how*.
 | Providers (git hosts, registries) | M3 |
 | Fides evidence | M4 |
 | OpenTelemetry | M5 |
-| CLI | M6 |
+| CLI + `pkg/ops` | M6 |
+| MCP server, LLM assist | M6.5 |
 | API server | M7 |
 | UI | M8 |
 
@@ -37,6 +38,8 @@ This is the *how*.
 | Kustomize | `sigs.k8s.io/kustomize/api` | Same |
 | Registries | `google/go-containerregistry` | Tag listing, digest resolution, cloud keychains for free |
 | Expressions | `expr-lang/expr` | Sandboxed, fast, no template injection surface |
+| LLM access | One OpenAI-compatible HTTP client | Ollama, llama.cpp, vLLM and the hosted vendors all speak `/v1/chat/completions` |
+| MCP | Hand-rolled JSON-RPC | Small protocol; a dependency buys nothing |
 | Observability | OpenTelemetry (traces + metrics), OTLP | Requirement; DORA falls out of it |
 | UI | Next.js 16 · React 19 · Tailwind v4 · lucide-react · recharts | Identical to the Fides portal |
 | CLI | cobra | Convention |
@@ -89,11 +92,25 @@ DORA metrics, exemplar Grafana dashboard.
 
 **Exit:** one trace spans CI → crossing → Flux reconciliation.
 
-### M6 — CLI
-Full surface, three output formats, documented exit codes, `hecate cross --watch`,
-shell completion.
+### M6 — CLI, over a shared operations layer
+`pkg/ops` first — one implementation of "list, explain, cross, approve, abort" that the
+CLI, API server, MCP server and UI all call. Then the CLI on top: full surface, three
+output formats, documented exit codes, `hecate cross --watch`, shell completion.
 
 **Exit:** every operation is scriptable; gates usable in CI by exit code alone.
+
+### M6.5 — MCP server and LLM assist
+An MCP server so LLM clients can drive Hecate, and an optional LLM to help explain a
+stuck Passage. Both are thin adapters over `pkg/ops`, which is why they sit here rather
+than earlier: built before it, they would each grow their own copy of the rules.
+
+One OpenAI-compatible client covers Ollama, llama.cpp, vLLM and the hosted vendors —
+no provider abstraction ([D9](DECISIONS.md)). Untrusted-input handling ships with the
+first prompt, not as later hardening. Hecate stays fully usable with no LLM configured,
+and an LLM never decides what crosses.
+
+**Exit:** an LLM client can inspect a stuck Passage and request a crossing through MCP;
+`hecate diagnose` explains a wedged Passage against a local Ollama model.
 
 ### M7 — API server
 Read/write API, SSO/OIDC, RBAC. The UI's backend.
@@ -110,6 +127,12 @@ CRD stability, upgrade path, security review, cosign + SBOM, ecosystem listing.
 The CLI (M6) lands *before* the UI (M8) and the API server (M7) lands between them.
 That order is deliberate: the CLI proves the API surface is coherent, and it is what
 early adopters actually use. A UI built before the model settles is rework.
+
+`pkg/ops` is the reason M6 comes where it does. Four consumers — CLI, MCP, API server,
+UI — need the same operations, and the one thing that must not happen is four
+implementations of "is this Bundle eligible" or "may this be approved". MCP and LLM
+support (M6.5) are deliberately *after* it rather than early: they are thin adapters,
+and built first they would each grow their own copy of those rules.
 
 Fides (M4) and OTel (M5) come before both, because they are the differentiators and
 because retrofitting tracing is far more expensive than building with it.

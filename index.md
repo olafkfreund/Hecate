@@ -214,7 +214,8 @@ competitor. It is the layer above all three that none of them provide.
 | | **M3 · Providers** | Git hosts and registries, verified in CI rather than claimed |
 | | **M4 · Evidence** | Change gate, attestations, approvals mapped to segregation of duties |
 | | **M5 · OpenTelemetry** | Passage traces, git-trailer context propagation, DORA |
-| | **M6 · CLI** | Full surface, `json`/`yaml`/`table`, documented exit codes |
+| | **M6 · CLI** | One shared operations layer, then the CLI: `json`/`yaml`/`table`, documented exit codes |
+| | **M6.5 · MCP + LLM** | An MCP server so agents can drive Hecate; optional local LLM for diagnosis |
 | | **M7 · API server** | SSO, RBAC — the UI's backend |
 | | **M8 · UI** | Pipeline graph, Bundle timeline, one-click crossing, evidence panel |
 | | **M9 · v1.0** | CRD stability, upgrade path, security review |
@@ -223,6 +224,11 @@ competitor. It is the layer above all three that none of them provide.
 
 The CLI lands before the UI on purpose. The CLI proves the API surface is coherent and
 it is what early adopters actually use; a UI built before the model settles is rework.
+
+The CLI, MCP server, API server and UI all call **one operations layer**. Four
+implementations of "is this Bundle eligible" or "may this be approved" is the failure
+mode worth designing against. An LLM can inspect and request; it never decides what
+crosses — that is what evidence gates are for.
 
 ---
 

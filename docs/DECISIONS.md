@@ -125,7 +125,46 @@ one line of glossary, paid once.
 
 ---
 
-## D8 — API group is `hecate.dev`
+## D8 — One operations layer, four consumers
+
+**2026-08-10 · accepted**
+
+The CLI, API server, MCP server and UI all call one `pkg/ops`. None of them
+reimplements "what is eligible", "may this be approved", or "why is this stuck".
+
+**Why.** Four consumers want the same handful of operations. Implemented separately
+they diverge, and the divergence lands in the *rules* — which is the worst place to
+have four answers. This is the actual early-architecture item; MCP and LLM support are
+thin adapters over it.
+
+**Consequence.** `pkg/ops` is built with the CLI, its first consumer, and nothing added
+later may bypass it.
+
+---
+
+## D9 — One LLM client, not a provider abstraction
+
+**2026-08-10 · accepted**
+
+Ollama, llama.cpp, vLLM, LM Studio and the hosted vendors all expose an
+OpenAI-compatible `/v1/chat/completions`. So "pluggable LLM" is a base URL, a model
+name and an optional key — one ~100-line client, no interface, no registry, no factory.
+
+**Why.** An interface with one meaningful implementation is a cost with no benefit. The
+compatibility layer already exists at the wire level; reimplementing it as a Go
+abstraction adds indirection and nothing else. If a provider genuinely does not fit,
+*that* is the day to add a second implementation.
+
+**Non-negotiable regardless of size.** Everything Hecate would feed an LLM — Flux
+condition messages, commit messages, PR titles, image tags — is attacker-influenced.
+Untrusted-data preamble and input caps ship in the first commit that sends a prompt.
+
+**Hard limit.** An LLM never makes a promotion decision. Diagnosis is an assist;
+Hecate is fully usable with none configured. Evidence gates decide what crosses.
+
+---
+
+## D10 — API group is `hecate.dev`
 
 **2026-08-10 · accepted, with a dependency**
 
