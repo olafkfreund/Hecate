@@ -1,0 +1,35 @@
+title: Hecate
+tagline: The promotion and release-orchestration layer for FluxCD
+description: >-
+  Hecate is the gate between your environments. Declarative promotion pipelines
+  for FluxCD, with compliance evidence and OpenTelemetry tracing built in.
+
+url: https://olafkfreund.github.io
+baseurl: /Hecate
+
+repository: olafkfreund/Hecate
+github_username: olafkfreund
+
+markdown: kramdown
+highlighter: rouge
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+  hard_wrap: false
+
+plugins:
+  - jekyll-seo-tag
+
+exclude:
+  - pkg/
+  - cmd/
+  - charts/
+  - examples/
+  - go.mod
+  - go.sum
+  - vendor/
+  - Makefile
+  - LICENSE
+  - "*.go"
+  - .github/
+  - .gitignore

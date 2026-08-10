@@ -1,0 +1,141 @@
+# A three-stage Flux promotion pipeline: dev -> staging -> production.
+#
+# Hecate never talks to Flux. Each Stage renders new state into git, pushes it,
+# and then `flux-wait` blocks until the Flux Kustomization has actually applied
+# that exact commit. Git is the rendezvous.
+#
+# Prerequisites: Flux installed, and a Kustomization per environment pointed at
+# the corresponding path in the deploy repo.
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Warehouse
+metadata:
+  name: podinfo
+  namespace: acme
+spec:
+  interval: 2m
+  subscriptions:
+    - image:
+        repoURL: ghcr.io/stefanprodan/podinfo
+        # Only ever consider semver releases; ignore :latest and dated tags.
+        imageSelectionStrategy: SemVer
+        semverConstraint: ^6.0.0
+
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: dev
+  namespace: acme
+spec:
+  requestedFreight:
+    - origin: { kind: Warehouse, name: podinfo }
+      sources: { direct: true }        # dev takes new artifacts straight from the Warehouse
+  promotionTemplate:
+    spec:
+      steps:
+        - uses: git-clone
+          config:
+            repoURL: https://github.com/acme/deploy.git
+            checkout: [{ branch: main, path: ./repo }]
+        - uses: kustomize-set-image
+          config:
+            path: ./repo/envs/dev
+            images: [{ image: ghcr.io/stefanprodan/podinfo }]
+        - uses: git-commit
+          as: commit
+          config:
+            path: ./repo
+            message: "dev: podinfo ${{ imageFrom('ghcr.io/stefanprodan/podinfo').Tag }}"
+        - uses: git-push
+          config: { path: ./repo }
+        - uses: flux-wait
+          config:
+            resources:
+              - { kind: Kustomization, name: podinfo-dev, namespace: flux-system }
+            # Wait for the commit this promotion just pushed, not merely for
+            # "Ready" — otherwise a stale green from the previous revision passes.
+            expectedRevision: ${{ outputs.commit.commit }}
+
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: staging
+  namespace: acme
+spec:
+  requestedFreight:
+    - origin: { kind: Warehouse, name: podinfo }
+      sources: { stages: [dev] }       # only Freight that already survived dev
+  promotionTemplate:
+    spec:
+      steps:
+        - uses: git-clone
+          config:
+            repoURL: https://github.com/acme/deploy.git
+            checkout: [{ branch: main, path: ./repo }]
+        - uses: kustomize-set-image
+          config:
+            path: ./repo/envs/staging
+            images: [{ image: ghcr.io/stefanprodan/podinfo }]
+        - uses: git-commit
+          as: commit
+          config:
+            path: ./repo
+            message: "staging: podinfo ${{ imageFrom('ghcr.io/stefanprodan/podinfo').Tag }}"
+        - uses: git-push
+          config: { path: ./repo }
+        - uses: flux-wait
+          config:
+            resources:
+              - { kind: Kustomization, name: podinfo-staging, namespace: flux-system }
+              - { kind: HelmRelease, name: podinfo-redis, namespace: staging }
+            expectedRevision: ${{ outputs.commit.commit }}
+            failAfter: 10m
+
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: production
+  namespace: acme
+spec:
+  requestedFreight:
+    - origin: { kind: Warehouse, name: podinfo }
+      sources: { stages: [staging] }
+  promotionTemplate:
+    spec:
+      steps:
+        - uses: git-clone
+          config:
+            repoURL: https://github.com/acme/deploy.git
+            checkout: [{ branch: main, path: ./repo }]
+        - uses: kustomize-set-image
+          config:
+            path: ./repo/envs/prod
+            images: [{ image: ghcr.io/stefanprodan/podinfo }]
+        - uses: git-commit
+          as: commit
+          config:
+            path: ./repo
+            message: "prod: podinfo ${{ imageFrom('ghcr.io/stefanprodan/podinfo').Tag }}"
+        # Production goes through review rather than straight to main.
+        - uses: git-push
+          as: push
+          config: { path: ./repo, generateTargetBranch: true }
+        - uses: git-open-pr
+          as: pr
+          config:
+            repoURL: https://github.com/acme/deploy.git
+            sourceBranch: ${{ outputs.push.branch }}
+            targetBranch: main
+        - uses: git-wait-for-pr
+          config:
+            repoURL: https://github.com/acme/deploy.git
+            prNumber: ${{ outputs.pr.prNumber }}
+        - uses: flux-wait
+          config:
+            resources:
+              - { kind: Kustomization, name: podinfo-prod, namespace: flux-system }
+            # Production rollouts are slower; allow longer before calling it wedged.
+            failAfter: 20m

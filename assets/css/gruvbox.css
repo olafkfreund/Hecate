@@ -1,0 +1,167 @@
+---
+---
+/* Gruvbox Dark — https://github.com/morhetz/gruvbox */
+:root {
+  --bg0-h:  #1d2021;
+  --bg0:    #282828;
+  --bg1:    #3c3836;
+  --bg2:    #504945;
+  --bg3:    #665c54;
+  --fg0:    #fbf1c7;
+  --fg1:    #ebdbb2;
+  --fg2:    #d5c4a1;
+  --fg3:    #bdae93;
+  --fg4:    #a89984;
+  --gray:   #928374;
+  --red:    #fb4934;
+  --green:  #b8bb26;
+  --yellow: #fabd2f;
+  --blue:   #83a598;
+  --purple: #d3869b;
+  --aqua:   #8ec07c;
+  --orange: #fe8019;
+
+  --mono: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  background: var(--bg0);
+  color: var(--fg1);
+  font-family: var(--sans);
+  font-size: 17px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap { width: 100%; max-width: 880px; margin: 0 auto; padding: 0 1.25rem; }
+
+/* ---------- header ---------- */
+.site-header {
+  background: var(--bg0-h);
+  border-bottom: 1px solid var(--bg1);
+  position: sticky; top: 0; z-index: 10;
+  backdrop-filter: blur(6px);
+}
+.header-inner {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem; min-height: 60px; flex-wrap: wrap;
+}
+.brand { display: inline-flex; align-items: baseline; gap: .5rem; text-decoration: none; }
+.brand-key  { color: var(--yellow); font-size: 1.15rem; }
+.brand-name { color: var(--fg0); font-weight: 700; letter-spacing: .02em; font-size: 1.15rem; }
+.site-nav { display: flex; gap: 1.1rem; align-items: center; flex-wrap: wrap; }
+.site-nav a { color: var(--fg3); text-decoration: none; font-size: .92rem; }
+.site-nav a:hover { color: var(--yellow); }
+.site-nav .nav-cta {
+  color: var(--bg0-h); background: var(--yellow);
+  padding: .3rem .7rem; border-radius: 4px; font-weight: 600;
+}
+.site-nav .nav-cta:hover { background: var(--orange); color: var(--bg0-h); }
+
+/* ---------- content ---------- */
+.content { padding: 2.5rem 1.25rem 4rem; }
+
+h1, h2, h3, h4 { color: var(--fg0); line-height: 1.25; font-weight: 700; }
+h1 { font-size: 2.4rem; margin: 0 0 .5rem; letter-spacing: -0.02em; }
+h2 {
+  font-size: 1.55rem; margin: 3rem 0 1rem;
+  padding-bottom: .4rem; border-bottom: 1px solid var(--bg1);
+}
+h3 { font-size: 1.15rem; margin: 2rem 0 .6rem; color: var(--yellow); }
+
+a { color: var(--blue); text-decoration: none; border-bottom: 1px solid transparent; }
+a:hover { color: var(--aqua); border-bottom-color: var(--aqua); }
+
+p { margin: 0 0 1.1rem; }
+strong { color: var(--fg0); }
+em { color: var(--fg2); }
+hr { border: 0; border-top: 1px solid var(--bg1); margin: 2.5rem 0; }
+
+ul, ol { padding-left: 1.3rem; }
+li { margin: .35rem 0; }
+li::marker { color: var(--orange); }
+
+blockquote {
+  margin: 1.5rem 0; padding: .1rem 1.1rem;
+  border-left: 3px solid var(--purple);
+  background: var(--bg0-h); color: var(--fg2); font-style: italic;
+  border-radius: 0 4px 4px 0;
+}
+
+/* ---------- hero ---------- */
+.hero { padding: 1rem 0 .5rem; }
+.hero .tagline { font-size: 1.2rem; color: var(--fg3); margin-bottom: 1.5rem; }
+.badges { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1.75rem; }
+.badge {
+  font-family: var(--mono); font-size: .74rem; letter-spacing: .04em;
+  padding: .22rem .55rem; border-radius: 3px;
+  background: var(--bg1); color: var(--fg3); border: 1px solid var(--bg2);
+}
+.badge.ok    { color: var(--green);  border-color: var(--green);  background: #b8bb2615; }
+.badge.warn  { color: var(--yellow); border-color: var(--yellow); background: #fabd2f15; }
+.badge.info  { color: var(--blue);   border-color: var(--blue);   background: #83a59815; }
+
+/* ---------- callouts ---------- */
+.note {
+  border: 1px solid var(--bg2); border-left: 3px solid var(--aqua);
+  background: var(--bg0-h); padding: 1rem 1.15rem; border-radius: 0 6px 6px 0;
+  margin: 1.5rem 0;
+}
+.note.gap  { border-left-color: var(--red); }
+.note.win  { border-left-color: var(--green); }
+.note > :last-child { margin-bottom: 0; }
+
+/* ---------- code ---------- */
+code {
+  font-family: var(--mono); font-size: .86em;
+  background: var(--bg1); color: var(--orange);
+  padding: .12em .38em; border-radius: 3px;
+}
+pre {
+  background: var(--bg0-h); border: 1px solid var(--bg1);
+  border-radius: 6px; padding: 1rem 1.1rem;
+  overflow-x: auto; line-height: 1.55; margin: 1.25rem 0;
+}
+pre code { background: none; color: var(--fg1); padding: 0; font-size: .84rem; }
+
+/* ASCII diagrams keep their alignment and never break the page */
+pre.ascii code { color: var(--fg3); }
+
+/* ---------- tables ---------- */
+.table-scroll { overflow-x: auto; margin: 1.25rem 0; }
+table { border-collapse: collapse; width: 100%; font-size: .92rem; }
+th, td { padding: .55rem .8rem; text-align: left; border-bottom: 1px solid var(--bg1); vertical-align: top; }
+th { color: var(--yellow); font-weight: 600; border-bottom: 1px solid var(--bg2); white-space: nowrap; }
+tbody tr:hover { background: var(--bg0-h); }
+
+/* Any table that overflows scrolls inside itself, never the body */
+table { display: block; overflow-x: auto; white-space: normal; }
+@media (min-width: 720px) { table { display: table; } }
+
+/* ---------- footer ---------- */
+.site-footer {
+  border-top: 1px solid var(--bg1); background: var(--bg0-h);
+  padding: 2rem 0; margin-top: 4rem; font-size: .88rem; color: var(--fg4);
+}
+.site-footer p { margin: .3rem 0; }
+.muted { color: var(--gray); font-size: .82rem; }
+
+/* ---------- rouge syntax highlighting, gruvbox ---------- */
+.highlight .c, .highlight .c1, .highlight .cm, .highlight .cs { color: var(--gray); font-style: italic; }
+.highlight .k, .highlight .kd, .highlight .kn, .highlight .kt, .highlight .kr { color: var(--red); }
+.highlight .s, .highlight .s1, .highlight .s2, .highlight .sb, .highlight .se { color: var(--green); }
+.highlight .na { color: var(--blue); }
+.highlight .nt { color: var(--red); }
+.highlight .nc, .highlight .nf, .highlight .nd { color: var(--yellow); }
+.highlight .nb, .highlight .no, .highlight .nv { color: var(--purple); }
+.highlight .m, .highlight .mi, .highlight .mf { color: var(--purple); }
+.highlight .o, .highlight .ow, .highlight .p { color: var(--fg2); }
+.highlight .gd { color: var(--red); }
+.highlight .gi { color: var(--green); }
+.highlight .err { color: var(--red); background: none; }

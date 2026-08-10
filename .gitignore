@@ -1,0 +1,7 @@
+/bin/
+/dist/
+*.test
+coverage.out
+.env
+node_modules/
+.next/
