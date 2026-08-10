@@ -144,6 +144,46 @@ There is a fourth, at the framework level: a health check naming an **unregister
 checker** is reported as Unknown rather than skipped. Silently ignoring a check the
 user asked for makes a Gate look healthier than it is.
 
+## Flux compatibility surface
+
+Everything Hecate depends on from Flux, in one place, so the blast radius of any Flux
+change is knowable without reading the code.
+
+**API versions read** (never written — Hecate does not create or mutate Flux resources):
+
+| Kind | Group/version |
+|---|---|
+| `Kustomization` | `kustomize.toolkit.fluxcd.io/v1` |
+| `HelmRelease` | `helm.toolkit.fluxcd.io/v2` |
+| `GitRepository`, `OCIRepository`, `HelmChart`, `HelmRepository`, `Bucket` | `source.toolkit.fluxcd.io/v1` |
+
+**Status fields read:**
+
+```
+metadata.generation            vs status.observedGeneration   (staleness)
+status.conditions[Ready]       status / reason / message / lastTransitionTime
+status.conditions[Stalled]     status / reason / message
+status.lastAppliedRevision     Kustomization
+status.lastAttemptedRevision   HelmRelease
+status.artifact.revision       source kinds
+status.history[0]              HelmRelease chartVersion / digest
+spec.suspend
+```
+
+**Events emitted** (not read): standard Kubernetes Events, which Flux's
+notification-controller picks up and dispatches. Hecate ships no notifier of its own.
+
+**Cross-namespace references are refused by default**, matching Flux's own
+`--no-cross-namespace-refs=true` posture across its controllers. See
+[D11](DECISIONS.md).
+
+**Why this section exists.** We read Flux as `unstructured`, which means an API version
+removal cannot break our build — it breaks silently at runtime. Flux does remove API
+versions. Two mitigations make that survivable: a startup discovery check that warns
+when a served version differs from our default, and status fixtures captured per
+supported Flux minor so a contract change fails a unit test in milliseconds. See
+[D4](DECISIONS.md), amended.
+
 ## The step engine
 
 Steps are **invoked repeatedly rather than blocking**. A step that is waiting returns

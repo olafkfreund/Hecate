@@ -77,6 +77,21 @@ v1 and v2.
 
 **Revisit if** we need a field the documented status contract does not expose.
 
+**Amended 2026-08-10 — the cost we failed to write down.** Trading compile-time coupling
+for version tolerance means an API version change **cannot break our build, so it breaks
+silently at runtime**. Flux does remove API versions: `image.toolkit.fluxcd.io/v1beta2`
+and `notification.toolkit.fluxcd.io/v1beta2` reached end-of-life in Flux v2.9.
+
+The decision stands, but it is only safe with two mitigations, both now required:
+
+1. **Startup API discovery** — warn loudly if a configured kind's served version differs
+   from the version we default to.
+2. **Status fixtures per supported Flux minor** — `pkg/flux` tests read real captured
+   status output for each Flux version we claim to support, so a contract change is a
+   unit-test failure rather than a support ticket.
+
+An unstructured reader without these is not version-tolerant, merely version-oblivious.
+
 ---
 
 ## D5 — Steps are polled, not blocked
@@ -171,3 +186,116 @@ Hecate is fully usable with none configured. Evidence gates decide what crosses.
 **Open action:** register `hecate.dev`. An API group on a domain we do not control is
 a problem at ecosystem-listing or donation time, and the group is painful to change
 once it is in users' manifests.
+
+---
+
+## D11 — Cross-namespace references are refused by default
+
+**2026-08-10 · accepted**
+
+The controller takes `--no-cross-namespace-refs`, defaulting to **true**. With it set, a
+Gate's `watch[].namespace` naming anything other than the Gate's own namespace is
+rejected at admission with an explanatory message.
+
+**Why.** Flux's [security best practices](https://fluxcd.io/flux/security/best-practices/)
+say it directly of tools like ours: *"Controllers integrating with Flux should adopt
+identical patterns: cross-namespace restriction, service account defaults, workload
+identity configuration, and network policy compliance."* Flux ships
+`--no-cross-namespace-refs=true` across five of its own controllers.
+
+Today `health.FluxResource.Namespace` accepts any namespace and merely *defaults* to the
+Gate's. In a multi-tenant cluster that lets one team's Gate watch another team's
+Kustomization — a tenant-isolation hole, and a channel for inferring what other teams
+are running.
+
+**Why now.** Default-open to default-closed is a breaking change the moment anyone's
+manifests rely on it. Free today.
+
+**Escape hatch.** Operators who genuinely run single-tenant can set the flag false. The
+default is what matters; the flag exists so the default can be safe.
+
+---
+
+## D12 — Emit Kubernetes Events; never build a notifier
+
+**2026-08-10 · accepted**
+
+Hecate emits standard Kubernetes Events for Beacon discovery, Gate admission, Passage
+lifecycle and health transitions. It ships no notification subsystem.
+
+**Why.** Flux's [notification-controller](https://fluxcd.io/flux/components/notification/)
+already watches Kubernetes Events and dispatches to Slack, Teams, Discord and webhooks.
+Every Flux user has it and knows how to configure it. Emitting Events buys the entire
+feature for the cost of a recorder, and users configure Hecate alerting exactly the way
+they configure Flux alerting.
+
+Building our own would mean a second place to configure notifications, a second set of
+provider integrations to maintain, and a second thing to get wrong.
+
+**Known limitation.** Flux's git commit-status providers need Kustomization-specific
+metadata and will not work with Hecate events. Generic providers will. Accepted: commit
+status is CI's job, not a promotion tool's.
+
+---
+
+## D13 — Bundles are garbage collected; status lists are capped
+
+**2026-08-10 · accepted**
+
+`Beacon.spec.retain` bounds how many unreferenced Bundles survive (default ~10).
+`GateStatus.History` is capped at 10 entries.
+
+**Why.** A Beacon on a two-minute interval emits Bundles indefinitely. Unbounded, that
+is etcd growth with no ceiling and a `kubectl get bundles` nobody can read. `History`
+is worse: an unbounded list inside a status object, rewritten on every reconcile.
+
+**Safety rule.** GC never removes a Bundle that is currently in a Gate, referenced by a
+Passage, or explicitly approved. Deleting the record of what is running in production
+to save space would be a spectacular own goal for a tool whose product is the audit
+trail.
+
+**Long-term history** belongs in the evidence store (Fides), not in etcd. Kubernetes
+objects are working state; the permanent record lives elsewhere.
+
+---
+
+## D14 — `ExternalArtifact` output: considered and rejected
+
+**2026-08-10 · rejected**
+
+Flux v2.9 ships
+[ArtifactGenerator and ExternalArtifact](https://fluxcd.io/flux/components/source/artifactgenerators/)
+via `source-watcher` — a sanctioned way for third-party tools to publish artifacts
+directly into Flux. Hecate could produce `ExternalArtifact` instead of writing git.
+
+**Rejected.** It would be faster and would need no repository write access, but it
+removes the git round-trip — and the git round-trip *is* the audit trail. For a tool
+whose differentiator is evidence-gated promotion, deleting the reviewable, revertible,
+human-readable record of what changed and why trades away the product to save latency.
+
+It would also break [D3](#d3--git-is-the-rendezvous-hecate-never-talks-to-flux):
+publishing a Flux CR is talking to Flux.
+
+**Revisit only if** a real user asks for it and explicitly accepts losing the git
+history. Recorded here so it is not re-litigated every time someone reads the Flux
+release notes.
+
+**Related and *not* rejected:** consuming `ExternalArtifact` and
+`ResourceSetInputProvider` as Beacon *inputs*. That is reuse, and it is planned.
+
+---
+
+## D15 — Beacon does not do monorepo decomposition
+
+**2026-08-10 · accepted**
+
+Beacon watches artifact sources. It does not grow path-pattern discovery, per-directory
+artifact splitting, or content-based partial revisions for monorepos.
+
+**Why.** Flux's ArtifactGenerator does exactly this, with path-pattern directory
+discovery as of v2.9, and it does it at the source layer where it belongs. A competing
+implementation in Beacon would be worse, would drift, and would put us in the position
+of arguing with upstream about whose monorepo story is correct.
+
+This is the maintenance strategy in miniature: **what the ecosystem absorbs, we
+delete.**

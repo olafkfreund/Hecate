@@ -111,6 +111,27 @@ pkg/passage/steps/    Built-in steps.
 charts/hecate/crds/   Generated CRDs.
 ```
 
+## Compatibility
+
+| | Supported |
+|---|---|
+| **Flux** | The three minor versions Flux itself supports (currently v2.7–v2.9) |
+| **Kubernetes** | N-2, matching Flux |
+| **Hecate** | The latest two minors |
+
+Hecate reads Flux resources and never writes them. The exact API versions and status
+fields it depends on are listed in
+[the Flux compatibility surface](docs/ARCHITECTURE.md#flux-compatibility-surface) —
+that list is the blast radius of any Flux change.
+
+Cross-namespace references are **refused by default**, matching Flux's own
+`--no-cross-namespace-refs=true` posture. See [D11](docs/DECISIONS.md).
+
+We track Flux with CI rather than good intentions: the e2e matrix runs against every
+supported Flux minor, Renovate opens the bump PR on each Flux release, and `pkg/flux`
+tests read real captured status output per version. Details in the
+[development plan](docs/DEVELOPMENT-PLAN.md#6-following-flux-upstream).
+
 ## Status
 
 **Pre-alpha.** The foundations are built and tested; there is no installable release
