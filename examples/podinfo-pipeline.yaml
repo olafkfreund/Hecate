@@ -1,141 +1,157 @@
-# A three-stage Flux promotion pipeline: dev -> staging -> production.
+# A three-Gate pipeline: dev -> staging -> production.
 #
-# Hecate never talks to Flux. Each Stage renders new state into git, pushes it,
-# and then `flux-wait` blocks until the Flux Kustomization has actually applied
-# that exact commit. Git is the rendezvous.
+# There is no pipeline object. The graph is implied by what each Gate admits:
+# staging admits only Bundles that cleared dev, production only those that
+# cleared staging. The topology cannot drift out of sync with the Gates.
 #
-# Prerequisites: Flux installed, and a Kustomization per environment pointed at
+# Hecate never talks to Flux. Each Passage renders new state into git, pushes
+# it, and then `flux-wait` blocks until the Flux Kustomization has applied that
+# exact commit. Git is the rendezvous.
+#
+# Prerequisites: Flux installed, with a Kustomization per environment pointed at
 # the corresponding path in the deploy repo.
 ---
-apiVersion: kargo.akuity.io/v1alpha1
-kind: Warehouse
+apiVersion: hecate.dev/v1alpha1
+kind: Beacon
 metadata:
   name: podinfo
   namespace: acme
 spec:
   interval: 2m
-  subscriptions:
+  watch:
     - image:
-        repoURL: ghcr.io/stefanprodan/podinfo
-        # Only ever consider semver releases; ignore :latest and dated tags.
-        imageSelectionStrategy: SemVer
-        semverConstraint: ^6.0.0
+        repo: ghcr.io/stefanprodan/podinfo
+        select: SemVer
+        constraint: ^6.0.0
+        # Exclude the mutable tags that otherwise cause surprise crossings.
+        ignore: [latest, main]
 
 ---
-apiVersion: kargo.akuity.io/v1alpha1
-kind: Stage
+apiVersion: hecate.dev/v1alpha1
+kind: Gate
 metadata:
   name: dev
   namespace: acme
 spec:
-  requestedFreight:
-    - origin: { kind: Warehouse, name: podinfo }
-      sources: { direct: true }        # dev takes new artifacts straight from the Warehouse
-  promotionTemplate:
-    spec:
-      steps:
-        - uses: git-clone
-          config:
-            repoURL: https://github.com/acme/deploy.git
-            checkout: [{ branch: main, path: ./repo }]
-        - uses: kustomize-set-image
-          config:
-            path: ./repo/envs/dev
-            images: [{ image: ghcr.io/stefanprodan/podinfo }]
-        - uses: git-commit
-          as: commit
-          config:
-            path: ./repo
-            message: "dev: podinfo ${{ imageFrom('ghcr.io/stefanprodan/podinfo').Tag }}"
-        - uses: git-push
-          config: { path: ./repo }
-        - uses: flux-wait
-          config:
-            resources:
-              - { kind: Kustomization, name: podinfo-dev, namespace: flux-system }
-            # Wait for the commit this promotion just pushed, not merely for
-            # "Ready" — otherwise a stale green from the previous revision passes.
-            expectedRevision: ${{ outputs.commit.commit }}
+  # No `after`, so dev is the entry point: it takes Bundles straight from the
+  # Beacon, and does so without being asked.
+  admits:
+    - from: { beacon: podinfo }
+  auto: true
+  passage:
+    steps:
+      - uses: git-clone
+        with:
+          repo: https://github.com/acme/deploy.git
+          branch: main
+      - uses: set-image
+        with:
+          path: envs/dev
+          image: ghcr.io/stefanprodan/podinfo
+      - uses: git-commit
+        as: commit
+        with:
+          message: "dev: podinfo ${{ bundle.image('ghcr.io/stefanprodan/podinfo').tag }}"
+      - uses: git-push
+      - uses: flux-wait
+        with:
+          resources:
+            - { kind: Kustomization, name: podinfo-dev, namespace: flux-system }
+          # Wait for the commit this Passage just pushed, not merely for
+          # "Ready" — otherwise a stale green from the previous revision passes.
+          expectedRevision: ${{ steps.commit.sha }}
 
 ---
-apiVersion: kargo.akuity.io/v1alpha1
-kind: Stage
+apiVersion: hecate.dev/v1alpha1
+kind: Gate
 metadata:
   name: staging
   namespace: acme
 spec:
-  requestedFreight:
-    - origin: { kind: Warehouse, name: podinfo }
-      sources: { stages: [dev] }       # only Freight that already survived dev
-  promotionTemplate:
-    spec:
-      steps:
-        - uses: git-clone
-          config:
-            repoURL: https://github.com/acme/deploy.git
-            checkout: [{ branch: main, path: ./repo }]
-        - uses: kustomize-set-image
-          config:
-            path: ./repo/envs/staging
-            images: [{ image: ghcr.io/stefanprodan/podinfo }]
-        - uses: git-commit
-          as: commit
-          config:
-            path: ./repo
-            message: "staging: podinfo ${{ imageFrom('ghcr.io/stefanprodan/podinfo').Tag }}"
-        - uses: git-push
-          config: { path: ./repo }
-        - uses: flux-wait
-          config:
-            resources:
-              - { kind: Kustomization, name: podinfo-staging, namespace: flux-system }
-              - { kind: HelmRelease, name: podinfo-redis, namespace: staging }
-            expectedRevision: ${{ outputs.commit.commit }}
-            failAfter: 10m
+  admits:
+    - from: { beacon: podinfo }
+      after: [dev]
+  auto: true
+  passage:
+    steps:
+      - uses: git-clone
+        with:
+          repo: https://github.com/acme/deploy.git
+          branch: main
+      - uses: set-image
+        with:
+          path: envs/staging
+          image: ghcr.io/stefanprodan/podinfo
+      - uses: git-commit
+        as: commit
+        with:
+          message: "staging: podinfo ${{ bundle.image('ghcr.io/stefanprodan/podinfo').tag }}"
+      - uses: git-push
+      - uses: flux-wait
+        with:
+          resources:
+            - { kind: Kustomization, name: podinfo-staging, namespace: flux-system }
+            - { kind: HelmRelease, name: podinfo-redis, namespace: staging }
+          expectedRevision: ${{ steps.commit.sha }}
+          failAfter: 10m
+  # Health says "it is running". Verification says "it worked". Downstream Gates
+  # admit only Bundles that were verified here.
+  verify:
+    - uses: flagger
+      with:
+        canary: { name: podinfo, namespace: staging }
 
 ---
-apiVersion: kargo.akuity.io/v1alpha1
-kind: Stage
+apiVersion: hecate.dev/v1alpha1
+kind: Gate
 metadata:
   name: production
   namespace: acme
 spec:
-  requestedFreight:
-    - origin: { kind: Warehouse, name: podinfo }
-      sources: { stages: [staging] }
-  promotionTemplate:
-    spec:
-      steps:
-        - uses: git-clone
-          config:
-            repoURL: https://github.com/acme/deploy.git
-            checkout: [{ branch: main, path: ./repo }]
-        - uses: kustomize-set-image
-          config:
-            path: ./repo/envs/prod
-            images: [{ image: ghcr.io/stefanprodan/podinfo }]
-        - uses: git-commit
-          as: commit
-          config:
-            path: ./repo
-            message: "prod: podinfo ${{ imageFrom('ghcr.io/stefanprodan/podinfo').Tag }}"
-        # Production goes through review rather than straight to main.
-        - uses: git-push
-          as: push
-          config: { path: ./repo, generateTargetBranch: true }
-        - uses: git-open-pr
-          as: pr
-          config:
-            repoURL: https://github.com/acme/deploy.git
-            sourceBranch: ${{ outputs.push.branch }}
-            targetBranch: main
-        - uses: git-wait-for-pr
-          config:
-            repoURL: https://github.com/acme/deploy.git
-            prNumber: ${{ outputs.pr.prNumber }}
-        - uses: flux-wait
-          config:
-            resources:
-              - { kind: Kustomization, name: podinfo-prod, namespace: flux-system }
-            # Production rollouts are slower; allow longer before calling it wedged.
-            failAfter: 20m
+  admits:
+    - from: { beacon: podinfo }
+      after: [staging]
+      requireApproval: true
+  # Weekday mornings, London time. Set the zone deliberately: a window defined
+  # in UTC drifts an hour against local working time twice a year.
+  windows:
+    - schedule: "0 9 * * 1-5"
+      duration: 6h
+      timeZone: Europe/London
+  passage:
+    steps:
+      # Evidence before anything is written. A HOLD verdict stops the Passage
+      # here, leaving production untouched.
+      - uses: evidence-gate
+        with:
+          maxRisk: 30
+      - uses: git-clone
+        with:
+          repo: https://github.com/acme/deploy.git
+          branch: main
+      - uses: set-image
+        with:
+          path: envs/prod
+          image: ghcr.io/stefanprodan/podinfo
+      - uses: git-commit
+        as: commit
+        with:
+          message: "prod: podinfo ${{ bundle.image('ghcr.io/stefanprodan/podinfo').tag }}"
+      # Production goes through review rather than straight to main.
+      - uses: git-push
+        as: push
+        with:
+          toNewBranch: true
+      - uses: git-pull-request
+        with:
+          repo: https://github.com/acme/deploy.git
+          from: ${{ steps.push.branch }}
+          into: main
+          waitForMerge: true
+      - uses: flux-wait
+        with:
+          resources:
+            - { kind: Kustomization, name: podinfo-prod, namespace: flux-system }
+          expectedRevision: ${{ steps.commit.sha }}
+          # Production rollouts are slower; allow longer before calling it wedged.
+          failAfter: 20m

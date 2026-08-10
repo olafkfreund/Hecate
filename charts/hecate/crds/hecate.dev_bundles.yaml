@@ -1,0 +1,227 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: bundles.hecate.dev
+spec:
+  group: hecate.dev
+  names:
+    kind: Bundle
+    listKind: BundleList
+    plural: bundles
+    shortNames:
+    - bnd
+    singular: bundle
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.beacon
+      name: Beacon
+      type: string
+    - jsonPath: .spec.digest
+      name: Digest
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Bundle is an immutable, content-addressed set of artifact versions — for
+          example one git commit plus two container images — that move through the
+          pipeline together.
+
+          A Bundle is never edited. Any change in artifact versions is a different
+          Bundle with a different digest. Artifacts that need to move at different
+          cadences belong in different Beacons, and therefore different Bundles.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: BundleSpec is the immutable content of a Bundle.
+            properties:
+              alias:
+                description: |-
+                  Alias is an optional short human-readable handle, so people can say
+                  "promote wandering-owl" instead of reciting a hash.
+                type: string
+              artifacts:
+                description: Artifacts are the versioned things this Bundle carries.
+                items:
+                  description: Artifact is one versioned thing. Exactly one field
+                    must be set.
+                  maxProperties: 1
+                  minProperties: 1
+                  properties:
+                    chart:
+                      description: ChartArtifact is a Helm chart at a specific version.
+                      properties:
+                        name:
+                          description: |-
+                            Name is the chart name. Empty for OCI charts, where the repo already
+                            identifies the chart.
+                          type: string
+                        repo:
+                          description: Repo is the chart repository — an HTTPS Helm
+                            repo or an OCI registry.
+                          type: string
+                        version:
+                          description: Version is the resolved chart version.
+                          type: string
+                      required:
+                      - repo
+                      - version
+                      type: object
+                    commit:
+                      description: CommitArtifact is a git commit.
+                      properties:
+                        branch:
+                          description: Branch or Tag records how the commit was found,
+                            for display.
+                          type: string
+                        message:
+                          description: Message is the commit subject, for display.
+                          type: string
+                        repo:
+                          description: Repo is the git repository URL.
+                          type: string
+                        sha:
+                          description: SHA is the full commit SHA.
+                          type: string
+                        tag:
+                          type: string
+                      required:
+                      - repo
+                      - sha
+                      type: object
+                    image:
+                      description: ImageArtifact is a container image at a specific
+                        version.
+                      properties:
+                        digest:
+                          description: |-
+                            Digest is the image digest, e.g. sha256:abc... This is what gets reported
+                            to Fides as an artifact, and what makes the promotion auditable — a tag
+                            can be moved, a digest cannot.
+                          type: string
+                        repo:
+                          description: Repo is the image repository, e.g. ghcr.io/acme/podinfo.
+                          type: string
+                        tag:
+                          description: Tag is the resolved tag.
+                          type: string
+                      required:
+                      - repo
+                      type: object
+                  type: object
+                minItems: 1
+                type: array
+              beacon:
+                description: Beacon names the Beacon that produced this Bundle.
+                type: string
+              digest:
+                description: |-
+                  Digest is the content address of this Bundle: a deterministic hash over
+                  its artifact versions. Two Bundles with identical artifacts always have
+                  the same digest, which is what makes "has this exact thing already been
+                  through staging?" answerable.
+
+                  Set by the controller; ignored on input.
+                type: string
+            required:
+            - artifacts
+            - beacon
+            type: object
+          status:
+            description: BundleStatus records where this Bundle has been.
+            properties:
+              approvedFor:
+                description: |-
+                  ApprovedFor lists Gates a human has explicitly approved this Bundle for,
+                  letting it skip the normal upstream ordering.
+                items:
+                  type: string
+                type: array
+              blocked:
+                description: Blocked lists Gates that rejected this Bundle, with the
+                  reason.
+                items:
+                  description: GateCrossing records one Bundle/Gate outcome.
+                  properties:
+                    actor:
+                      description: Actor is who caused it — a user, or the controller
+                        for automatic passage.
+                      type: string
+                    at:
+                      description: At is when it happened.
+                      format: date-time
+                      type: string
+                    gate:
+                      description: Gate is the Gate in question.
+                      type: string
+                    passage:
+                      description: Passage is the Passage that produced this outcome.
+                      type: string
+                    reason:
+                      description: Reason explains a block.
+                      type: string
+                  required:
+                  - at
+                  - gate
+                  type: object
+                type: array
+              cleared:
+                description: |-
+                  Cleared lists the Gates this Bundle has successfully passed, in order.
+                  This is the "how did it get to prod?" record.
+                items:
+                  description: GateCrossing records one Bundle/Gate outcome.
+                  properties:
+                    actor:
+                      description: Actor is who caused it — a user, or the controller
+                        for automatic passage.
+                      type: string
+                    at:
+                      description: At is when it happened.
+                      format: date-time
+                      type: string
+                    gate:
+                      description: Gate is the Gate in question.
+                      type: string
+                    passage:
+                      description: Passage is the Passage that produced this outcome.
+                      type: string
+                    reason:
+                      description: Reason explains a block.
+                      type: string
+                  required:
+                  - at
+                  - gate
+                  type: object
+                type: array
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

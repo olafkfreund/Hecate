@@ -13,7 +13,7 @@ The gate between your environments — with evidence.</p>
 
 <div class="badges">
   <span class="badge warn">status: pre-alpha</span>
-  <span class="badge ok">spike: green</span>
+  <span class="badge ok">33 tests green</span>
   <span class="badge info">Apache 2.0</span>
   <span class="badge info">Go 1.26</span>
 </div>
@@ -27,37 +27,34 @@ The gate between your environments — with evidence.</p>
 
 ## Why {#why}
 
-Flux is very good at one thing: making a cluster match what is in git. It has no opinion
-about **what should be in git next**.
+Flux is very good at one thing: making a cluster match what is in git. It has no
+opinion about **what should be in git next**.
 
-So the moment you have more than one environment, you hit the same wall every Flux team
-hits. How does the image that passed tests in `dev` get to `staging`? What is actually in
-production right now, and who put it there? What stops it going to prod on a Friday, or
-before the security scan finished?
-
-Flux does not answer these. Nor does Argo CD. The difference is that **Argo CD users have
-an answer** — [Kargo](https://github.com/akuity/kargo) — and Flux users do not.
+So the moment you have more than one environment, you hit the wall every Flux team
+hits. How does the image that passed tests in `dev` get to `staging`? What is actually
+in production right now, and who put it there? What stops it going to prod on a
+Friday, or before the security scan finished?
 
 <div class="note gap" markdown="1">
 **The gap, precisely.** The [Flux ecosystem](https://fluxcd.io/ecosystem/) has UIs,
 extensions, integrations and ancillary tools. It has **no promotion category at all.**
 </div>
 
-The two things people reach for instead don't close it:
+The two things people reach for don't close it:
 
-- **[Flagger](https://flagger.app/)** is excellent, and it is *progressive delivery within
-  one environment* — shifting traffic between two versions in one cluster. It does not
-  move an artifact from dev to staging to prod.
+- **[Flagger](https://flagger.app/)** is excellent, and it is *progressive delivery
+  within one environment* — shifting traffic between two versions in one cluster. It
+  does not move an artifact from dev to staging to prod.
 - **[Flux Operator](https://fluxoperator.dev/) `ResourceSet`** gives you templated and
-  ephemeral environments with genuinely strong input discovery. It has no Freight, no
-  Stages, no gates, no approvals, and no answer to "how did this get to prod?"
+  ephemeral environments with genuinely strong input discovery. It has no promotion
+  model: no immutable release unit, no thresholds, no approvals, no history.
 
-So teams write the promotion logic themselves: a pile of `yq` in CI that nobody trusts and
-one person understands.
+So teams write the promotion logic themselves: a pile of `yq` in CI that nobody trusts
+and one person understands.
 
 <pre class="ascii"><code>                 within one environment        across environments
               ┌──────────────────────────┬──────────────────────────┐
-  Argo CD     │  Argo Rollouts           │  Kargo                   │
+  Argo CD     │  Argo Rollouts           │  (well served)           │
               ├──────────────────────────┼──────────────────────────┤
   Flux        │  Flagger                 │  ── HECATE ──            │
               └──────────────────────────┴──────────────────────────┘</code></pre>
@@ -66,69 +63,75 @@ one person understands.
 
 ## How {#how}
 
-Hecate models delivery the way you already think about it:
+Four resources. That is the whole API.
 
 <div class="table-scroll" markdown="1">
 
-| Concept | What it is |
+| | |
 |---|---|
-| **Warehouse** | Watches your registries, charts and repos. Discovers new artifacts. |
-| **Freight** | An immutable, content-addressed set of artifact versions — *this* commit plus *these* images. The unit that moves. |
-| **Stage** | An environment. Requests Freight from a Warehouse or from an upstream Stage — that's what forms the pipeline. |
-| **Promotion** | One execution of a Stage's steps against one piece of Freight. Auditable, replayable, abortable. |
+| **Beacon** | Watches your registries, charts and repos. Emits a Bundle when something new appears. |
+| **Bundle** | An immutable, content-addressed set of artifact versions — *this* commit plus *these* images. The unit that moves. |
+| **Gate** | An environment, and the threshold a Bundle must cross to enter it. |
+| **Passage** | One attempt to move one Bundle through one Gate. Auditable, resumable, abortable. |
 
 </div>
 
-A Stage looks like this:
-
 ```yaml
-apiVersion: kargo.akuity.io/v1alpha1
-kind: Stage
+apiVersion: hecate.dev/v1alpha1
+kind: Gate
 metadata:
   name: production
 spec:
-  requestedFreight:
-    - origin: { kind: Warehouse, name: podinfo }
-      sources: { stages: [staging] }     # only what already survived staging
-  promotionTemplate:
-    spec:
-      steps:
-        - uses: git-clone
-          config: { repoURL: https://github.com/acme/deploy, checkout: [{ branch: main, path: ./repo }] }
-        - uses: kustomize-set-image
-          config: { path: ./repo/prod, images: [{ image: ghcr.io/acme/podinfo }] }
-        - uses: git-commit
-          as: commit
-          config: { path: ./repo, message: "promote ${{ imageFrom('ghcr.io/acme/podinfo').Tag }} to prod" }
-        - uses: git-push
-          config: { path: ./repo }
+  admits:
+    - from: { beacon: podinfo }
+      after: [staging]          # only what already cleared staging
+      requireApproval: true
+  passage:
+    steps:
+      - uses: git-clone
+        with: { repo: https://github.com/acme/deploy, branch: main }
+      - uses: set-image
+        with: { path: envs/prod, image: ghcr.io/acme/podinfo }
+      - uses: git-commit
+        as: commit
+        with: { message: "promote podinfo to prod" }
+      - uses: git-push
 
-        # ── Hecate's part ──────────────────────────────────────────────
-        - uses: flux-wait
-          config:
-            resources:
-              - { kind: Kustomization, name: podinfo, namespace: flux-system }
-            expectedRevision: ${{ outputs.commit.commit }}
-            failAfter: 15m
+      - uses: flux-wait
+        with:
+          resources:
+            - { kind: Kustomization, name: podinfo, namespace: flux-system }
+          expectedRevision: ${{ steps.commit.sha }}
+          failAfter: 15m
 ```
+
+**There is no pipeline object.** The graph is implied by what each Gate admits — a
+separate pipeline resource would be a second source of truth that drifts out of sync
+with the Gates it describes.
 
 **Hecate never talks to Flux.** It writes to git; Flux syncs; Hecate reads
 `Kustomization` and `HelmRelease` status back to know whether it worked. Git is the
-rendezvous. That one rule is what keeps Flux authoritative and keeps Hecate removable —
+rendezvous. That one rule keeps Flux authoritative and keeps Hecate removable —
 uninstall it and you are left with working manifests.
 
 ### Honest health
 
-Most naive Flux health checks are wrong in the same three ways. Ours are tested against
-all three:
+Most naive Flux health checks are wrong in the same three ways. Ours are tested
+against all three:
 
-- **`Ready=True` is not enough.** If `observedGeneration` is behind `metadata.generation`,
-  that Ready describes the *previous* revision. This is the classic false-green.
+- **`Ready=True` is not enough.** If `observedGeneration` is behind
+  `metadata.generation`, that Ready describes the *previous* revision. The classic
+  false-green.
 - **`Ready=False` is not failure.** Flux retries most failures forever, so a bare
   `Ready=False` never becomes terminal. We report *Progressing* until Flux sets
   `Stalled=True` or the failure outlives a deadline you set.
-- **Suspended is not progressing.** A suspended resource will never reconcile. Reporting
-  "still working" would hang a promotion forever waiting on a human who isn't coming.
+- **Suspended is not progressing.** A suspended resource will never reconcile.
+  Reporting "still working" would hang a Passage forever waiting on a human who isn't
+  coming.
+
+There is a fourth, at the framework level: a health check naming a checker that isn't
+registered is **reported**, not skipped. Silently ignoring a check you asked for makes
+a Gate look healthier than it is.
 
 ---
 
@@ -136,66 +139,66 @@ all three:
 
 This is the part no other promotion tool does.
 
-A promotion **is** a change gate. [Fides](https://github.com/olafkfreund/fides) already
+A crossing **is** a change gate. [Fides](https://github.com/olafkfreund/fides) already
 models exactly that, so the two line up with no impedance mismatch:
 
 <div class="table-scroll" markdown="1">
 
 | Hecate | Fides |
 |---|---|
-| Freight (immutable artifact set) | Trail |
-| Image digest inside the Freight | Artifact (SHA256) |
-| Stage | Environment |
-| Verification result | Attestation |
-| Approving a Promotion | `fides approve` — segregation of duties |
-| *May this go to production?* | `GET /api/v1/trails/{id}/change-gate` → verdict + risk score |
+| Bundle | Trail |
+| Image digest inside the Bundle | Artifact (SHA256) |
+| Gate | Environment |
+| Verification outcome | Attestation |
+| Approving a Passage | `fides approve` — segregation of duties |
+| *May this cross?* | change-gate verdict + risk score |
 
 </div>
 
 <div class="note win" markdown="1">
-The result: **"can this ship to prod?" is answered by evidence, not by whoever holds merge
-rights** — and every promotion leaves a tamper-evident record that maps onto SOC 2,
-ISO 27001, NIST 800-53, PCI-DSS, DORA and SOX controls.
+The result: **"can this ship to prod?" is answered by evidence, not by whoever holds
+merge rights** — and every Passage leaves a tamper-evident record that maps onto
+SOC 2, ISO 27001, NIST 800-53, PCI-DSS, DORA and SOX controls.
 </div>
 
 ### Traced end to end
 
-Every promotion is an OpenTelemetry **trace**; every step a **span**. Trace context is
-propagated into git commit trailers, so one trace can span your CI run, the promotion, the
-Flux reconciliation, and the first request that hit the new version.
+Every Passage is an OpenTelemetry **trace**; every step a **span**. Trace context is
+propagated into git commit trailers, so one trace can span your CI run, the crossing,
+the Flux reconciliation, and the first request that hit the new version.
+`traceID` is a first-class field on Passage status, not an annotation bolted on later.
 
-DORA metrics — lead time, deployment frequency, change-failure rate, MTTR — fall out of
-that trace data instead of being a bolt-on subsystem.
+DORA metrics — lead time, deployment frequency, change-failure rate, MTTR — fall out
+of that trace data instead of being a separate subsystem.
 
 ---
 
-## What we are building on
+## Built from scratch, on purpose
 
-Kargo is Apache-2.0, ~193k lines of mature Go, and its coupling to Argo CD turns out to be
-**two promotion steps, one health checker, and Argo Rollouts verification** — 37 of roughly
-800 non-test source files.
+Hecate is its own implementation: its own API, vocabulary, engine and step library,
+with no third-party promotion engine in the dependency graph.
 
-So Hecate does not reimplement it. We wrote the Flux adapter and inherit the rest: the
-pipeline model, 34 engine-neutral promotion steps, the API server, RBAC, SSO, sharding,
-GC, every git provider and every cloud registry credential helper.
+We prototyped the alternative — adapting an existing engine — and it worked. We chose
+not to ship it. An adapter makes the roadmap someone else's to set, and the features
+we care about most would have been bolted onto a model designed around different
+assumptions. Owning the model is the point; the engine is the cheap part.
 
 <div class="note" markdown="1">
-**The spike is green.** ~370 lines of adapter, 10 tests, no cluster required, building
-against Kargo v1.11.1. It also surfaced three fixable blockers — two of which are upstream
-PRs we intend to contribute back. The full write-up, including what broke and why, is in
-[`docs/SPIKE-RESULTS.md`](https://github.com/olafkfreund/Hecate/blob/main/docs/SPIKE-RESULTS.md).
+**What that costs, stated plainly.** We reimplement the step library, control plane
+and provider integrations. It is smaller than it sounds: most of the value in that
+layer is *wiring*, not original algorithms — `go-git`, the Helm SDK, the kustomize API
+and `go-containerregistry` do the actual work, and we call them directly.
+
+The reasoning is recorded in
+[`docs/DECISIONS.md`](https://github.com/olafkfreund/Hecate/blob/main/docs/DECISIONS.md).
 </div>
 
-We reuse rather than rebuild wherever the ecosystem already solved something:
+We still reuse the ecosystem wherever it already solved something: **Flux Operator**
+`ResourceSetInputProvider` for artifact discovery, **Flagger** for in-environment
+verification, **Fides** for evidence.
 
-- **Flux Operator** `ResourceSetInputProvider` for artifact discovery — it already covers
-  GitHub, GitLab, Azure DevOps, AWS CodeCommit, Gitea, OCI, ACR, ECR and GAR.
-- **Flagger** for in-environment verification.
-- **Kargo** for the promotion engine.
-- **Fides** for evidence.
-
-Hecate is not a Flux replacement, a Flagger replacement, or a Flux Operator competitor. It
-is the layer above all three that none of them provide.
+Hecate is not a Flux replacement, a Flagger replacement, or a Flux Operator
+competitor. It is the layer above all three that none of them provide.
 
 ---
 
@@ -205,31 +208,33 @@ is the layer above all three that none of them provide.
 
 | | Milestone | What lands |
 |---|---|---|
-| ✅ | **M0 · Spike** | Flux health checker + `flux-wait`, proven against Kargo v1.11.1 |
-| | **M1 · First binary** | Composed control plane, Helm chart, real promotion on a kind cluster in CI |
-| | **M2 · Flux depth** | `flux-reconcile`, Flagger verification, remote clusters, `ResourceSetInputProvider` |
-| | **M3 · Fides** | Change gate before, attestation after, approvals mapped to SoD |
-| | **M4 · OpenTelemetry** | Promotion traces, git-trailer context propagation, DORA |
-| | **M5 · CLI** | Full surface, `json`/`yaml`/`table` output, documented exit codes |
-| | **M6 · UI** | Pipeline graph, Freight timeline, one-click promote, evidence panel |
-| | **M7 · Providers** | Every major git provider and cloud registry verified in CI, not claimed |
-| | **M8 · v1.0** | SSO, RBAC, upgrade path, security review |
+| ✅ | **M0 · Foundations** | API, status evaluation, health framework, step engine — 33 tests |
+| | **M1 · Control plane** | Controllers, Helm chart, a real crossing on kind in CI |
+| | **M2 · Step library** | git, render, OCI, expressions, per-step schemas |
+| | **M3 · Providers** | Git hosts and registries, verified in CI rather than claimed |
+| | **M4 · Evidence** | Change gate, attestations, approvals mapped to segregation of duties |
+| | **M5 · OpenTelemetry** | Passage traces, git-trailer context propagation, DORA |
+| | **M6 · CLI** | Full surface, `json`/`yaml`/`table`, documented exit codes |
+| | **M7 · API server** | SSO, RBAC — the UI's backend |
+| | **M8 · UI** | Pipeline graph, Bundle timeline, one-click crossing, evidence panel |
+| | **M9 · v1.0** | CRD stability, upgrade path, security review |
 
 </div>
 
-The CLI is the product; the UI is the adoption multiplier. Gates return documented exit
-codes so they compose in pipelines.
+The CLI lands before the UI on purpose. The CLI proves the API surface is coherent and
+it is what early adopters actually use; a UI built before the model settles is rework.
 
 ---
 
 ## Status
 
-Pre-alpha. The spike is done and green; there is no installable release yet.
+Pre-alpha. The foundations are built and tested; there is no installable release yet.
 
 If you run Flux across more than one environment and have opinions about how promotion
 *should* work, [open an issue](https://github.com/olafkfreund/Hecate/issues) — this is
 exactly the moment when that input changes the design.
 
+- 🏛 [Architecture](https://github.com/olafkfreund/Hecate/blob/main/docs/ARCHITECTURE.md)
 - 📄 [Product plan](https://github.com/olafkfreund/Hecate/blob/main/docs/PRODUCT-PLAN.md)
 - 🔧 [Development plan](https://github.com/olafkfreund/Hecate/blob/main/docs/DEVELOPMENT-PLAN.md)
-- 🧪 [Spike results](https://github.com/olafkfreund/Hecate/blob/main/docs/SPIKE-RESULTS.md)
+- ⚖️ [Decision record](https://github.com/olafkfreund/Hecate/blob/main/docs/DECISIONS.md)

@@ -1,0 +1,410 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: gates.hecate.dev
+spec:
+  group: hecate.dev
+  names:
+    kind: Gate
+    listKind: GateList
+    plural: gates
+    shortNames:
+    - gt
+    singular: gate
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.current.bundle
+      name: Current
+      type: string
+    - jsonPath: .status.health.status
+      name: Health
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Gate is an environment, and the threshold a Bundle must cross to enter it.
+
+          Gates form the pipeline: a Gate that admits Bundles only after they have
+          cleared an upstream Gate is downstream of it. There is no separate pipeline
+          object — the graph is implied by what each Gate admits, so it cannot drift
+          out of sync with reality.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: GateSpec describes what this Gate admits and what crossing
+              it involves.
+            properties:
+              admits:
+                description: Admits declares which Bundles may cross this Gate.
+                items:
+                  description: Admission declares one class of Bundle this Gate accepts.
+                  properties:
+                    after:
+                      description: |-
+                        After lists upstream Gates a Bundle must have cleared first. Empty means
+                        the Bundle may come straight from the Beacon — the entry point of a
+                        pipeline.
+                      items:
+                        type: string
+                      type: array
+                    from:
+                      description: From names the Beacon whose Bundles this admission
+                        covers.
+                      properties:
+                        beacon:
+                          description: Beacon is the emitting Beacon's name, in this
+                            namespace.
+                          type: string
+                      required:
+                      - beacon
+                      type: object
+                    requireApproval:
+                      description: |-
+                        RequireApproval blocks crossing until a human explicitly approves the
+                        Bundle for this Gate, regardless of upstream state.
+                      type: boolean
+                  required:
+                  - from
+                  type: object
+                minItems: 1
+                type: array
+              auto:
+                description: |-
+                  Auto admits and crosses eligible Bundles without waiting to be asked.
+                  Sensible for dev, rarely for production.
+                type: boolean
+              passage:
+                description: |-
+                  Passage is the sequence of steps that moves an admitted Bundle into this
+                  environment. Typically: render the new state, commit it, push it, and
+                  wait for the delivery engine to apply it.
+                properties:
+                  steps:
+                    description: Steps run in order. Each may reference earlier steps'
+                      outputs.
+                    items:
+                      description: Step is one instruction in a Passage.
+                      properties:
+                        as:
+                          description: |-
+                            As names this step's output so later steps can reference it, e.g. a step
+                            with `as: commit` exposes `${{ steps.commit.sha }}`.
+                          type: string
+                        continueOnError:
+                          description: |-
+                            ContinueOnError lets the Passage proceed even if this step fails. Use
+                            sparingly: it is how a broken deploy gets reported as a success.
+                          type: boolean
+                        if:
+                          description: |-
+                            If is an expression that must evaluate true for the step to run. Skipped
+                            steps are recorded as Skipped, not silently omitted.
+                          type: string
+                        timeout:
+                          description: Timeout bounds how long this step may run before
+                            it is abandoned.
+                          type: string
+                        uses:
+                          description: Uses names a registered step implementation,
+                            e.g. "flux-wait".
+                          type: string
+                        with:
+                          description: |-
+                            With is the step's configuration. Its shape is defined by the step
+                            implementation, which publishes a JSON Schema for validation and for
+                            generating the UI form.
+                          x-kubernetes-preserve-unknown-fields: true
+                      required:
+                      - uses
+                      type: object
+                    minItems: 1
+                    type: array
+                required:
+                - steps
+                type: object
+              suspend:
+                description: |-
+                  Suspend stops new Passages without deleting the Gate. In-flight Passages
+                  are unaffected.
+                type: boolean
+              vars:
+                description: Vars are values usable in expressions throughout this
+                  Gate's Passage.
+                items:
+                  description: Var is a named value usable in expressions.
+                  properties:
+                    name:
+                      type: string
+                    value:
+                      type: string
+                  required:
+                  - name
+                  - value
+                  type: object
+                type: array
+              verify:
+                description: |-
+                  Verify describes evidence that must be gathered after crossing before
+                  downstream Gates will admit the Bundle. Health says "it is running";
+                  verification says "it is working".
+                items:
+                  description: Verification gathers evidence that a crossing actually
+                    worked.
+                  properties:
+                    uses:
+                      description: Uses names a registered verifier, e.g. "flagger"
+                        or "fides".
+                      type: string
+                    with:
+                      description: With is the verifier's configuration.
+                      x-kubernetes-preserve-unknown-fields: true
+                  required:
+                  - uses
+                  type: object
+                type: array
+              watch:
+                description: |-
+                  Watch describes what to monitor to decide whether this Gate is healthy
+                  once a Bundle is in place.
+                items:
+                  description: HealthCheck asks a registered checker to assess something.
+                  properties:
+                    uses:
+                      description: Uses names a registered health checker, e.g. "flux".
+                      type: string
+                    with:
+                      description: With is the checker's configuration.
+                      x-kubernetes-preserve-unknown-fields: true
+                  required:
+                  - uses
+                  type: object
+                type: array
+              windows:
+                description: |-
+                  Windows restricts when Passages may start. Outside every window, eligible
+                  Bundles queue rather than fail.
+                items:
+                  description: Window is a recurring period during which Passages
+                    may start.
+                  properties:
+                    deny:
+                      description: |-
+                        Deny inverts the window: instead of the only time Passages may start,
+                        it becomes the only time they may not. For change freezes.
+                      type: boolean
+                    duration:
+                      description: Duration is how long it stays open once opened.
+                      type: string
+                    schedule:
+                      description: Schedule is a cron expression marking when the
+                        window opens.
+                      type: string
+                    timeZone:
+                      description: |-
+                        TimeZone is an IANA name, e.g. "Europe/London". Defaults to UTC.
+
+                        Set this deliberately: a window defined in UTC drifts an hour against
+                        local working time twice a year, which is exactly when someone is
+                        surprised by a deploy.
+                      type: string
+                  required:
+                  - duration
+                  - schedule
+                  type: object
+                type: array
+            required:
+            - admits
+            type: object
+          status:
+            description: GateStatus reports what is in this Gate and how it is doing.
+            properties:
+              activePassage:
+                description: ActivePassage is the in-flight Passage, if any.
+                type: string
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              current:
+                description: Current is the Bundle presently in this environment.
+                properties:
+                  actor:
+                    description: Actor is who initiated the crossing.
+                    type: string
+                  bundle:
+                    description: Bundle is the Bundle's object name.
+                    type: string
+                  digest:
+                    description: Digest is its content address.
+                    type: string
+                  enteredAt:
+                    description: EnteredAt is when the crossing completed.
+                    format: date-time
+                    type: string
+                  passage:
+                    description: Passage is the Passage that brought it here.
+                    type: string
+                  verified:
+                    description: |-
+                      Verified reports whether this Bundle's verification succeeded here.
+                      Downstream Gates should refuse to admit an unverified Bundle.
+                    type: boolean
+                required:
+                - bundle
+                - enteredAt
+                type: object
+              eligible:
+                description: |-
+                  Eligible lists Bundles that could cross now but have not. This is the
+                  queue a human acts on, and the answer to "what am I waiting for?"
+                items:
+                  type: string
+                type: array
+              health:
+                description: Health is the latest assessment from this Gate's watches.
+                properties:
+                  details:
+                    description: Details is opaque, check-specific output for the
+                      UI and CLI.
+                    x-kubernetes-preserve-unknown-fields: true
+                  issues:
+                    description: Issues explain any non-Healthy status, in human-readable
+                      form.
+                    items:
+                      type: string
+                    type: array
+                  observedAt:
+                    description: ObservedAt is when this assessment was made.
+                    format: date-time
+                    type: string
+                  status:
+                    description: Status is the overall assessment.
+                    enum:
+                    - Healthy
+                    - Progressing
+                    - Degraded
+                    - Unknown
+                    - NotApplicable
+                    type: string
+                required:
+                - status
+                type: object
+              history:
+                description: History is the recent record of what crossed, newest
+                  first.
+                items:
+                  description: GateOccupant records a Bundle's tenure in a Gate.
+                  properties:
+                    actor:
+                      description: Actor is who initiated the crossing.
+                      type: string
+                    bundle:
+                      description: Bundle is the Bundle's object name.
+                      type: string
+                    digest:
+                      description: Digest is its content address.
+                      type: string
+                    enteredAt:
+                      description: EnteredAt is when the crossing completed.
+                      format: date-time
+                      type: string
+                    passage:
+                      description: Passage is the Passage that brought it here.
+                      type: string
+                    verified:
+                      description: |-
+                        Verified reports whether this Bundle's verification succeeded here.
+                        Downstream Gates should refuse to admit an unverified Bundle.
+                      type: boolean
+                  required:
+                  - bundle
+                  - enteredAt
+                  type: object
+                type: array
+              observedGeneration:
+                format: int64
+                type: integer
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

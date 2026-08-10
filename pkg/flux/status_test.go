@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/olafkfreund/hecate/api/v1alpha1"
 )
 
 var now = time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
@@ -44,7 +46,7 @@ func TestEvaluate(t *testing.T) {
 		name string
 		obj  *unstructured.Unstructured
 		opts Options
-		want State
+		want v1alpha1.Health
 	}{
 		{
 			name: "ready and current is healthy",
@@ -53,7 +55,7 @@ func TestEvaluate(t *testing.T) {
 				status(m)["lastAppliedRevision"] = "main@sha1:9f8c1a2b3c4d5e6f"
 			}),
 			opts: Options{Now: now},
-			want: StateHealthy,
+			want: v1alpha1.HealthHealthy,
 		},
 		{
 			name: "ready at the expected revision is healthy",
@@ -62,7 +64,7 @@ func TestEvaluate(t *testing.T) {
 				status(m)["lastAppliedRevision"] = "main@sha1:9f8c1a2b3c4d5e6f"
 			}),
 			opts: Options{Now: now, ExpectedRevision: "9f8c1a2b"},
-			want: StateHealthy,
+			want: v1alpha1.HealthHealthy,
 		},
 		{
 			name: "ready at the wrong revision is still progressing",
@@ -71,7 +73,7 @@ func TestEvaluate(t *testing.T) {
 				status(m)["lastAppliedRevision"] = "main@sha1:aaaaaaaaaaaa"
 			}),
 			opts: Options{Now: now, ExpectedRevision: "9f8c1a2b"},
-			want: StateProgressing,
+			want: v1alpha1.HealthProgressing,
 		},
 		{
 			// The false-green case: Ready=True describes the previous generation.
@@ -80,7 +82,7 @@ func TestEvaluate(t *testing.T) {
 				status(m)["conditions"] = readyCond("True", "ReconciliationSucceeded", "applied", now)
 			}),
 			opts: Options{Now: now},
-			want: StateProgressing,
+			want: v1alpha1.HealthProgressing,
 		},
 		{
 			name: "recent failure is progressing because Flux retries",
@@ -88,7 +90,7 @@ func TestEvaluate(t *testing.T) {
 				status(m)["conditions"] = readyCond("False", "BuildFailed", "kustomize build failed", now.Add(-2*time.Minute))
 			}),
 			opts: Options{Now: now, FailAfter: 10 * time.Minute},
-			want: StateProgressing,
+			want: v1alpha1.HealthProgressing,
 		},
 		{
 			name: "failure past the deadline is unhealthy",
@@ -96,7 +98,7 @@ func TestEvaluate(t *testing.T) {
 				status(m)["conditions"] = readyCond("False", "BuildFailed", "kustomize build failed", now.Add(-30*time.Minute))
 			}),
 			opts: Options{Now: now, FailAfter: 10 * time.Minute},
-			want: StateUnhealthy,
+			want: v1alpha1.HealthDegraded,
 		},
 		{
 			name: "stalled is unhealthy immediately",
@@ -107,7 +109,7 @@ func TestEvaluate(t *testing.T) {
 				)
 			}),
 			opts: Options{Now: now},
-			want: StateUnhealthy,
+			want: v1alpha1.HealthDegraded,
 		},
 		{
 			name: "suspended is unknown, not progressing",
@@ -116,29 +118,29 @@ func TestEvaluate(t *testing.T) {
 				status(m)["conditions"] = readyCond("True", "ReconciliationSucceeded", "applied", now)
 			}),
 			opts: Options{Now: now},
-			want: StateUnknown,
+			want: v1alpha1.HealthUnknown,
 		},
 		{
 			name: "no conditions yet is progressing",
 			obj:  ks(1, 1, nil),
 			opts: Options{Now: now},
-			want: StateProgressing,
+			want: v1alpha1.HealthProgressing,
 		},
 		{
 			name: "missing resource is unknown",
 			obj:  nil,
 			opts: Options{Now: now},
-			want: StateUnknown,
+			want: v1alpha1.HealthUnknown,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := Evaluate(tt.obj, tt.opts)
-			if got.State != tt.want {
-				t.Fatalf("state = %q, want %q (issues: %v)", got.State, tt.want, got.Issues)
+			if got.Health != tt.want {
+				t.Fatalf("state = %q, want %q (issues: %v)", got.Health, tt.want, got.Issues)
 			}
-			if tt.want != StateHealthy && len(got.Issues) == 0 {
+			if tt.want != v1alpha1.HealthHealthy && len(got.Issues) == 0 {
 				t.Errorf("non-healthy result must explain itself, got no issues")
 			}
 		})
@@ -167,27 +169,6 @@ func TestRevisionMatches(t *testing.T) {
 	}
 }
 
-func TestStateMerge(t *testing.T) {
-	// A set of resources is only as healthy as its worst member.
-	tests := []struct {
-		a, b, want State
-	}{
-		{StateHealthy, StateHealthy, StateHealthy},
-		{StateHealthy, StateProgressing, StateProgressing},
-		{StateProgressing, StateUnhealthy, StateUnhealthy},
-		{StateUnknown, StateProgressing, StateUnknown},
-		{StateUnhealthy, StateUnknown, StateUnhealthy},
-	}
-	for _, tt := range tests {
-		if got := tt.a.Merge(tt.b); got != tt.want {
-			t.Errorf("%s.Merge(%s) = %s, want %s", tt.a, tt.b, got, tt.want)
-		}
-		if got := tt.b.Merge(tt.a); got != tt.want {
-			t.Errorf("Merge must be commutative: %s.Merge(%s) = %s, want %s", tt.b, tt.a, got, tt.want)
-		}
-	}
-}
-
 // HelmRelease records its revision in a different place than Kustomization.
 func TestAppliedRevisionFromHelmReleaseHistory(t *testing.T) {
 	hr := &unstructured.Unstructured{Object: map[string]any{
@@ -201,8 +182,8 @@ func TestAppliedRevisionFromHelmReleaseHistory(t *testing.T) {
 		},
 	}}
 	got := Evaluate(hr, Options{Now: now, ExpectedRevision: "6.3.5"})
-	if got.State != StateHealthy {
-		t.Fatalf("state = %q, want Healthy (issues: %v)", got.State, got.Issues)
+	if got.Health != v1alpha1.HealthHealthy {
+		t.Fatalf("state = %q, want Healthy (issues: %v)", got.Health, got.Issues)
 	}
 	if got.Revision != "6.3.5" {
 		t.Errorf("revision = %q, want 6.3.5", got.Revision)

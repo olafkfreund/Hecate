@@ -1,165 +1,173 @@
 # Hecate — Product Plan
 
-> *Hecate Kleidouchos, "the key-holder": goddess of keys, gates, thresholds and
+> *Hecate **Kleidouchos**, "the key-holder": goddess of keys, gates, thresholds and
 > crossroads. She stands at the boundary and decides what may pass.*
 
 **One line:** Hecate is the promotion and release-orchestration layer for FluxCD —
-the gate between environments, with compliance evidence built in.
+the gate between your environments, with compliance evidence built in.
 
 ---
 
 ## 1. The problem
 
-Neither Flux nor Argo CD solves **cross-environment promotion**. They reconcile one
-declared state onto one set of targets; they have no concept of "this version is in
-staging and should move to production once it proves itself."
+Flux is very good at one thing: making a cluster match what is in git. It has no
+opinion about **what should be in git next**.
 
-Argo CD users have an answer: **Kargo**. Flux users have three bad options:
+The moment you have more than one environment, that gap becomes yours to fill. How
+does the image that passed tests in dev reach staging? What is in production right
+now, and who put it there? What stops it shipping on a Friday, or before the security
+scan finished?
 
-1. **Hand-rolled CI** — a pile of `yq` in GitHub Actions that nobody trusts and one
-   person understands.
-2. **Flagger** — excellent, but it is progressive delivery *within* one environment.
-   It shifts traffic between two versions in one cluster; it does not move an artifact
-   from dev to staging to prod.
-3. **Flux Operator `ResourceSet`** — templated and ephemeral environments with strong
-   input discovery. It has no Freight, no Stages, no gates, no approvals, no answer to
-   "what is in prod right now, and how did it get there?"
+The [Flux ecosystem](https://fluxcd.io/ecosystem/) has UIs, extensions, integrations
+and ancillary tools. It has **no promotion category at all**. So teams write the logic
+themselves: a pile of `yq` in CI that nobody trusts and one person understands.
 
-The gap is real and the Flux ecosystem page has no category for it.
+The two things people reach for do not close it:
+
+- **Flagger** is excellent, and it is progressive delivery *within* one environment —
+  shifting traffic between two versions in one cluster. It does not move an artifact
+  from dev to staging to prod.
+- **Flux Operator `ResourceSet`** gives templated and ephemeral environments with
+  genuinely strong input discovery. It has no promotion model: no immutable release
+  unit, no thresholds, no approvals, no history.
 
 ## 2. Who it is for
 
-| Persona | What they need | What they get |
+| Persona | Needs | Gets |
 |---|---|---|
-| **Platform engineer** running Flux for N teams | Promotion without writing bespoke CI per team | Declarative pipelines, self-service, one control plane |
-| **Application team** shipping to dev→staging→prod | To see where their change is and promote it safely | Pipeline UI, one-click promote, honest health |
-| **SRE / release manager** | Windows, approvals, rollback, blast-radius control | Promotion windows, gates, verification, per-Target fan-out |
-| **Compliance / audit** | Evidence that controls were enforced, not just claimed | Fides-backed change gates and an attestation per promotion |
+| **Platform engineer** running Flux for N teams | Promotion without bespoke CI per team | Declarative pipelines, self-service, one control plane |
+| **Application team** shipping dev→staging→prod | To see where their change is and move it safely | Pipeline view, one-click crossing, honest health |
+| **SRE / release manager** | Windows, approvals, rollback, blast-radius control | Promotion windows, thresholds, verification |
+| **Compliance / audit** | Evidence controls were enforced, not just claimed | Evidence-gated crossings and a record per Passage |
 
-The wedge persona is the platform engineer who already runs Flux, has been told
-"just use Kargo", and discovered Kargo's health model assumes Argo CD.
+The wedge persona is the platform engineer who already runs Flux and has concluded
+that every promotion tool worth having assumes a different delivery engine.
 
 ## 3. Positioning
 
 ```
                  within one environment        across environments
               ┌──────────────────────────┬──────────────────────────┐
-  Argo CD     │  Argo Rollouts           │  Kargo                   │
+  Argo CD     │  Argo Rollouts           │  (well served)           │
               ├──────────────────────────┼──────────────────────────┤
   Flux        │  Flagger                 │  ── HECATE ──            │
               └──────────────────────────┴──────────────────────────┘
 ```
 
-Hecate is **not** a Flux replacement, a Flagger replacement, or a Flux Operator
-competitor. It sits above Flux and cooperates with all three:
+Hecate sits **above** Flux and cooperates with the ecosystem rather than competing
+with it:
 
-- **Flux** is the delivery engine. Hecate writes rendered state into git or OCI;
-  Flux syncs it; Hecate reads `Kustomization`/`HelmRelease` status back as health.
-  The rendezvous is the source of truth, never a direct call.
-- **Flagger** is the verification engine for in-environment rollout. A Hecate Stage can
-  gate on Flagger `Canary` status the way Kargo gates on Argo Rollouts `AnalysisRun`.
+- **Flux** is the delivery engine. Hecate writes rendered state into git or OCI; Flux
+  syncs it; Hecate reads resource status back as health. The rendezvous is the source
+  of truth, never a direct call.
+- **Flagger** is the verification engine for in-environment rollout. A Gate can gate
+  on Flagger `Canary` outcome.
 - **Flux Operator** owns Flux lifecycle and input discovery. Hecate consumes
   `ResourceSetInputProvider` rather than reimplementing artifact discovery.
 
 **Ecosystem slot:** a new category on fluxcd.io/ecosystem — *promotion and release
 orchestration*.
 
-## 4. What makes Hecate different from "Kargo but Flux"
+## 4. What makes Hecate different
 
-Feature parity with Kargo is the price of entry, not the product. Three things are ours.
+A working promotion model is the price of entry, not the product. Three things are
+ours.
 
-### 4.1 Compliance-gated promotion (Fides)
+### 4.1 Evidence-gated crossings
 
-A promotion is structurally a change gate, and Fides already models it:
+A promotion is structurally a change gate, and
+[Fides](https://github.com/olafkfreund/fides) already models one — so the two line up
+with no impedance mismatch:
 
 | Hecate | Fides |
 |---|---|
-| Freight (immutable artifact set) | Trail |
-| Container image digest in Freight | Artifact (SHA256) |
-| Stage | Environment / logical-env |
-| Verification result | Attestation |
-| Manual approval of a Promotion | `fides approve` (segregation of duties) |
-| Promotion allowed? | `GET /api/v1/trails/{id}/change-gate` → approve/hold + 0–100 risk |
+| Bundle | Trail |
+| Image digest inside a Bundle | Artifact (SHA256) |
+| Gate | Environment |
+| Verification outcome | Attestation |
+| Approving a Passage | `fides approve` — segregation of duties |
+| *May this cross?* | change-gate verdict + 0–100 risk score |
 
-This yields a promotion pipeline where **"can this go to prod?" is answered by evidence,
-not by whoever has merge rights** — and every promotion leaves a tamper-evident record.
-No GitOps promotion tool does this today. It is the reason to choose Hecate over waiting
-for Kargo 2.0 to become engine-agnostic.
+The result: **"can this ship to prod?" is answered by evidence, not by whoever holds
+merge rights** — and every Passage leaves a tamper-evident record mapping onto SOC 2,
+ISO 27001, NIST 800-53, PCI-DSS, DORA and SOX controls.
+
+No GitOps promotion tool does this. It is the single strongest reason to pick Hecate.
 
 ### 4.2 OpenTelemetry-native
 
-Not "we export some Prometheus metrics." Every promotion is a **trace**, every step a
-**span**, with trace context propagated into git commit trailers so a deployment can be
-correlated end-to-end from CI through Flux reconciliation to the first request that hit
-the new version. Fides itself only carries OTel as an indirect dependency, so Hecate
-leads here and Fides can adopt the same conventions.
+Not "we export some Prometheus metrics." Every Passage is a **trace**, every step a
+**span**, with trace context propagated into git commit trailers so one trace spans
+the CI run, the crossing, the Flux reconciliation, and the first request that hit the
+new version.
 
-DORA metrics (lead time, deployment frequency, change-failure rate, MTTR) fall out of the
-trace data rather than being a separate subsystem.
+`PassageStatus.traceID` is a first-class API field, not an annotation bolted on later.
 
-### 4.3 A UI and CLI people actually want to use
+DORA metrics fall out of that trace data rather than being a separate subsystem.
 
-- **UI:** Next.js 16 + React 19 + Tailwind v4 + lucide-react + recharts + next-themes —
-  the Fides portal stack, so the two products feel like one platform. Kargo's Ant Design
-  UI is not reused.
+### 4.3 A UI and CLI worth using
+
+- **UI:** Next.js 16 + React 19 + Tailwind v4 + lucide-react + recharts + next-themes
+  — the Fides portal stack, so the two products feel like one platform.
 - **CLI:** the primary interface, not an afterthought. Every UI action has a CLI
-  equivalent, output is `--output json|yaml|table` everywhere, and gates return
-  **documented exit codes** so they compose in pipelines — the contract Fides already
-  proved works.
+  equivalent, `--output json|yaml|table` everywhere, and gates return **documented
+  exit codes** so they compose in pipelines.
 
 ## 5. Product principles
 
-1. **Git is the rendezvous.** Hecate never talks to Flux directly and never applies to a
-   cluster. It writes to a source of truth and reads status back. This is what keeps
-   Flux authoritative and Hecate replaceable.
-2. **Honest health.** A promotion that reports success when the deploy is wedged is worse
-   than no tool. Stale `observedGeneration`, suspended resources, and infinite Flux
-   retries are all handled explicitly (see `docs/SPIKE-RESULTS.md`).
-3. **The CLI is the product.** If it cannot be done from a terminal and scripted in CI,
-   it is not done.
-4. **Reuse before build.** Kargo for the engine, Flux Operator for discovery, Flagger for
-   verification, Fides for evidence. We write adapters and the things nobody else has.
+1. **Git is the rendezvous.** Hecate never talks to Flux and never applies to a
+   cluster. This keeps Flux authoritative and Hecate removable.
+2. **Honest health.** A crossing that reports success while the deploy is wedged is
+   worse than no tool. Stale `observedGeneration`, suspended resources, unregistered
+   checkers and infinite Flux retries are all handled explicitly.
+3. **History is immutable.** A Passage is never reused and a Bundle is never edited.
+   A second attempt is a second Passage. That is what makes the record worth trusting.
+4. **The CLI is the product.** If it cannot be scripted, it is not done.
 5. **No lock-in.** Uninstalling Hecate leaves working Flux manifests in git.
+6. **Fewer resources.** Four kinds, no pipeline object. Adding a resource later is
+   easy; removing one is not.
 
 ## 6. Scope
 
-### v0.1 — "it promotes" (the wedge)
-Flux health checker · `flux-wait` / `flux-reconcile` steps · Stage/Freight/Promotion via
-Kargo · CLI `get`/`promote`/`approve` · Helm chart · OTel traces on promotions.
+### v0.1 — "it crosses"
+Beacon, Bundle, Gate, Passage · controller · step engine · `flux-wait`,
+`flux-reconcile`, git and rendering steps · CLI `get` / `cross` / `approve` · Helm
+chart · OTel traces.
 
 ### v0.2 — "it gates"
-Fides change-gate integration · promotion approvals mapped to Fides SoD · attestation
-per promotion · Flagger `Canary` verification · promotion windows.
+Fides change gate before crossing · attestation after · approvals mapped to Fides SoD
+· Flagger verification · promotion windows.
 
 ### v0.3 — "it is pleasant"
-Hecate UI (pipeline graph, Freight timeline, one-click promote) · full OTel/DORA
-dashboards · `ResourceSetInputProvider` as a Warehouse source.
+Hecate UI: pipeline graph, Bundle timeline, one-click crossing, approval queue,
+evidence panel. Full OTel/DORA dashboards. `ResourceSetInputProvider` as a Beacon
+source.
 
 ### v1.0 — "it is trusted"
-Multi-cluster / remote Flux · all major git providers and cloud registries verified in CI
-· SSO · RBAC · documented upgrade path · production references.
+Multi-cluster · every major git provider and cloud registry verified in CI · SSO ·
+RBAC · documented upgrade path · production references.
 
 ### Non-goals
 
 - Replacing Flux, Flagger or Flux Operator.
 - Applying manifests to clusters directly. Ever.
-- Supporting Argo CD. That is Kargo's job and it does it well.
-- A hosted SaaS offering in v1.
+- Supporting Argo CD. That space is well served.
+- A hosted SaaS offering before v1.
 
 ## 7. Success metrics
 
 | Horizon | Metric |
 |---|---|
-| 3 months | Listed on fluxcd.io/ecosystem; 3 external teams running v0.1 |
-| 6 months | Fides gate used in a real audit; 25+ GitHub stars from Flux community; both upstream Kargo PRs merged |
-| 12 months | 10 production references; promotion→attestation flow cited in a compliance report |
+| 3 months | Installable v0.1; 3 external teams running it |
+| 6 months | Listed on fluxcd.io/ecosystem; evidence gate used in a real audit |
+| 12 months | 10 production references; a Passage record cited in a compliance report |
 
 ## 8. Key risks
 
 | Risk | Severity | Response |
 |---|---|---|
-| **Kargo 2.0 becomes engine-agnostic and obsoletes the adapter** | High | This is the *goal*, not the threat. Path A means we ride it. Our durable value is Fides + OTel + UI, none of which Kargo 2.0 provides. Keep `pkg/flux` Kargo-free so we can stand alone. |
-| Upstream PRs (module tags, generic client) rejected | Medium | Both have working local workarounds already proven in the spike. |
-| Flux status contract changes | Low | Contract is stable across v1/v2; we test against fixtures and pin nothing. |
-| UI is the long pole | Medium | Ship v0.1 and v0.2 CLI-only. The CLI is the product; the UI is the adoption multiplier. |
-| ControlPlane ships promotion in Flux Operator | Medium | Likeliest real competitor. Differentiate on Fides evidence and depth of the promotion model, and cooperate rather than duplicate discovery. |
+| **Scope.** Independence means building the control plane, step library, providers and UI ourselves | **High** | Sequence ruthlessly. Ship CLI-only through v0.2 — the UI is an adoption multiplier, not a prerequisite. Lean on `go-git`, the Helm SDK and the kustomize API rather than writing that layer. |
+| ControlPlane ships promotion in Flux Operator | Medium | The likeliest real competitor. Differentiate on evidence and depth of model; cooperate on discovery rather than duplicating it. |
+| Adoption: a new vocabulary raises the learning curve | Medium | One glossary, used consistently everywhere. Four resources is a small surface to learn. |
+| Flux status contract changes | Low | Stable across v1/v2; we read it as unstructured and test against fixtures. |
+| `hecate.dev` unregistered | Low, but blocking later | Register it. Tracked as an issue. |

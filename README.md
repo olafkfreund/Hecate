@@ -11,9 +11,10 @@
 [![Status](https://img.shields.io/badge/status-pre--alpha-fabd2f.svg)](#status)
 
 [Website](https://olafkfreund.github.io/Hecate/) ·
+[Architecture](docs/ARCHITECTURE.md) ·
 [Product plan](docs/PRODUCT-PLAN.md) ·
 [Development plan](docs/DEVELOPMENT-PLAN.md) ·
-[Spike results](docs/SPIKE-RESULTS.md)
+[Decisions](docs/DECISIONS.md)
 
 </div>
 
@@ -21,101 +22,132 @@
 
 ## What
 
-Flux makes a cluster match what is in git. It has no opinion about **what should be in git
-next** — so cross-environment promotion is left to hand-rolled CI.
+Flux makes a cluster match what is in git. It has no opinion about **what should be in
+git next** — so cross-environment promotion is left to hand-rolled CI.
 
-Argo CD users solve this with [Kargo](https://github.com/akuity/kargo). Flux users have
-had nothing. The [Flux ecosystem](https://fluxcd.io/ecosystem/) has no promotion category
-at all.
-
+The [Flux ecosystem](https://fluxcd.io/ecosystem/) has no promotion category at all.
 Hecate fills that slot:
 
 |  | within one environment | across environments |
 |---|---|---|
-| **Argo CD** | Argo Rollouts | Kargo |
+| **Argo CD** | Argo Rollouts | (well served) |
 | **Flux** | Flagger | **Hecate** |
 
-## How
+## The model
 
-Hecate writes rendered state into git or OCI, Flux syncs it, and Hecate reads
-`Kustomization` / `HelmRelease` status back to decide whether the promotion worked.
-**It never talks to Flux directly.** Git is the rendezvous — which is what keeps Flux
-authoritative and Hecate removable.
+Four resources. That is the whole API.
+
+| | |
+|---|---|
+| **Beacon** | Watches registries, charts and repos. Emits a Bundle when something new appears. |
+| **Bundle** | An immutable, content-addressed set of artifact versions. The unit that moves. |
+| **Gate** | An environment, and the threshold a Bundle must cross to enter it. |
+| **Passage** | One attempt to move one Bundle through one Gate. |
 
 ```yaml
-- uses: flux-wait
-  config:
-    resources:
-      - { kind: Kustomization, name: podinfo, namespace: flux-system }
-    expectedRevision: ${{ outputs.commit.commit }}
-    failAfter: 15m
+apiVersion: hecate.dev/v1alpha1
+kind: Gate
+metadata:
+  name: production
+spec:
+  admits:
+    - from: { beacon: podinfo }
+      after: [staging]          # only what already cleared staging
+      requireApproval: true
+  passage:
+    steps:
+      - uses: git-clone
+      - uses: set-image
+      - uses: git-commit
+        as: commit
+      - uses: git-push
+      - uses: flux-wait
+        with:
+          resources:
+            - { kind: Kustomization, name: podinfo, namespace: flux-system }
+          expectedRevision: ${{ steps.commit.sha }}
 ```
 
-Three things distinguish it from "Kargo, but Flux":
+**There is no pipeline object** — the graph is implied by what each Gate admits, so it
+cannot drift out of sync with reality.
 
-- **Compliance-gated promotion.** A promotion *is* a change gate, and
-  [Fides](https://github.com/olafkfreund/fides) already models one. Freight → trail,
-  image digest → artifact, verification → attestation, approval → segregation of duties.
-  "Can this ship to prod?" gets answered by evidence rather than merge rights.
-- **OpenTelemetry-native.** Promotion = trace, step = span, trace context propagated
-  through git commit trailers. DORA metrics fall out of the trace data.
-- **A UI and CLI worth using.** Next.js 16 + React 19 + Tailwind v4, matching the Fides
-  portal. The CLI is the product — every UI action has a CLI equivalent and gates return
-  documented exit codes.
+**Hecate never talks to Flux.** A Passage writes to git; Flux syncs; Hecate reads
+`Kustomization` / `HelmRelease` status back. Git is the rendezvous, which keeps Flux
+authoritative and Hecate removable.
 
-## Built on Kargo
+## What makes it different
 
-Kargo is Apache-2.0 and its Argo CD coupling is narrow: two promotion steps, one health
-checker, and Argo Rollouts verification — 37 of ~800 non-test Go files. So Hecate supplies
-a Flux adapter and inherits the pipeline model, 34 engine-neutral promotion steps, the API
-server, RBAC, SSO, sharding, GC, every git provider and every cloud registry credential
-helper.
+- **Evidence-gated crossings.** A crossing *is* a change gate, and
+  [Fides](https://github.com/olafkfreund/fides) already models one: Bundle → trail,
+  image digest → artifact, verification → attestation, approval → segregation of
+  duties. "Can this ship to prod?" gets answered by evidence rather than merge rights.
+- **OpenTelemetry-native.** Passage = trace, step = span, trace context propagated
+  through git commit trailers. `traceID` is a first-class API field. DORA metrics fall
+  out of the trace data.
+- **A UI and CLI worth using.** Next.js 16 + React 19 + Tailwind v4, matching the
+  Fides portal. The CLI is the product — every UI action has a CLI equivalent and
+  gates return documented exit codes.
 
-We reuse the rest of the ecosystem too: **Flux Operator** `ResourceSetInputProvider` for
-artifact discovery, **Flagger** for in-environment verification.
+## Honest health
+
+Most naive Flux health checks are wrong in the same ways. These are all tested:
+
+- **Stale status is the false-green.** `Ready=True` with `observedGeneration` behind
+  `metadata.generation` describes the *previous* revision.
+- **`Ready=False` is not failure.** Flux retries forever; we report Progressing until
+  `Stalled=True` or a tunable deadline passes.
+- **Suspended is not progressing.** It will never reconcile — waiting is pointless.
+- **An unregistered checker is reported, not skipped.** Silently ignoring a check you
+  asked for inflates Gate health.
 
 ## Repository layout
 
 ```
-pkg/flux/      Flux status evaluation. No Kargo dependency — the escape hatch.
-pkg/kargo/     Adapters: health.Checker + promotion.StepRunner.
-docs/          Product plan, development plan, spike results.
+api/v1alpha1/         Beacon, Bundle, Gate, Passage. The whole API.
+pkg/flux/             Flux status evaluation. Pure; no client, no I/O.
+pkg/health/           Checker interface, registry, and the Flux checker.
+pkg/passage/          Step interface, registry, and the execution engine.
+pkg/passage/steps/    Built-in steps.
+charts/hecate/crds/   Generated CRDs.
 ```
-
-`pkg/flux` is deliberately Kargo-free. All the judgement lives there, so if the
-Kargo-distribution approach ever fails, that package moves into a standalone controller
-unchanged.
 
 ## Status
 
-**Pre-alpha.** The spike is complete and green — the Flux health checker and `flux-wait`
-step build against Kargo v1.11.1 and pass 10 tests with no cluster required. There is no
-installable release yet.
+**Pre-alpha.** The foundations are built and tested; there is no installable release
+yet. See the [development plan](docs/DEVELOPMENT-PLAN.md) for what lands when.
 
 ```console
 $ go test ./...
-ok  github.com/olafkfreund/hecate/pkg/flux    # 4 tests, pure
-ok  github.com/olafkfreund/hecate/pkg/kargo   # 6 tests, fake client
+ok  github.com/olafkfreund/hecate/api/v1alpha1
+ok  github.com/olafkfreund/hecate/pkg/flux
+ok  github.com/olafkfreund/hecate/pkg/health
+ok  github.com/olafkfreund/hecate/pkg/passage
+ok  github.com/olafkfreund/hecate/pkg/passage/steps
 ```
 
-See [`docs/SPIKE-RESULTS.md`](docs/SPIKE-RESULTS.md) for what worked, what broke, and the
-two upstream PRs we owe Kargo.
+33 tests, no cluster required, ~0.2s. That is the bar: anything testable without a
+cluster must be.
 
 ## Development
 
 ```bash
-go test ./...     # no cluster needed
+go test ./...
 go vet ./...
-```
 
-Kargo is consumed via `replace` directives pinning its `api` and `pkg/x/client/generated`
-submodules to pseudo-versions — see the spike results for why this is currently necessary.
+# regenerate deepcopy functions and CRDs after changing api/
+go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.19.0 \
+  object:headerFile=/dev/null paths=./api/... \
+  crd output:crd:dir=charts/hecate/crds
+```
 
 ## Contributing
 
-Early enough that design input matters more than code. If you run Flux across more than
-one environment, [open an issue](https://github.com/olafkfreund/Hecate/issues).
+Early enough that design input matters more than code. If you run Flux across more
+than one environment, [open an issue](https://github.com/olafkfreund/Hecate/issues).
+
+Non-obvious decisions are recorded in [docs/DECISIONS.md](docs/DECISIONS.md) — read it
+before proposing a structural change; the answer may already be there.
 
 ## License
 
-[Apache 2.0](LICENSE). Not affiliated with the FluxCD project, the CNCF, or Akuity.
+[Apache 2.0](LICENSE). Not affiliated with the FluxCD project or the CNCF.

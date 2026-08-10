@@ -1,0 +1,240 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: passages.hecate.dev
+spec:
+  group: hecate.dev
+  names:
+    kind: Passage
+    listKind: PassageList
+    plural: passages
+    shortNames:
+    - psg
+    singular: passage
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.gate
+      name: Gate
+      type: string
+    - jsonPath: .spec.bundle
+      name: Bundle
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Passage is one attempt to move a Bundle through a Gate.
+
+          A Passage is created, runs its steps to completion, and is then a permanent
+          record of what happened. It is never reused: a second attempt is a second
+          Passage. That is what makes the history trustworthy — nothing is overwritten.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              PassageSpec is what this Passage was asked to do. It is immutable once
+              created; the only mutable field is Abort.
+            properties:
+              abort:
+                description: |-
+                  Abort requests that a running Passage stop. Set it to true to cancel;
+                  the controller will mark remaining steps Aborted.
+                type: boolean
+              actor:
+                description: |-
+                  Actor is who initiated this Passage — a username, or "controller" for
+                  automatic crossings.
+                type: string
+              bundle:
+                description: Bundle is the Bundle being moved.
+                type: string
+              gate:
+                description: Gate is the Gate being crossed.
+                type: string
+              steps:
+                description: |-
+                  Steps is the resolved step list, copied from the Gate at creation time.
+
+                  Copied rather than referenced on purpose: editing a Gate must not
+                  retroactively change what an in-flight or completed Passage did.
+                items:
+                  description: Step is one instruction in a Passage.
+                  properties:
+                    as:
+                      description: |-
+                        As names this step's output so later steps can reference it, e.g. a step
+                        with `as: commit` exposes `${{ steps.commit.sha }}`.
+                      type: string
+                    continueOnError:
+                      description: |-
+                        ContinueOnError lets the Passage proceed even if this step fails. Use
+                        sparingly: it is how a broken deploy gets reported as a success.
+                      type: boolean
+                    if:
+                      description: |-
+                        If is an expression that must evaluate true for the step to run. Skipped
+                        steps are recorded as Skipped, not silently omitted.
+                      type: string
+                    timeout:
+                      description: Timeout bounds how long this step may run before
+                        it is abandoned.
+                      type: string
+                    uses:
+                      description: Uses names a registered step implementation, e.g.
+                        "flux-wait".
+                      type: string
+                    with:
+                      description: |-
+                        With is the step's configuration. Its shape is defined by the step
+                        implementation, which publishes a JSON Schema for validation and for
+                        generating the UI form.
+                      x-kubernetes-preserve-unknown-fields: true
+                  required:
+                  - uses
+                  type: object
+                minItems: 1
+                type: array
+            required:
+            - bundle
+            - gate
+            - steps
+            type: object
+          status:
+            description: PassageStatus is what actually happened.
+            properties:
+              currentStep:
+                description: CurrentStep indexes the step being executed.
+                format: int32
+                type: integer
+              evidence:
+                description: Evidence references the compliance record produced for
+                  this Passage.
+                properties:
+                  risk:
+                    description: Risk is the change-gate risk score, 0-100.
+                    format: int32
+                    type: integer
+                  trail:
+                    description: Trail is the Fides trail identifier for this Passage.
+                    type: string
+                  url:
+                    description: URL links to the full record.
+                    type: string
+                  verdict:
+                    description: Verdict is the change-gate outcome, e.g. "approve"
+                      or "hold".
+                    type: string
+                type: object
+              finishedAt:
+                description: FinishedAt is when the Passage reached a terminal phase.
+                format: date-time
+                type: string
+              message:
+                description: Message explains the phase, especially a non-success
+                  one.
+                type: string
+              observedGeneration:
+                format: int64
+                type: integer
+              phase:
+                default: Pending
+                description: Phase is the overall outcome.
+                enum:
+                - Pending
+                - Running
+                - Succeeded
+                - Failed
+                - Aborted
+                type: string
+              startedAt:
+                description: StartedAt is when the first step ran.
+                format: date-time
+                type: string
+              steps:
+                description: Steps records each step's outcome, in spec order.
+                items:
+                  description: StepStatus records what happened when a step ran.
+                  properties:
+                    as:
+                      description: As is the step's output name, if it had one.
+                      type: string
+                    attempts:
+                      description: |-
+                        Attempts counts how many times this step has been invoked. Steps that
+                        wait on external systems are invoked repeatedly until they settle.
+                      format: int32
+                      type: integer
+                    finishedAt:
+                      description: FinishedAt is when the step reached a terminal
+                        phase.
+                      format: date-time
+                      type: string
+                    message:
+                      description: Message explains the phase.
+                      type: string
+                    output:
+                      description: Output is what the step produced, available to
+                        later steps.
+                      x-kubernetes-preserve-unknown-fields: true
+                    phase:
+                      description: Phase is the outcome.
+                      enum:
+                      - Pending
+                      - Running
+                      - Succeeded
+                      - Failed
+                      - Skipped
+                      - Aborted
+                      type: string
+                    startedAt:
+                      description: StartedAt is when the step first ran.
+                      format: date-time
+                      type: string
+                    uses:
+                      description: Uses is the step implementation that ran.
+                      type: string
+                  required:
+                  - phase
+                  - uses
+                  type: object
+                type: array
+              traceID:
+                description: |-
+                  TraceID is the OpenTelemetry trace this Passage belongs to, so a
+                  promotion can be correlated with the CI run that produced the artifact
+                  and the reconciliation that applied it.
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
