@@ -76,17 +76,27 @@ Schema for validation and UI form generation.
 **Exit:** a Gate can render, commit, push, open a PR, wait for merge, and wait for Flux.
 
 ### M3 — Providers
-Git hosts (GitHub, GitLab, Bitbucket, Gitea, Azure DevOps, AWS CodeCommit) and
-registries (ECR, GAR, ACR, GHCR, Docker Hub, Quay, Harbor), including workload
-identity. Inbound webhooks so a push triggers discovery instead of waiting for the
-poll interval.
+**GitHub and GitLab first**, both including their self-hosted forms (Enterprise Server,
+self-managed) from day one rather than as a retrofit. Bitbucket, Gitea and Azure DevOps
+follow demand rather than a completeness urge.
+
+The surface is smaller than it looks: clone, commit and push work against **any** host
+over HTTPS or SSH with no provider code at all. Host-specific code is needed only for
+pull/merge requests, commit status, and inbound webhooks — and for webhooks we follow
+Flux v2.9's OIDC-secured Receivers rather than inventing shared-secret handling.
+
+Registries (ECR, GAR, ACR, GHCR, Docker Hub, Quay, Harbor) come via
+`go-containerregistry`, whose keychains cover most cloud identity cases.
 
 **Exit:** the support matrix in the README is generated from passing CI jobs.
 
 ### M4 — Evidence
-Fides client, `evidence-gate` step, attestation per Passage, approvals mapped to Fides
-segregation of duties, Bundle image digests reported as Fides artifacts, verdict and
-risk surfaced on the Gate.
+Fides client, `evidence-gate` step covering **all four** Fides gates (`assert`,
+`policy check`, `allowlist check`, `change-gate` — two of which are environment-scoped
+and map onto a Gate), Gate-to-Fides-environment mapping, attestation per Passage,
+approvals mapped to segregation of duties, Bundle image digests reported as artifacts,
+verdict and risk surfaced on the Gate, and `hecate verify` so the tamper-evidence claim
+is checkable rather than asserted.
 
 **Exit:** a crossing into production is blocked by a HOLD verdict and released by an
 approval.

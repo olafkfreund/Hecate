@@ -68,6 +68,37 @@ with it:
 **Ecosystem slot:** a new category on fluxcd.io/ecosystem — *promotion and release
 orchestration*.
 
+### 3.1 Who we are actually competing with
+
+Not Flagger, and not Flux Operator. **A GitHub Actions workflow file.**
+
+Flux's own documentation still recommends
+[promoting Helm releases with GitHub Actions](https://fluxcd.io/flux/use-cases/gh-actions-helm-promotion/).
+That is the incumbent: free, already installed, understood by everyone on the team, and
+genuinely good enough for a single team with two environments.
+
+This is good news twice over. The gap is unfilled by any product, and Flux's stated
+best practice — *promotion should be a Git operation, not a script that modifies a
+running cluster* — is [D3](DECISIONS.md) almost word for word. We are the productised
+version of upstream's own advice rather than an argument with it.
+
+But it sets a hard bar: **Hecate must be obviously better than fifty lines of YAML on
+first contact.** What that workflow cannot do, and what every feature should be measured
+against:
+
+| A promotion workflow | Hecate |
+|---|---|
+| Has no memory — no idea what is in which environment | Gate status answers it directly |
+| Pushes and hopes | Waits for Flux to actually converge on the pushed revision |
+| Cannot gate on health or verification | Refuses to admit an unverified Bundle |
+| Approval is "who can merge" | Approval is a distinct right, with segregation of duties |
+| Leaves no queryable history | Every crossing is an immutable, auditable record |
+| Cannot answer "why is this stuck?" | It is a first-class question |
+| One workflow per repo, copy-pasted N times | One control plane for N teams |
+| Fails silently when Flux does not converge | Honest health, with a deadline |
+
+Any Hecate feature that does not widen one of those rows is decoration.
+
 ## 4. What makes Hecate different
 
 A working promotion model is the price of entry, not the product. Three things are
@@ -86,7 +117,19 @@ with no impedance mismatch:
 | Gate | Environment |
 | Verification outcome | Attestation |
 | Approving a Passage | `fides approve` — segregation of duties |
-| *May this cross?* | change-gate verdict + 0–100 risk score |
+| *May this cross?* | four gates, below |
+
+Fides exposes **four** gates with distinct exit codes, not one — and two are
+environment-scoped, which maps exactly onto a Gate:
+
+| Fides call | Hecate use |
+|---|---|
+| `assert --sha256 --policy` | policy over the Bundle's image digests |
+| `policy check --env --trail` | the Gate's own environment policy |
+| `allowlist check --env --sha` | is this exact image approved for this Gate |
+| `change-gate --trail` | verdict plus a 0–100 risk score |
+
+A Gate chooses which apply, so dev can run none and production can run all four.
 
 The result: **"can this ship to prod?" is answered by evidence, not by whoever holds
 merge rights** — and every Passage leaves a tamper-evident record mapping onto SOC 2,

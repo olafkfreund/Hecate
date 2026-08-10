@@ -49,8 +49,14 @@ The two things people reach for don't close it:
   ephemeral environments with genuinely strong input discovery. It has no promotion
   model: no immutable release unit, no thresholds, no approvals, no history.
 
-So teams write the promotion logic themselves: a pile of `yq` in CI that nobody trusts
-and one person understands.
+So teams write the promotion logic themselves. Flux's own docs still recommend
+[doing it with GitHub Actions](https://fluxcd.io/flux/use-cases/gh-actions-helm-promotion/)
+— which means **our real competition is a workflow file**, not another product.
+
+That workflow has no memory of what is in which environment, pushes and hopes rather
+than waiting for Flux to converge, treats "who can merge" as the approval model, leaves
+no queryable history, and cannot answer *why is this stuck?*. Those gaps are the
+product.
 
 <pre class="ascii"><code>                 within one environment        across environments
               ┌──────────────────────────┬──────────────────────────┐
@@ -151,7 +157,7 @@ models exactly that, so the two line up with no impedance mismatch:
 | Gate | Environment |
 | Verification outcome | Attestation |
 | Approving a Passage | `fides approve` — segregation of duties |
-| *May this cross?* | change-gate verdict + risk score |
+| *May this cross?* | four gates: artifact policy, environment policy, digest allowlist, change-gate verdict + risk |
 
 </div>
 
