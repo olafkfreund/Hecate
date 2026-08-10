@@ -106,6 +106,7 @@ Most naive Flux health checks are wrong in the same ways. These are all tested:
 api/v1alpha1/         Beacon, Bundle, Gate, Passage. The whole API.
 pkg/beacon/           Artifact discovery: tag selection, image resolution, controller.
 pkg/flux/             Flux status evaluation. Pure; no client, no I/O.
+pkg/gate/             Eligibility, promotion windows, Gate controller.
 pkg/health/           Checker interface, registry, and the Flux checker.
 pkg/passage/          Step interface, registry, and the execution engine.
 pkg/passage/steps/    Built-in steps.
@@ -143,12 +144,13 @@ $ go test ./...
 ok  github.com/olafkfreund/hecate/api/v1alpha1
 ok  github.com/olafkfreund/hecate/pkg/beacon
 ok  github.com/olafkfreund/hecate/pkg/flux
+ok  github.com/olafkfreund/hecate/pkg/gate
 ok  github.com/olafkfreund/hecate/pkg/health
 ok  github.com/olafkfreund/hecate/pkg/passage
 ok  github.com/olafkfreund/hecate/pkg/passage/steps
 ```
 
-54 tests, no cluster required, ~0.7s. That is the bar: anything testable without a
+85 tests, no cluster required, ~1s. That is the bar: anything testable without a
 cluster must be. Image resolution is tested against a real in-memory registry rather
 than a mock.
 

@@ -23,6 +23,7 @@ rules:
   - hecate.dev
   resources:
   - beacons
+  - gates
   verbs:
   - get
   - list
@@ -31,6 +32,8 @@ rules:
   - hecate.dev
   resources:
   - beacons/status
+  - bundles/status
+  - gates/status
   verbs:
   - get
   - patch
@@ -39,6 +42,7 @@ rules:
   - hecate.dev
   resources:
   - bundles
+  - passages
   verbs:
   - create
   - get

@@ -299,3 +299,70 @@ of arguing with upstream about whose monorepo story is correct.
 
 This is the maintenance strategy in miniature: **what the ecosystem absorbs, we
 delete.**
+
+---
+
+## D16 — `cleared` means crossed *and* verified
+
+**2026-08-11 · accepted**
+
+A Gate records a Bundle in `BundleStatus.Cleared` only once the crossing succeeded
+**and** that Gate's verification passed. A crossing that happened but failed
+verification goes to `BundleStatus.Blocked` with the reason.
+
+Downstream eligibility is therefore exactly `bundle.HasCleared(upstreamGate)` — no
+extra field, no cross-Gate lookups.
+
+**Why not read the upstream Gate's own status?** `GateStatus.History` is capped
+([D13](#d13--bundles-are-garbage-collected-status-lists-are-capped)), so an older
+Bundle's record ages out — and a Bundle that genuinely cleared staging would silently
+become ineligible for production weeks later. The Bundle is the durable record; the
+Gate's status is a view.
+
+**Why not add `verified` to `GateCrossing`?** It would encode the same fact twice and
+invite the two copies to disagree. `GateOccupant.Verified` already exists for the
+Gate-side view.
+
+**Consequence, and the one thing to get right when verification lands (#21):** today
+`Cleared` is written on a successful Passage, which is correct for a Gate that declares
+no verification. When verification is implemented, that single write is the place it
+gates. Nothing else needs to change.
+
+---
+
+## D17 — Automatic crossings only move forward
+
+**2026-08-11 · accepted**
+
+Having crossed a Gate before does **not** make a Bundle ineligible; only being
+*currently* in the Gate does. Automatic crossings pick the newest eligible Bundle, and
+only when it is newer than the current occupant.
+
+**Why.** The obvious rule — "ineligible if it has cleared this Gate" — makes rollback
+impossible for ever, because the Bundle you want to go back to has by definition
+cleared. But dropping that rule alone means two eligible Bundles cross each other
+alternately without end, since neither is current once the other arrives. Ordering
+solves both: older Bundles stay listed and reachable, and automation never reverses.
+
+**Consequence.** Rolling back is deliberately a human action — create a Passage for the
+older Bundle directly. A controller that can roll back on its own is a controller that
+will, at the worst possible moment.
+
+---
+
+## D18 — Neither Bundles nor Passages carry owner references
+
+**2026-08-11 · accepted**
+
+Bundles are labelled `hecate.dev/beacon`, Passages `hecate.dev/gate`. Neither has an
+owner reference to the object that created it.
+
+**Why.** Owner references cascade-delete. Removing a Beacon would erase every Bundle it
+emitted; removing a Gate would erase the record of every crossing through it. For a
+tool whose product is the audit trail, deleting history as a side effect of deleting
+configuration is the wrong default — and it is the kind of default nobody notices until
+the audit.
+
+**Consequence.** Cleanup is explicit, and belongs to the garbage collector under
+[D13](#d13--bundles-are-garbage-collected-status-lists-are-capped)'s safety rule.
+Controllers use label-based `Watches` rather than `Owns` to react to their children.
