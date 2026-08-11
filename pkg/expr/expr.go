@@ -156,6 +156,28 @@ func Bool(code string, env Env) (bool, error) {
 	return b, nil
 }
 
+// Condition evaluates a boolean expression over an arbitrary environment.
+//
+// For the one case a step cannot express through Env: a condition about
+// something that only exists after the step ran, like an HTTP response. The
+// sandbox choice lives here so a step cannot accidentally widen it.
+func Condition(code string, env map[string]any) (bool, error) {
+	code = strings.TrimSpace(code)
+	program, err := expr.Compile(code, expr.Env(env), expr.AsBool())
+	if err != nil {
+		return false, fmt.Errorf("invalid condition %q: %w", code, err)
+	}
+	out, err := expr.Run(program, env)
+	if err != nil {
+		return false, fmt.Errorf("evaluating %q: %w", code, err)
+	}
+	b, ok := out.(bool)
+	if !ok {
+		return false, fmt.Errorf("condition %q evaluated to %T, not a boolean", code, out)
+	}
+	return b, nil
+}
+
 // Interpolate substitutes every `${{ ... }}` in s.
 //
 // When the whole string is a single expression the typed value is returned;

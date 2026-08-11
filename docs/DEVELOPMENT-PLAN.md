@@ -31,7 +31,7 @@ This is the *how*.
 | API server | M7 |
 | UI | M8 |
 
-184 tests, no cluster required, ~1s.
+192 tests, no cluster required, ~1s.
 
 ## 2. Technology
 
@@ -76,13 +76,13 @@ running Flux, in CI.
 
 ### M2 — Step library
 Done: `flux-wait`, `flux-reconcile`, `git-clone`, `git-commit`, `git-push`,
-`git-pull-request`, `edit-yaml`, `set-image`, and expression evaluation over
-Bundle artifacts and prior step outputs.
+`git-pull-request`, `edit-yaml`, `set-image`, `http`, and expression evaluation
+over Bundle artifacts and prior step outputs.
 
 Left: `render-kustomize`, `render-helm` ([#67](https://github.com/olafkfreund/Hecate/issues/67)),
-`oci-push`/`oci-pull` ([#69](https://github.com/olafkfreund/Hecate/issues/69)),
-`http` ([#70](https://github.com/olafkfreund/Hecate/issues/70)), and per-step JSON
-Schema validated at admission ([#71](https://github.com/olafkfreund/Hecate/issues/71),
+`oci-push`/`oci-pull` ([#69](https://github.com/olafkfreund/Hecate/issues/69)), and
+per-step JSON Schema validated at admission
+([#71](https://github.com/olafkfreund/Hecate/issues/71),
 [#97](https://github.com/olafkfreund/Hecate/issues/97)).
 
 **Exit:** a Gate can render, commit, push, open a PR, wait for merge, and wait for Flux.
