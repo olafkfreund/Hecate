@@ -1,0 +1,58 @@
+{{- if .Values.rbac.create }}
+{{/*
+  Rules come from ../rbac/role.yaml, which controller-gen generates from the
+  +kubebuilder:rbac markers in the controllers. Reading it here rather than
+  templating a hand-written copy means the permissions can never drift from
+  what the code actually does — and `make generate` never clobbers Helm syntax.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "hecate.fullname" . }}
+  labels: {{- include "hecate.labels" . | nindent 4 }}
+rules:
+{{- (.Files.Get "rbac/role.yaml" | fromYaml).rules | toYaml | nindent 0 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "hecate.fullname" . }}
+  labels: {{- include "hecate.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "hecate.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "hecate.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- if .Values.leaderElection }}
+---
+{{/* Leader election needs a Lease it owns, in its own namespace only. */}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "hecate.fullname" . }}-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "hecate.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "hecate.fullname" . }}-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "hecate.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "hecate.fullname" . }}-leader-election
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "hecate.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end }}

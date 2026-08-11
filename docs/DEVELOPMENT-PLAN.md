@@ -19,7 +19,8 @@ This is the *how*.
 | `pkg/passage` — execution engine and Passage controller | ✅ done |
 | `cmd/hecate-controller` — the binary | ✅ done |
 | Nix flake, k3d dev cluster, CI workflows | ✅ done |
-| Helm chart, RBAC wiring, in-cluster e2e | M1 |
+| Helm chart, RBAC, hardened deployment | ✅ done |
+| GHCR images, in-cluster e2e | M1 |
 | Step library (git, render, OCI) | M2 |
 | Providers (git hosts, registries) | M3 |
 | Fides evidence | M4 |

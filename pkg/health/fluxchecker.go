@@ -112,6 +112,14 @@ func (c FluxConfig) failAfter() (time.Duration, error) {
 	return d, nil
 }
 
+// Hecate reads Flux resources and never writes them — see D3. The one future
+// exception is the reconcile annotation in flux-reconcile (#20), which will
+// need `patch` on Kustomizations and HelmReleases, scoped narrowly and no wider.
+//
+// +kubebuilder:rbac:groups=kustomize.toolkit.fluxcd.io,resources=kustomizations,verbs=get;list;watch
+// +kubebuilder:rbac:groups=helm.toolkit.fluxcd.io,resources=helmreleases,verbs=get;list;watch
+// +kubebuilder:rbac:groups=source.toolkit.fluxcd.io,resources=gitrepositories;ocirepositories;helmcharts;helmrepositories;buckets,verbs=get;list;watch
+
 // FluxChecker assesses Flux resources.
 type FluxChecker struct {
 	client client.Client

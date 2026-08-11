@@ -1,0 +1,106 @@
+{{- if and (gt (int .Values.replicaCount) 1) (not .Values.leaderElection) }}
+{{- fail "replicaCount > 1 requires leaderElection=true, or replicas will race over the same Passages" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hecate.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "hecate.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels: {{- include "hecate.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "hecate.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}{{- toYaml . | nindent 8 }}{{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "hecate.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: controller
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --metrics-bind-address={{ if .Values.metrics.enabled }}:{{ .Values.metrics.port }}{{ else }}0{{ end }}
+            - --health-probe-bind-address=:8081
+            - --leader-elect={{ .Values.leaderElection }}
+            - --no-cross-namespace-refs={{ .Values.hecate.noCrossNamespaceRefs }}
+            - --work-root={{ .Values.hecate.workRoot }}
+            - --zap-log-level={{ .Values.hecate.logLevel }}
+            - --zap-encoder={{ .Values.hecate.logFormat }}
+          env:
+            {{- if .Values.otel.enabled }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.otel.endpoint | quote }}
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: {{ .Values.otel.protocol | quote }}
+            - name: OTEL_SERVICE_NAME
+              value: {{ .Values.otel.serviceName | quote }}
+            {{- range $k, $v := .Values.otel.extraEnv }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if .Values.fides.enabled }}
+            - name: FIDES_SERVER_URL
+              value: {{ required "fides.serverURL is required when fides.enabled" .Values.fides.serverURL | quote }}
+            {{- /* Always a Secret reference. A token in values.yaml ends up in
+                   the release object, in git, and in `helm get values`. */}}
+            - name: FIDES_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "fides.tokenSecret.name is required when fides.enabled" .Values.fides.tokenSecret.name }}
+                  key: {{ .Values.fides.tokenSecret.key }}
+            {{- end }}
+          ports:
+            {{- if .Values.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+            {{- end }}
+            - name: probes
+              containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            httpGet: { path: /healthz, port: probes }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet: { path: /readyz, port: probes }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            # The only writable path, which is what lets the root filesystem be
+            # read-only. Contents are disposable (D19).
+            - name: work
+              mountPath: {{ .Values.hecate.workRoot }}
+      volumes:
+        - name: work
+          emptyDir:
+            sizeLimit: {{ .Values.hecate.workDirSizeLimit }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints: {{- toYaml . | nindent 8 }}
+      {{- end }}

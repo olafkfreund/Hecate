@@ -1,0 +1,19 @@
+{{- if and .Values.metrics.enabled .Values.metrics.service.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "hecate.fullname" . }}-metrics
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "hecate.labels" . | nindent 4 }}
+  {{- with .Values.metrics.service.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: ClusterIP
+  selector: {{- include "hecate.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ .Values.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+{{- end }}

@@ -111,6 +111,7 @@ pkg/gate/             Eligibility, promotion windows, Gate controller.
 pkg/health/           Checker interface, registry, and the Flux checker.
 pkg/passage/          Step interface, registry, execution engine, Passage controller.
 pkg/passage/steps/    Built-in steps.
+charts/hecate/        Helm chart. CRDs and RBAC are generated, never hand-edited.
 charts/hecate/crds/   Generated CRDs.
 ```
 
@@ -165,6 +166,7 @@ nix develop          # or: direnv allow
 
 make test            # 97 tests, ~1s, no cluster
 make cluster         # k3d in Docker, with Flux installed
+make install         # build, push and install the chart into the dev cluster
 make e2e             # drive a Bundle through two Gates on a real API server
 make generate        # regenerate CRDs and RBAC after touching api/
 make check           # what CI enforces

@@ -109,9 +109,13 @@ has drifted, because a stale CRD silently rejects fields the code sets.
 To run the controller against your dev cluster:
 
 ```console
-$ make cluster-load  # build the image, push to the local registry
-$ make run           # or run it out-of-cluster against KUBECONFIG
+$ make install    # build the image, push to the local registry, install the chart
+$ make uninstall  # remove it again; CRDs are left alone
+$ make run        # or run it out-of-cluster against KUBECONFIG, for a debugger
 ```
+
+`make run` is the faster loop while iterating on controller logic; `make install`
+is how you check the packaging, the RBAC and the hardened pod actually work.
 
 ## 6. Secrets
 
@@ -171,6 +175,11 @@ If you invoked make from outside it: `export KUBECONFIG=$PWD/.dev/kubeconfig`.
 
 **CI fails on "Generated files are current".** You changed `api/` or a
 kubebuilder marker without running `make generate`. Run it and commit the diff.
+
+**`helm install` fails with a CRD conflict.** Something applied the CRDs
+client-side first. `make cluster` uses server-side apply for exactly this
+reason; if you applied them by hand, repeat it with
+`kubectl apply --server-side --force-conflicts`.
 
 **`nix build` fails on a vendor hash mismatch.** A dependency changed. Nix
 prints the correct hash — put it in `flake.nix` as `vendorHash`.

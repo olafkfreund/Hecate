@@ -1,0 +1,19 @@
+Hecate {{ .Chart.AppVersion }} is installed in {{ .Release.Namespace }}.
+
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "hecate.fullname" . }}
+  kubectl get beacons,bundles,gates,passages -A
+
+Cross-namespace references are {{ if .Values.hecate.noCrossNamespaceRefs }}REFUSED{{ else }}ALLOWED{{ end }}.
+{{- if not .Values.hecate.noCrossNamespaceRefs }}
+
+  WARNING: a Gate can watch resources in any namespace. On a multi-tenant
+  cluster this lets one team observe another's workloads. See D11.
+{{- end }}
+{{- if not .Values.fides.enabled }}
+
+Evidence gating is off. Hecate is fully usable without it; enable `fides` to
+gate crossings on change-gate verdicts.
+{{- end }}
+
+Next: define a Beacon and a Gate. See
+https://github.com/olafkfreund/Hecate/blob/main/examples/podinfo-pipeline.yaml

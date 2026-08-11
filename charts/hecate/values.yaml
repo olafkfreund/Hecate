@@ -1,0 +1,100 @@
+# Hecate — promotion and release orchestration for FluxCD.
+
+image:
+  repository: ghcr.io/olafkfreund/hecate-controller
+  # Defaults to the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# More than one replica needs leaderElection, or they will fight over the same
+# Passages. The chart enforces that rather than trusting the combination.
+replicaCount: 1
+leaderElection: false
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  # Where cloud identity is wired in: IRSA, Workload Identity, Managed Identity.
+  # Registry credentials then need no Secret at all.
+  annotations: {}
+
+rbac:
+  # Hecate reads Flux resources and never writes them (D3). Disable only if you
+  # manage the ClusterRole yourself.
+  create: true
+
+hecate:
+  # Refuse a Gate watching resources outside its own namespace. Matches the
+  # posture Flux ships on its own controllers (D11). Set false only on a
+  # single-tenant cluster, and know what you are turning off.
+  noCrossNamespaceRefs: true
+
+  # Scratch space for Passage steps. Disposable by design: steps must tolerate
+  # it being empty on any invocation (D19), so an emptyDir is sufficient and a
+  # PersistentVolume would be machinery for nothing.
+  workRoot: /var/lib/hecate/passages
+  workDirSizeLimit: 1Gi
+
+  logLevel: info
+  # json in production; console is only readable during development.
+  logFormat: json
+
+metrics:
+  enabled: true
+  port: 8080
+  service:
+    enabled: true
+    annotations: {}
+
+# OpenTelemetry. Standard OTEL_* variables, so this drops into an existing
+# collector with no Hecate-specific configuration. Tracing lands in M5.
+otel:
+  enabled: false
+  endpoint: ""            # e.g. http://otel-collector.observability:4317
+  protocol: grpc
+  serviceName: hecate
+  extraEnv: {}
+
+# Fides evidence gating. Lands in M4; the wiring is here so credentials are
+# never inline — only ever a Secret reference.
+fides:
+  enabled: false
+  serverURL: ""
+  # Secret holding an API token under `token`. Never put the token in values.
+  tokenSecret:
+    name: ""
+    key: token
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+priorityClassName: ""
+
+# Hardened by default. The controller needs no privileges, no root and no
+# writable root filesystem — the only writable path is the scratch emptyDir.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]

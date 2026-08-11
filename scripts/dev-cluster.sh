@@ -56,7 +56,9 @@ up() {
   fi
 
   log "installing Hecate CRDs"
-  kubectl apply -f charts/hecate/crds/ >/dev/null
+  # Server-side apply: a later `helm install` also applies these, and
+  # client-side apply leaves field ownership that Helm then conflicts with.
+  kubectl apply --server-side --force-conflicts -f charts/hecate/crds/ >/dev/null
 
   cat <<EOF
 

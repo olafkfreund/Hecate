@@ -8,7 +8,7 @@ CONTROLLER_GEN ?= controller-gen
 CHART_DIR      := charts/hecate
 
 .DEFAULT_GOAL := help
-.PHONY: help test vet fmt lint check generate build run cluster cluster-rm cluster-load e2e secrets-edit secrets-rekey clean
+.PHONY: help test vet fmt lint check generate build run cluster cluster-rm cluster-load install uninstall e2e secrets-edit secrets-rekey clean
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -38,7 +38,7 @@ generate: ## Regenerate deepcopy, CRDs and RBAC from the API and controller mark
 	$(CONTROLLER_GEN) \
 		object:headerFile=/dev/null paths=./api/... \
 		crd output:crd:dir=$(CHART_DIR)/crds \
-		rbac:roleName=hecate-controller output:rbac:dir=$(CHART_DIR)/templates \
+		rbac:roleName=hecate-controller output:rbac:dir=$(CHART_DIR)/rbac \
 		paths=./pkg/...
 
 build: ## Build the controller binary
@@ -57,6 +57,16 @@ cluster-rm: ## Delete the k3d dev cluster
 
 cluster-load: ## Build the controller image and push it to the cluster registry
 	./scripts/dev-cluster.sh load
+
+install: cluster-load ## Build, push and install the chart into the dev cluster
+	helm upgrade --install hecate $(CHART_DIR) \
+		--namespace hecate-system --create-namespace \
+		--set image.repository=hecate-registry:5001/hecate-controller \
+		--set image.tag=dev --set image.pullPolicy=Always \
+		--wait --timeout 3m
+
+uninstall: ## Remove the chart from the dev cluster (CRDs are left alone)
+	helm uninstall hecate --namespace hecate-system || true
 
 e2e: ## Run the end-to-end suite against the dev cluster
 	@./scripts/dev-cluster.sh status >/dev/null || { echo "no dev cluster — run 'make cluster'"; exit 1; }
