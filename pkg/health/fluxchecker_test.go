@@ -3,6 +3,7 @@ package health
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -208,4 +209,67 @@ func TestRegistryRejectsDuplicates(t *testing.T) {
 	if err := reg.Register(NewFluxChecker(cl)); err == nil {
 		t.Error("registering a duplicate name should fail, not silently overwrite")
 	}
+}
+
+// Flux tells integrating controllers to adopt cross-namespace restriction, and
+// ships --no-cross-namespace-refs=true on five of its own controllers. Left
+// open, one team's Gate can watch another team's Kustomization.
+func TestCrossNamespaceRefsAreRefusedByDefault(t *testing.T) {
+	cl := fake.NewClientBuilder().
+		WithScheme(newScheme(ksGVK)).
+		WithObjects(kustomization("podinfo", "other-team", true, "main@sha1:abc")).
+		Build()
+
+	cfg := FluxConfig{Resources: []FluxResource{
+		{Kind: "Kustomization", Name: "podinfo", Namespace: "other-team"},
+	}}
+
+	t.Run("refused, and the resource is never read", func(t *testing.T) {
+		report := NewFluxChecker(cl).Check(context.Background(), Request{
+			Namespace: "acme", Gate: "production", Config: cfgJSON(t, cfg),
+		})
+		if report.Status != v1alpha1.HealthUnknown {
+			t.Fatalf("status = %s, want Unknown", report.Status)
+		}
+		// The message has to name the escape hatch, or the refusal is a puzzle.
+		joined := strings.Join(report.Issues, " ")
+		if !strings.Contains(joined, "cross-namespace") || !strings.Contains(joined, "no-cross-namespace-refs") {
+			t.Errorf("issues = %v, want an explanation naming the flag", report.Issues)
+		}
+		// Healthy would mean we read another tenant's resource.
+		if report.Status == v1alpha1.HealthHealthy {
+			t.Error("a cross-namespace resource was actually read")
+		}
+	})
+
+	t.Run("allowed when the operator opts in", func(t *testing.T) {
+		report := NewFluxChecker(cl).AllowingCrossNamespace(true).
+			Check(context.Background(), Request{
+				Namespace: "acme", Gate: "production", Config: cfgJSON(t, cfg),
+			})
+		if report.Status != v1alpha1.HealthHealthy {
+			t.Fatalf("status = %s, want Healthy once opted in (issues: %v)", report.Status, report.Issues)
+		}
+	})
+
+	t.Run("the Gate's own namespace is always fine, written out or omitted", func(t *testing.T) {
+		checker := NewFluxChecker(fake.NewClientBuilder().
+			WithScheme(newScheme(ksGVK)).
+			WithObjects(kustomization("podinfo", "acme", true, "main@sha1:abc")).
+			Build())
+
+		for name, ns := range map[string]string{"explicit": "acme", "omitted": ""} {
+			t.Run(name, func(t *testing.T) {
+				report := checker.Check(context.Background(), Request{
+					Namespace: "acme",
+					Config: cfgJSON(t, FluxConfig{Resources: []FluxResource{
+						{Kind: "Kustomization", Name: "podinfo", Namespace: ns},
+					}}),
+				})
+				if report.Status != v1alpha1.HealthHealthy {
+					t.Errorf("status = %s, want Healthy (issues: %v)", report.Status, report.Issues)
+				}
+			})
+		}
+	})
 }

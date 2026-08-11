@@ -73,7 +73,10 @@ func (r FluxResource) gvk() (schema.GroupVersionKind, error) {
 }
 
 // Validate checks the config is usable before anything is queried.
-func (c FluxConfig) Validate() error {
+//
+// gateNamespace is the namespace of the Gate this config belongs to.
+// allowCrossNamespace relaxes the tenant boundary; see D11.
+func (c FluxConfig) Validate(gateNamespace string, allowCrossNamespace bool) error {
 	if len(c.Resources) == 0 {
 		return fmt.Errorf("at least one resource is required")
 	}
@@ -83,6 +86,15 @@ func (c FluxConfig) Validate() error {
 		}
 		if _, err := r.gvk(); err != nil {
 			return fmt.Errorf("resources[%d]: %w", i, err)
+		}
+		if !allowCrossNamespace && r.Namespace != "" && r.Namespace != gateNamespace {
+			// Refused, not defaulted-away: silently rewriting the namespace
+			// would watch something the author did not ask for.
+			return fmt.Errorf(
+				"resources[%d]: namespace %q is not %q — cross-namespace references are "+
+					"refused by default, matching Flux's own --no-cross-namespace-refs. "+
+					"Start the controller with --no-cross-namespace-refs=false to allow them",
+				i, r.Namespace, gateNamespace)
 		}
 	}
 	_, err := c.failAfter()
@@ -103,10 +115,25 @@ func (c FluxConfig) failAfter() (time.Duration, error) {
 // FluxChecker assesses Flux resources.
 type FluxChecker struct {
 	client client.Client
+	// AllowCrossNamespace permits a Gate to watch resources outside its own
+	// namespace. False by default, matching the posture Flux ships on five of
+	// its own controllers and asks integrating controllers to adopt.
+	//
+	// Left open, one team's Gate can watch another team's Kustomization — a
+	// tenant-isolation hole, and a channel for inferring what other teams run.
+	AllowCrossNamespace bool
 }
 
-// NewFluxChecker returns a Checker backed by the given cluster client.
+// NewFluxChecker returns a Checker backed by the given cluster client, refusing
+// cross-namespace references.
 func NewFluxChecker(c client.Client) *FluxChecker { return &FluxChecker{client: c} }
+
+// AllowingCrossNamespace returns a checker that permits references outside the
+// Gate's namespace. For single-tenant clusters that genuinely want it.
+func (f *FluxChecker) AllowingCrossNamespace(allow bool) *FluxChecker {
+	f.AllowCrossNamespace = allow
+	return f
+}
 
 // Name implements Checker.
 func (f *FluxChecker) Name() string { return CheckerFlux }
@@ -117,7 +144,7 @@ func (f *FluxChecker) Check(ctx context.Context, req Request) v1alpha1.HealthRep
 	if err != nil {
 		return Unknown("flux health check: %s", err)
 	}
-	if err := cfg.Validate(); err != nil {
+	if err := cfg.Validate(req.Namespace, f.AllowCrossNamespace); err != nil {
 		return Unknown("flux health check: %s", err)
 	}
 

@@ -45,6 +45,7 @@ rules:
   - bundles
   verbs:
   - create
+  - delete
   - get
   - list
   - watch

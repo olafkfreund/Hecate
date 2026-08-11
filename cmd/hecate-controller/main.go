@@ -34,6 +34,7 @@ type options struct {
 	leaderElect bool
 	leaderID    string
 	workRoot    string
+	noCrossNS   bool
 	showVersion bool
 }
 
@@ -56,6 +57,9 @@ func run() error {
 		"Name of the resource used for leader election.")
 	flag.StringVar(&opts.workRoot, "work-root", filepath.Join(os.TempDir(), "hecate-passages"),
 		"Base directory for Passage scratch space. Contents are disposable; steps must tolerate it being empty.")
+	flag.BoolVar(&opts.noCrossNS, "no-cross-namespace-refs", true,
+		"Refuse a Gate watching resources outside its own namespace. Matches Flux's own "+
+			"posture; set false only on a single-tenant cluster.")
 	flag.BoolVar(&opts.showVersion, "version", false, "Print the version and exit.")
 
 	zapOpts := zap.Options{Development: false}
@@ -92,7 +96,8 @@ func run() error {
 	// One Flux checker, used in two places: the health registry assesses Gates
 	// with it, and the flux-wait step reuses it so a Passage waits on exactly
 	// what the Gate will go on to watch.
-	fluxChecker := health.NewFluxChecker(mgr.GetClient())
+	fluxChecker := health.NewFluxChecker(mgr.GetClient()).
+		AllowingCrossNamespace(!opts.noCrossNS)
 
 	checkers := health.NewRegistry()
 	checkers.MustRegister(fluxChecker)
@@ -133,7 +138,8 @@ func run() error {
 		"version", version,
 		"checkers", checkers.Names(),
 		"steps", stepRunners.Names(),
-		"workRoot", opts.workRoot)
+		"workRoot", opts.workRoot,
+		"crossNamespaceRefs", map[bool]string{true: "refused", false: "allowed"}[opts.noCrossNS])
 
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		return fmt.Errorf("running manager: %w", err)

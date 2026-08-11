@@ -44,6 +44,20 @@ type BeaconSpec struct {
 	// +kubebuilder:default=Automatic
 	// +optional
 	Emit EmitPolicy `json:"emit,omitempty"`
+	// Retain bounds how many *unreferenced* Bundles from this Beacon are kept.
+	//
+	// A Beacon polling every couple of minutes emits indefinitely; unbounded,
+	// that is etcd growth with no ceiling and a `kubectl get bundles` nobody can
+	// read. Zero disables collection entirely.
+	//
+	// Bundles in use are never collected regardless of this value — see the
+	// safety rule in D13. The long-term record belongs in the evidence store,
+	// not in etcd.
+	//
+	// +kubebuilder:default=10
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	Retain *int32 `json:"retain,omitempty"`
 	// Suspend stops this Beacon from discovering anything new, without
 	// deleting it. Existing Bundles are unaffected.
 	//

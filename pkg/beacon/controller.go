@@ -48,7 +48,8 @@ func (r *Reconciler) now() time.Time {
 
 // +kubebuilder:rbac:groups=hecate.dev,resources=beacons,verbs=get;list;watch
 // +kubebuilder:rbac:groups=hecate.dev,resources=beacons/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=hecate.dev,resources=bundles,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups=hecate.dev,resources=bundles,verbs=get;list;watch;create;delete
+// +kubebuilder:rbac:groups=hecate.dev,resources=gates;passages,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
@@ -111,6 +112,16 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		}
 		r.setReady(&beacon, metav1.ConditionTrue, "Discovered",
 			fmt.Sprintf("resolved %d source(s); latest Bundle is %s", len(artifacts), name))
+	}
+
+	// Collect after emitting, so the Bundle we may have just created is counted
+	// among the ones we keep rather than treated as a candidate.
+	if deleted, err := r.collect(ctx, &beacon); err != nil {
+		// Collection failing must not stop discovery: a Beacon that cannot tidy
+		// up should still be finding artifacts.
+		logger.Error(err, "collecting old Bundles")
+	} else if deleted > 0 {
+		logger.Info("collected unreferenced Bundles", "count", deleted)
 	}
 
 	if err := r.updateStatus(ctx, &beacon); err != nil {

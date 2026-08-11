@@ -39,8 +39,9 @@ func (f *FluxWait) Run(ctx context.Context, sc *passage.StepContext) (passage.St
 	if err != nil {
 		return passage.StepResult{}, passage.Terminalf("%s: %s", StepFluxWait, err)
 	}
-	if err := cfg.Validate(); err != nil {
-		// Bad configuration will not become good by waiting.
+	if err := cfg.Validate(sc.Namespace, f.checker.AllowCrossNamespace); err != nil {
+		// Bad configuration will not become good by waiting. That includes a
+		// cross-namespace reference: it is refused, not retried.
 		return passage.StepResult{}, passage.Terminalf("%s: %s", StepFluxWait, err)
 	}
 
