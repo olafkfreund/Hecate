@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/registry"
@@ -188,5 +189,54 @@ func TestKeychainMissingSecretIsReported(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "absent") {
 		t.Errorf("a missing credentials Secret must be reported by name, got: %v", err)
+	}
+}
+
+// #109: a deployed Beacon must be able to watch a plain-HTTP registry — an
+// air-gapped or internal one, or the k3d dev registry. The field, the CRD and
+// this wiring all existed; nothing defended them, so dropping the option would
+// have broken only the in-cluster e2e, and only by falling back to the network.
+//
+// This asserts the resolver *passes the field through*. pkg/registry asserts
+// what the option then does. Neither test alone is enough: a resolver that hard
+// coded false would pass the first, and one that passed the wrong option would
+// pass the second.
+//
+// A named host is unavoidable here — loopback is http either way (see
+// TestInsecureIsOptIn), so the in-memory registry every other test in this file
+// uses cannot tell the two apart. `.test` is reserved by RFC 6761 and must not
+// be forwarded by a resolver, so this stays offline; the deadline is in case
+// someone's resolver hijacks it anyway.
+func TestInsecureReachesTheRegistry(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		insecure bool
+		wantHTTP bool
+	}{
+		{"plain HTTP is not attempted unless asked for", false, false},
+		{"insecure falls back to plain HTTP", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			_, err := (&Resolver{}).Resolve(ctx, "acme", v1alpha1.WatchSource{
+				Image: &v1alpha1.ImageWatch{
+					Repo: "reg.invalid.test:5000/acme/api", Insecure: tc.insecure,
+				},
+			})
+			if err == nil {
+				t.Fatal("a watch on an unresolvable host reported success")
+			}
+
+			// Note what this shows: insecure means https *then* http, not http
+			// only. Turning it on does not downgrade a registry whose TLS works.
+			if got := strings.Contains(err.Error(), "http://"); got != tc.wantHTTP {
+				t.Errorf("attempted plain HTTP = %v, want %v: %v", got, tc.wantHTTP, err)
+			}
+			if !strings.Contains(err.Error(), "https://") {
+				t.Errorf("TLS was not tried first: %v", err)
+			}
+		})
 	}
 }

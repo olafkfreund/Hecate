@@ -81,11 +81,36 @@ func TestStripScheme(t *testing.T) {
 
 // One implementation, one answer: a Beacon resolving a tag and a step pushing an
 // artifact must not disagree about which credentials apply.
+//
+// Asserted on the resulting scheme rather than on the number of options, which
+// is what this used to check: a count passes just as happily if NameOptions
+// returns the wrong option, and the thing worth defending is the effect.
+//
+// A *named* host, because that is the only case that discriminates. Loopback
+// resolves to http whether or not the option is set — go-containerregistry
+// treats it as insecure on its own — so a test using an httptest server would
+// pass with the option wired to nothing at all.
 func TestInsecureIsOptIn(t *testing.T) {
-	if len(NameOptions(false)) != 0 {
-		t.Error("a plain registry was allowed without being asked for — that would send credentials in clear")
-	}
-	if len(NameOptions(true)) != 1 {
-		t.Error("insecure was requested and not applied")
+	for _, tc := range []struct {
+		host, secure, insecure string
+	}{
+		{"reg.internal:5000", "https", "http"},
+		{"ghcr.io", "https", "http"},
+		// Recorded rather than required: loopback cannot tell the two apart, and
+		// anyone writing the obvious test needs to find that out here.
+		{"127.0.0.1:5000", "http", "http"},
+		{"localhost:5000", "http", "http"},
+	} {
+		t.Run(tc.host, func(t *testing.T) {
+			for insecure, want := range map[bool]string{false: tc.secure, true: tc.insecure} {
+				repo, err := name.NewRepository(tc.host+"/acme/api", NameOptions(insecure)...)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := repo.Scheme(); got != want {
+					t.Errorf("insecure=%v: scheme = %s, want %s", insecure, got, want)
+				}
+			}
+		})
 	}
 }
