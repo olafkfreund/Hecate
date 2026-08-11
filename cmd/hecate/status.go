@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/olafkfreund/hecate/api/v1alpha1"
+	"github.com/olafkfreund/hecate/pkg/llm"
 	"github.com/olafkfreund/hecate/pkg/ops"
 )
 
@@ -115,6 +116,7 @@ func explain(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("explain", flag.ContinueOnError)
 	namespace := namespaceFlag(fs)
 	asJSON := fs.Bool("json", false, "emit JSON")
+	withAI := fs.Bool("ai", false, "add a natural-language summary from the configured model")
 	fs.Usage = usage
 	rest, err := parseArgs(fs, args)
 	if err != nil {
@@ -154,6 +156,13 @@ func explain(ctx context.Context, args []string) int {
 	for _, w := range ex.Waiting {
 		fmt.Printf("  waiting:  %s — %s\n", w.Bundle, w.Reason)
 	}
+
+	// Last, after the facts. The deterministic explanation above is the
+	// product; this is an assist and is never required — with no model
+	// configured everything above is unchanged and the flag says so.
+	if *withAI {
+		printDiagnosis(ctx, ex)
+	}
 	return exitOK
 }
 
@@ -180,4 +189,40 @@ func dash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+// printDiagnosis appends a model's phrasing of the explanation.
+//
+// Every failure here is reported and swallowed: a model that is unreachable,
+// slow or wrong must not turn a working `hecate explain` into a broken one.
+// The facts are already on screen above.
+func printDiagnosis(ctx context.Context, ex *ops.Explanation) {
+	cfg := llm.FromEnv()
+	if !cfg.Configured() {
+		fmt.Fprintln(os.Stderr,
+			"\nno model configured — set HECATE_LLM_URL and HECATE_LLM_MODEL "+
+				"(for example http://localhost:11434/v1 and llama3.2)")
+		return
+	}
+	client, err := llm.New(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "\n%s\n", err)
+		return
+	}
+
+	answer, err := llm.Diagnose(ctx, client, ex)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "\nthe model could not be reached: %s\n", err)
+		return
+	}
+	// Attributed, because a reader should know which sentences a model wrote.
+	fmt.Printf("\n%s says:\n%s\n", client.Model(), indent(answer))
+}
+
+func indent(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	for i := range lines {
+		lines[i] = "  " + lines[i]
+	}
+	return strings.Join(lines, "\n")
 }

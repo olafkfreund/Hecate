@@ -19,6 +19,7 @@ This is the *how*.
 | `evidence-gate` — all four Fides gates | ✅ done |
 | `pkg/ops` — the operations layer every surface sits on | ✅ done |
 | `hecate-mcp` — MCP server, read tools, gated writes, both protocol eras | ✅ done |
+| `pkg/llm` — OpenAI-compatible client, fenced untrusted input | ✅ done |
 | `pkg/beacon` — discovery, image resolution, Beacon controller | ✅ done |
 | `pkg/gate` — eligibility, promotion windows, Gate controller | ✅ done |
 | `pkg/passage` — execution engine and Passage controller | ✅ done |
@@ -35,7 +36,7 @@ This is the *how*.
 | API server | M7 |
 | UI | M8 |
 
-270 tests, no cluster required, ~1s.
+285 tests, no cluster required, ~1s.
 
 ## 2. Technology
 

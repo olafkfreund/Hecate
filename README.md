@@ -123,6 +123,28 @@ there is no flag for it: approval is a segregation-of-duties control, and an
 agent that could satisfy it would leave the control in every audit trail having
 stopped meaning anything ([D34](docs/DECISIONS.md)).
 
+### Diagnosis, optionally with a model
+
+```console
+$ export HECATE_LLM_URL=http://localhost:11434/v1 HECATE_LLM_MODEL=llama3.2
+$ hecate explain production --ai
+production is Blocked
+1 Bundle cannot cross: awaiting approval
+
+  [AwaitingApproval] awaiting approval
+      → hecate approve podinfo-6b2
+
+llama3.2 says:
+  The production gate is blocked: podinfo-6b2 is waiting for approval.
+  Run `hecate approve podinfo-6b2` to let it through.
+```
+
+Any OpenAI-compatible endpoint — Ollama, llama.cpp, vLLM, or a hosted vendor —
+because they all speak the same API. **The model phrases the diagnosis; it never
+makes it.** It is handed the analysis Hecate already did, everything works
+identically without one, and nothing it says affects a promotion
+([D35](docs/DECISIONS.md)).
+
 ### Compliance as a gate, not a report
 
 A Gate can refuse a crossing on evidence. All four of
@@ -250,7 +272,7 @@ ok  github.com/olafkfreund/hecate/pkg/passage
 ok  github.com/olafkfreund/hecate/pkg/passage/steps
 ```
 
-270 tests, no cluster required, ~1s. That is the bar: anything testable without a
+285 tests, no cluster required, ~1s. That is the bar: anything testable without a
 cluster must be. Image resolution is tested against a real in-memory registry rather
 than a mock.
 
@@ -262,7 +284,7 @@ controller-gen — at the versions CI uses.
 ```bash
 nix develop          # or: direnv allow
 
-make test            # 270 tests, ~1s, no cluster
+make test            # 285 tests, ~1s, no cluster
 make cluster         # k3d in Docker, with Flux installed
 make install         # build, push and install the chart into the dev cluster
 make e2e             # drive a Bundle through two Gates on a real API server

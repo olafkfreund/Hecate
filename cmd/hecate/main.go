@@ -81,7 +81,13 @@ Usage:
 Common flags:
   -namespace      namespace to work in  (default: the kubeconfig's)
   -json           emit JSON             (status, explain)
+  -ai             add a model's summary (explain)
   -actor          who to record         (default: the current user)
+
+Model (optional; explain -ai only). Everything works without one:
+  HECATE_LLM_URL    OpenAI-compatible base URL, e.g. http://localhost:11434/v1
+  HECATE_LLM_MODEL  model name, e.g. llama3.2
+  HECATE_LLM_API_KEY  only if the endpoint wants one
 
 Fides connection (verify only):
   -server         Fides server URL      (or $FIDES_SERVER_URL)

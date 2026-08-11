@@ -60,6 +60,12 @@ flake-hash-check: ## Fail if flake.nix's vendorHash is stale
 	@# hash validates against a leftover build and only fails in CI.
 	@computed=$$($(MAKE) --no-print-directory flake-hash 2>/dev/null | grep -o 'sha256-[^"]*'); \
 	 declared=$$(grep -o 'sha256-[^"]*' flake.nix); \
+	 if [ -z "$$computed" ]; then \
+	   echo "could not compute the vendorHash."; \
+	   echo "Most likely a new file is untracked: a flake only sees what git does."; \
+	   echo "Try 'git add -A' and run again."; \
+	   exit 1; \
+	 fi; \
 	 if [ "$$computed" != "$$declared" ]; then \
 	   echo "flake.nix vendorHash is stale."; \
 	   echo "  declared: $$declared"; \
