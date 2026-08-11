@@ -20,7 +20,7 @@ This is the *how*.
 | `cmd/hecate-controller` — the binary | ✅ done |
 | Nix flake, k3d dev cluster, CI workflows | ✅ done |
 | Helm chart, RBAC, hardened deployment | ✅ done |
-| GHCR images, in-cluster e2e | M1 |
+| GHCR images, release pipeline, in-cluster e2e | ✅ done |
 | Step library (git, render, OCI) | M2 |
 | Providers (git hosts, registries) | M3 |
 | Fides evidence | M4 |
@@ -61,7 +61,7 @@ Each maps to a GitHub Epic.
 ### M0 — Foundations ✅
 API, status evaluation, health framework, step engine, first step.
 
-### M1 — Control plane
+### M1 — Control plane ✅
 Controllers for all four kinds: Beacon discovers and emits Bundles; Gate computes
 eligibility and health; Passage runs the engine. Helm chart, RBAC, GHCR images.
 
@@ -239,7 +239,12 @@ status output — and are not a substitute for unit tests.
 ## 9. Release
 
 - SemVer; `v0.x` until the CRD contract is stable.
-- Images to GHCR, chart to an OCI registry.
+- **Cutting a release:** bump `version` in `flake.nix`, then `git tag vX.Y.Z && git push --tags`.
+  The tag is the source of truth; the chart takes its version from a `helm package`
+  flag, and the pipeline fails if `flake.nix` disagrees with the tag.
+- `workflow_dispatch` on the release workflow runs everything except publishing,
+  for exercising it before committing to a version that cannot be unpublished.
+- Images to GHCR, chart to the same registry as an OCI artifact.
 - Signed with cosign, SBOM attached, and **each release's provenance recorded in
   Fides**. If we will not gate our own releases with it, we should not ask anyone else
   to.
