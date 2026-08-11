@@ -1,0 +1,54 @@
+name: E2E
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Nightly, so upstream Flux releases surface here rather than in an issue.
+    - cron: '0 3 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  crossing:
+    name: Crossing on k3d (Flux ${{ matrix.flux }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The three minors Flux itself supports. A Flux release that breaks us
+        # fails a build rather than a user's cluster — see #90.
+        flux: ['2.7', '2.8', '2.9']
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: nolar/setup-k3d-k3s@v1
+        with:
+          version: v1.31
+          k3d-name: hecate-dev
+
+      - name: Install Flux ${{ matrix.flux }}
+        run: |
+          curl -s https://fluxcd.io/install.sh | sudo bash
+          flux install --version="v${{ matrix.flux }}" \
+            --components-extra=image-reflector-controller,image-automation-controller
+          kubectl -n flux-system wait --for=condition=Available deploy --all --timeout=5m
+
+      - name: Install Hecate CRDs
+        run: kubectl apply -f charts/hecate/crds/
+
+      - name: Run e2e
+        run: go test -tags e2e -count=1 -timeout 20m ./test/e2e/...
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl get beacons,bundles,gates,passages -A -o wide || true
+          kubectl -n flux-system get all || true
+          kubectl get events -A --sort-by=.lastTimestamp | tail -50 || true

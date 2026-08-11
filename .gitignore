@@ -5,3 +5,10 @@ coverage.out
 .env
 node_modules/
 .next/
+
+# local dev cluster state
+.dev/
+bin/
+result
+result-*
+.direnv/

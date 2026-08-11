@@ -1,0 +1,33 @@
+name: Nix
+
+on:
+  push:
+    branches: [main]
+    paths: ['flake.nix', 'flake.lock', '**.nix', 'go.mod', 'go.sum', '**.go']
+  pull_request:
+    paths: ['flake.nix', 'flake.lock', '**.nix', 'go.mod', 'go.sum', '**.go']
+
+permissions:
+  contents: read
+
+jobs:
+  flake:
+    name: Flake check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      # Catches the failure mode that bites hardest: vendorHash going stale
+      # after a dependency change, which nobody notices until a release.
+      - name: nix flake check
+        run: nix flake check --print-build-logs
+
+      - name: nix build
+        run: nix build .#default --print-build-logs
+
+      - name: Dev shell evaluates
+        run: nix develop --command go version

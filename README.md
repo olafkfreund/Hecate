@@ -14,7 +14,8 @@
 [Architecture](docs/ARCHITECTURE.md) ·
 [Product plan](docs/PRODUCT-PLAN.md) ·
 [Development plan](docs/DEVELOPMENT-PLAN.md) ·
-[Decisions](docs/DECISIONS.md)
+[Decisions](docs/DECISIONS.md) ·
+[Onboarding](docs/ONBOARDING.md)
 
 </div>
 
@@ -156,15 +157,23 @@ than a mock.
 
 ## Development
 
-```bash
-go test ./...
-go vet ./...
+Everything is pinned in `flake.nix` — Go, kubectl, Helm, k3d, the Flux CLI,
+controller-gen — at the versions CI uses.
 
-# regenerate deepcopy functions and CRDs after changing api/
-go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.19.0 \
-  object:headerFile=/dev/null paths=./api/... \
-  crd output:crd:dir=charts/hecate/crds
+```bash
+nix develop          # or: direnv allow
+
+make test            # 97 tests, ~1s, no cluster
+make cluster         # k3d in Docker, with Flux installed
+make e2e             # drive a Bundle through two Gates on a real API server
+make generate        # regenerate CRDs and RBAC after touching api/
+make check           # what CI enforces
 ```
+
+`make cluster` pins `KUBECONFIG` to `./.dev/kubeconfig`, so a stray `kubectl
+delete` during development can never reach a real cluster.
+
+Full setup, including agenix secrets: **[docs/ONBOARDING.md](docs/ONBOARDING.md)**.
 
 ## Contributing
 
