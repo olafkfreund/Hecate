@@ -714,3 +714,43 @@ evidence that already exists, so waiting will not lower it.
 blocking every promotion in the fleet whenever the compliance system restarts is
 its own outage. A rejected *token* is terminal — that will not start working on
 its own.
+
+## D31 — A Gate's steps are checked by the controller, not by a webhook
+
+**Decision:** the Gate controller validates `spec.passage.steps` on every
+reconcile. A Gate whose steps are wrong reports `Ready=False` with
+`InvalidSteps`, emits an event, and opens no Passage. There is no validating
+admission webhook.
+
+The requirement was that a typo be caught when the Gate is applied rather than
+part-way through a production crossing. A webhook is the literal reading — it
+makes `kubectl apply` fail — and it was not worth its price. A webhook needs a
+serving certificate and its rotation, a `CABundle` kept in sync, and a
+`failurePolicy` decision where both answers are bad: `Fail` means Hecate being
+down stops anyone editing a Gate, and `Ignore` means the validation silently
+does not happen exactly when the cluster is already unhealthy.
+
+The controller path costs none of that and buys nearly all of the value. The
+Gate is marked invalid within a reconcile of being applied, `kubectl describe`
+names the step and the field, and — the part that actually matters — **no
+Passage is ever created**, so the failure cannot be discovered half-way through
+a crossing with a commit already pushed. What is lost is that `kubectl apply`
+still returns success.
+
+**Every problem is reported, not the first.** A Gate is edited as a unit, and
+one error per apply turns a single bad edit into several rounds.
+
+**Unknown fields are refused** (`DisallowUnknownFields`). The default is silent:
+`mesage:` decodes cleanly into an empty struct, and the step then complains that
+the message is missing — pointing at the field that is present rather than the
+one that is misspelt. This is the single change that catches most of what #97
+was about, and it caught a mistake in Hecate's own test suite the moment it
+landed: a test was passing a `git-commit` config to `git-push`.
+
+**Checks that need a cluster are not made.** Whether a Kustomization exists is
+left to execution: a Gate may legitimately be applied before the resources it
+will wait for. A check that guesses is worse than one that waits.
+
+**An expression is not a malformed value.** `${{ vars.endpoint }}` cannot be
+judged before the Passage runs, and refusing it would ban the interpolation the
+engine exists to provide.

@@ -8,11 +8,13 @@
 package passage
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -60,11 +62,25 @@ type StepContext struct {
 
 // DecodeConfig unmarshals a step's config into a typed struct.
 func DecodeConfig[T any](sc *StepContext) (T, error) {
+	return CheckConfig[T](sc.Config)
+}
+
+// CheckConfig decodes a `with:` block strictly, and is how a step validates one
+// without running.
+//
+// Strict because the default is silent: json.Unmarshal drops fields it does not
+// recognise, so `mesage:` for `message:` decodes cleanly into an empty struct
+// and the step fails later complaining the message is missing — pointing at the
+// field that is there rather than the one that is misspelt. Refusing the unknown
+// field names the actual mistake.
+func CheckConfig[T any](raw json.RawMessage) (T, error) {
 	var cfg T
-	if len(sc.Config) == 0 {
+	if len(raw) == 0 {
 		return cfg, nil
 	}
-	if err := json.Unmarshal(sc.Config, &cfg); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&cfg); err != nil {
 		return cfg, fmt.Errorf("invalid configuration: %w", err)
 	}
 	return cfg, nil
@@ -205,6 +221,81 @@ func (r *Registry) Get(name string) (Runner, bool) {
 }
 
 // Names lists the registered steps, sorted.
+// ConfigChecker is implemented by a step that can judge its `with:` block
+// without running.
+//
+// Optional: a step that does not implement it is simply not checked, which is
+// better than a registry that refuses to hold steps nobody has got to yet.
+type ConfigChecker interface {
+	CheckConfig(raw json.RawMessage) error
+}
+
+// StepProblem is one thing wrong with a Gate's step list.
+type StepProblem struct {
+	// Index is the step's position, which is how an author finds it: steps have
+	// no required name, so "step 3" is often the only way to point at one.
+	Index int
+	Uses  string
+	Err   error
+}
+
+func (p StepProblem) Error() string {
+	where := fmt.Sprintf("steps[%d]", p.Index)
+	if p.Uses != "" {
+		where += " (" + p.Uses + ")"
+	}
+	return where + ": " + p.Err.Error()
+}
+
+// Validate reports everything wrong with a step list.
+//
+// Every problem, not the first: an author fixing a Gate wants the whole list,
+// and returning one at a time turns a single mistake into several apply-and-
+// wait cycles.
+func (r *Registry) Validate(steps []v1alpha1.Step) []StepProblem {
+	var problems []StepProblem
+	seen := map[string]int{}
+
+	for i, step := range steps {
+		if step.Uses == "" {
+			problems = append(problems, StepProblem{Index: i,
+				Err: errors.New("no step named — `uses` is required")})
+			continue
+		}
+
+		// An alias is how later steps read this one's output, so a duplicate
+		// silently shadows the earlier step's values.
+		if step.As != "" {
+			if first, dup := seen[step.As]; dup {
+				problems = append(problems, StepProblem{Index: i, Uses: step.Uses,
+					Err: fmt.Errorf("alias %q is already used by steps[%d]", step.As, first)})
+			} else {
+				seen[step.As] = i
+			}
+		}
+
+		runner, ok := r.Get(step.Uses)
+		if !ok {
+			problems = append(problems, StepProblem{Index: i, Uses: step.Uses,
+				Err: fmt.Errorf("no such step (available: %s)", strings.Join(r.Names(), ", "))})
+			continue
+		}
+
+		checker, ok := runner.(ConfigChecker)
+		if !ok {
+			continue
+		}
+		var raw json.RawMessage
+		if step.With != nil {
+			raw = step.With.Raw
+		}
+		if err := checker.CheckConfig(raw); err != nil {
+			problems = append(problems, StepProblem{Index: i, Uses: step.Uses, Err: err})
+		}
+	}
+	return problems
+}
+
 func (r *Registry) Names() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

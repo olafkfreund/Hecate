@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -18,6 +19,7 @@ import (
 	"github.com/olafkfreund/hecate/api/v1alpha1"
 	"github.com/olafkfreund/hecate/pkg/health"
 	"github.com/olafkfreund/hecate/pkg/metrics"
+	"github.com/olafkfreund/hecate/pkg/passage"
 )
 
 const (
@@ -46,7 +48,11 @@ type Reconciler struct {
 	client.Client
 	// Health assesses the Gate's watches. May be nil, in which case health is
 	// reported as NotApplicable rather than silently omitted.
-	Health   *health.Registry
+	Health *health.Registry
+	// Steps validates a Gate's step list. May be nil, in which case a Gate is
+	// not checked — which is worse than checking it, and better than a
+	// controller that refuses to start because nobody wired a registry.
+	Steps    *passage.Registry
 	Recorder record.EventRecorder
 	// Now is the clock, injectable for tests.
 	Now func() time.Time
@@ -86,6 +92,19 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, r.Status().Update(ctx, &gate)
 	}
 
+	// Checked before anything else looks at this Gate, and fatal to it: a Gate
+	// whose steps are wrong must not open a Passage, because the alternative is
+	// discovering the mistake part-way through a crossing with a commit already
+	// pushed. Reported rather than retried — nothing here becomes true by
+	// waiting (D31).
+	if problems := r.checkSteps(&gate); len(problems) > 0 {
+		gate.Status.Eligible = nil
+		r.setReady(&gate, metav1.ConditionFalse, ReasonInvalidSteps, problems)
+		r.event(&gate, corev1.EventTypeWarning, ReasonInvalidSteps, problems)
+		logger.Info("gate has invalid steps", "problems", problems)
+		return ctrl.Result{}, r.Status().Update(ctx, &gate)
+	}
+
 	// Record finished crossings before judging eligibility, so a Passage that
 	// just succeeded is reflected in `current` rather than leaving its Bundle
 	// looking eligible for a Gate it is already in.
@@ -115,6 +134,28 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 	logger.V(1).Info("gate reconciled", "eligible", len(eligible), "reason", reason)
 	return ctrl.Result{RequeueAfter: ReconcileInterval}, nil
+}
+
+// ReasonInvalidSteps marks a Gate whose Passage template will not run.
+const ReasonInvalidSteps = "InvalidSteps"
+
+// checkSteps renders everything wrong with the Gate's step list, or "".
+//
+// The whole list rather than the first problem: a Gate is edited as a unit, and
+// reporting one mistake per apply turns a single bad edit into several rounds.
+func (r *Reconciler) checkSteps(gate *v1alpha1.Gate) string {
+	if r.Steps == nil || gate.Spec.Passage == nil {
+		return ""
+	}
+	problems := r.Steps.Validate(gate.Spec.Passage.Steps)
+	if len(problems) == 0 {
+		return ""
+	}
+	rendered := make([]string, len(problems))
+	for i, p := range problems {
+		rendered[i] = p.Error()
+	}
+	return strings.Join(rendered, "; ")
 }
 
 // advance starts an automatic Passage when one is warranted, and returns the

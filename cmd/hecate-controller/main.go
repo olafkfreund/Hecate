@@ -128,6 +128,9 @@ func run() error {
 	if err := (&gate.Reconciler{
 		Client: mgr.GetClient(),
 		Health: checkers,
+		// The same registry the engine runs from, so a Gate is judged against
+		// exactly the steps that would execute it.
+		Steps: stepRunners,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("setting up the Gate controller: %w", err)
 	}

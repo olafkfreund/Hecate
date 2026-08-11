@@ -17,6 +17,12 @@ see the Bundle, the Gate's `vars`, and earlier steps' outputs. A whole-string
 expression keeps its type, so `${{ vars.replicas }}` stays a number
 ([D22](DECISIONS.md)).
 
+A Gate's steps are checked as soon as it is applied: an unknown step, a
+duplicate `as` alias, a misspelt field or a missing required one marks the Gate
+`Ready=False` with `InvalidSteps` and stops it opening any Passage
+([D31](DECISIONS.md)). `kubectl describe gate` names the step index and the
+field.
+
 Two rules apply to every step:
 
 - **Re-running one must be safe.** Scratch space is disposable and a controller
@@ -333,12 +339,8 @@ capped at 4KB and reports `truncated`.
 
 ## Not here yet
 
-`render-kustomize` and `render-helm` ([#67]), `oci-push` and `oci-pull`
-([#69]), and per-step schema validation at admission ([#71], [#97]). Until that
-last one lands, a mistake in a `with:` block is caught when the step runs, as a
-terminal `InvalidConfig` naming the field.
+`render-kustomize` and `render-helm` ([#67]), and `oci-push` and `oci-pull`
+([#69]).
 
 [#67]: https://github.com/olafkfreund/Hecate/issues/67
 [#69]: https://github.com/olafkfreund/Hecate/issues/69
-[#71]: https://github.com/olafkfreund/Hecate/issues/71
-[#97]: https://github.com/olafkfreund/Hecate/issues/97

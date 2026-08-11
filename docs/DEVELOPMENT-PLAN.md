@@ -33,7 +33,7 @@ This is the *how*.
 | API server | M7 |
 | UI | M8 |
 
-220 tests, no cluster required, ~1s.
+231 tests, no cluster required, ~1s.
 
 ## 2. Technology
 
@@ -81,11 +81,12 @@ Done: `flux-wait`, `flux-reconcile`, `git-clone`, `git-commit`, `git-push`,
 `git-pull-request`, `edit-yaml`, `set-image`, `http`, and expression evaluation
 over Bundle artifacts and prior step outputs.
 
-Left: `render-kustomize`, `render-helm` ([#67](https://github.com/olafkfreund/Hecate/issues/67)),
-`oci-push`/`oci-pull` ([#69](https://github.com/olafkfreund/Hecate/issues/69)), and
-per-step JSON Schema validated at admission
-([#71](https://github.com/olafkfreund/Hecate/issues/71),
-[#97](https://github.com/olafkfreund/Hecate/issues/97)).
+Step configuration is checked when a Gate is applied, by the controller rather
+than a webhook ([D31](DECISIONS.md)): a bad step marks the Gate `InvalidSteps`
+and it opens no Passage.
+
+Left: `render-kustomize`, `render-helm` ([#67](https://github.com/olafkfreund/Hecate/issues/67))
+and `oci-push`/`oci-pull` ([#69](https://github.com/olafkfreund/Hecate/issues/69)).
 
 **Exit:** a Gate can render, commit, push, open a PR, wait for merge, and wait for Flux.
 Everything but rendering is there, and the rest is demonstrated rather than

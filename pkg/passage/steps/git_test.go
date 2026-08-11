@@ -284,9 +284,18 @@ func TestGitPushToNewBranch(t *testing.T) {
 func TestMissingCheckoutIsExplained(t *testing.T) {
 	work := t.TempDir()
 
-	for _, r := range []passage.Runner{NewGitCommit(), NewGitPush(nil)} {
+	// Each step gets its own config: passing one step's config to another is a
+	// mistake strict decoding now refuses, and it refused this test.
+	for _, tc := range []struct {
+		runner passage.Runner
+		cfg    any
+	}{
+		{NewGitCommit(), GitCommitConfig{Message: "x"}},
+		{NewGitPush(nil), GitPushConfig{}},
+	} {
+		r := tc.runner
 		t.Run(r.Name(), func(t *testing.T) {
-			_, err := r.Run(context.Background(), gitCtx(t, work, GitCommitConfig{Message: "x"}))
+			_, err := r.Run(context.Background(), gitCtx(t, work, tc.cfg))
 			if err == nil {
 				t.Fatal("expected an error with no checkout present")
 			}
