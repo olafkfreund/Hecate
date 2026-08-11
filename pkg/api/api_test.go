@@ -421,3 +421,55 @@ func TestReadsReturnTheAPITypes(t *testing.T) {
 		t.Error("the spec did not survive the round trip")
 	}
 }
+
+// #72 asks for all four resources, and this file originally covered three:
+// Beacons were missing from pkg/ops entirely, so no amount of testing the API
+// in isolation would have found it. Table-driven over the four rather than one
+// more happy path, because the failure mode was an omission, not a bug.
+func TestAllFourResourcesAreReachable(t *testing.T) {
+	objs := []client.Object{
+		&v1alpha1.Beacon{
+			ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "acme"},
+			Spec: v1alpha1.BeaconSpec{Watch: []v1alpha1.WatchSource{
+				{Image: &v1alpha1.ImageWatch{Repo: "example.test/api"}},
+			}},
+		},
+		gate("staging"),
+		bundle("app-1"),
+		&v1alpha1.Passage{
+			ObjectMeta: metav1.ObjectMeta{Name: "p-1", Namespace: "acme"},
+			Spec:       v1alpha1.PassageSpec{Gate: "staging", Bundle: "app-1"},
+		},
+	}
+
+	for _, tc := range []struct{ plural, name string }{
+		{"beacons", "app"},
+		{"gates", "staging"},
+		{"bundles", "app-1"},
+		{"passages", "p-1"},
+	} {
+		t.Run(tc.plural, func(t *testing.T) {
+			s, _ := newServer(t,
+				map[string]string{"t": "alice"},
+				grants{"alice": {"list gates": true}},
+				objs...)
+
+			list := call(t, s, "t", "GET", "/api/v1alpha1/namespaces/acme/"+tc.plural, "")
+			if list.Code != http.StatusOK {
+				t.Fatalf("list: %d %s", list.Code, list.Body)
+			}
+			var items []map[string]any
+			if err := json.Unmarshal(list.Body.Bytes(), &items); err != nil {
+				t.Fatalf("list did not decode: %v", err)
+			}
+			if len(items) != 1 {
+				t.Fatalf("listed %d, want 1", len(items))
+			}
+
+			get := call(t, s, "t", "GET", "/api/v1alpha1/namespaces/acme/"+tc.plural+"/"+tc.name, "")
+			if get.Code != http.StatusOK {
+				t.Fatalf("get: %d %s", get.Code, get.Body)
+			}
+		})
+	}
+}

@@ -64,6 +64,29 @@ func IsNotFound(err error) bool {
 
 // ------------------------------------------------------------------ reads ---
 
+// Beacons lists a namespace's Beacons, by name.
+func (o *Ops) Beacons(ctx context.Context, namespace string) ([]v1alpha1.Beacon, error) {
+	var list v1alpha1.BeaconList
+	if err := o.Client.List(ctx, &list, client.InNamespace(namespace)); err != nil {
+		return nil, fmt.Errorf("listing Beacons: %w", err)
+	}
+	sort.Slice(list.Items, func(i, j int) bool { return list.Items[i].Name < list.Items[j].Name })
+	return list.Items, nil
+}
+
+// Beacon reads one Beacon.
+func (o *Ops) Beacon(ctx context.Context, namespace, name string) (*v1alpha1.Beacon, error) {
+	var beacon v1alpha1.Beacon
+	err := o.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &beacon)
+	if apierrors.IsNotFound(err) {
+		return nil, &NotFoundError{Kind: "Beacon", Namespace: namespace, Name: name}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading Beacon %s: %w", name, err)
+	}
+	return &beacon, nil
+}
+
 // Gates lists a namespace's Gates, by name.
 //
 // Ordered rather than left in list order: a surface that prints them should

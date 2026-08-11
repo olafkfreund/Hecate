@@ -35,6 +35,10 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": s.Version})
 	})
 
+	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/beacons",
+		s.guard(ActionRead, s.listBeacons))
+	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/beacons/{name}",
+		s.guard(ActionRead, s.getBeacon))
 	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/gates",
 		s.guard(ActionRead, s.listGates))
 	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/gates/{name}",
@@ -107,6 +111,14 @@ func (s *Server) guard(action Action, h handler) http.Handler {
 }
 
 // ---------------------------------------------------------------- reads ----
+
+func (s *Server) listBeacons(ctx context.Context, _ Subject, r *http.Request) (any, error) {
+	return s.Ops.Beacons(ctx, r.PathValue("namespace"))
+}
+
+func (s *Server) getBeacon(ctx context.Context, _ Subject, r *http.Request) (any, error) {
+	return s.Ops.Beacon(ctx, r.PathValue("namespace"), r.PathValue("name"))
+}
 
 func (s *Server) listGates(ctx context.Context, _ Subject, r *http.Request) (any, error) {
 	return s.Ops.Gates(ctx, r.PathValue("namespace"))
