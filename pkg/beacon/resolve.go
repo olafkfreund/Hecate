@@ -139,7 +139,7 @@ func keychainFromSecret(secret *corev1.Secret) (authn.Keychain, error) {
 			Auths map[string]authn.AuthConfig `json:"auths"`
 		}
 		if err := json.Unmarshal(raw, &cfg); err != nil {
-			return nil, fmt.Errorf("Secret %s: malformed %s: %w", secret.Name, corev1.DockerConfigJsonKey, err)
+			return nil, fmt.Errorf("malformed %s in Secret %s: %w", corev1.DockerConfigJsonKey, secret.Name, err)
 		}
 		kc := secretKeychain{}
 		for registry, auth := range cfg.Auths {
@@ -153,7 +153,8 @@ func keychainFromSecret(secret *corev1.Secret) (authn.Keychain, error) {
 	username, password := string(secret.Data["username"]), string(secret.Data["password"])
 	if username == "" && password == "" {
 		return nil, fmt.Errorf(
-			"Secret %s has neither %s nor username/password", secret.Name, corev1.DockerConfigJsonKey)
+			"no usable credentials in Secret %s: expected %s, or username and password",
+			secret.Name, corev1.DockerConfigJsonKey)
 	}
 	// No registry key, so these credentials apply to whatever is asked for.
 	return anyRegistryKeychain{authn.AuthConfig{Username: username, Password: password}}, nil

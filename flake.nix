@@ -101,7 +101,7 @@
             pkgs.fluxcd
 
             # Secrets
-            agenix.packages.${pkgs.system}.default
+            agenix.packages.${pkgs.stdenv.hostPlatform.system}.default
             pkgs.age
 
             # Nix hygiene

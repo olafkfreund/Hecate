@@ -2,6 +2,7 @@ package gate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -163,7 +164,7 @@ func (r *Reconciler) startPassage(
 	ctx context.Context, gate *v1alpha1.Gate, bundle *v1alpha1.Bundle,
 ) (*v1alpha1.Passage, error) {
 	if gate.Spec.Passage == nil || len(gate.Spec.Passage.Steps) == 0 {
-		return nil, fmt.Errorf("Gate has no passage steps defined")
+		return nil, errors.New("no passage steps defined")
 	}
 
 	passage := &v1alpha1.Passage{
