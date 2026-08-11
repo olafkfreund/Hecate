@@ -189,3 +189,7 @@ treats a fixed-output derivation as already realised when an output with the
 specified hash exists in the store, so a stale `vendorHash` can validate against
 a leftover result on your machine. Only a clean store catches it, which is what
 the Nix workflow is for. Trust CI over a local pass here.
+
+**So: after adding a Go dependency, run `make flake-hash`** and paste the result
+into `flake.nix`. It forces the recomputation that a plain `nix build` will not
+do for you.

@@ -12,7 +12,7 @@ CHART_DIR      := charts/hecate
 export KUBECONFIG ?= $(CURDIR)/.dev/kubeconfig
 
 .DEFAULT_GOAL := help
-.PHONY: help test vet fmt lint check generate build run cluster cluster-rm cluster-load install uninstall e2e secrets-edit secrets-rekey clean
+.PHONY: help test vet fmt lint check flake-hash generate build run cluster cluster-rm cluster-load install uninstall e2e secrets-edit secrets-rekey clean
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -37,6 +37,19 @@ lint: ## Lint Go and Nix
 
 check: vet test ## Everything CI enforces, locally
 	@test -z "$$(gofmt -l .)" || { echo "gofmt needed:"; gofmt -l .; exit 1; }
+
+flake-hash: ## Print the vendorHash flake.nix needs (run after adding a Go dependency)
+	@# A stale vendorHash cannot be detected by a plain `nix build`: Nix treats a
+	@# fixed-output derivation as already realised when an output with the
+	@# specified hash is in the store, so it validates against a leftover build.
+	@# Forcing a bogus hash makes it recompute and report the real one.
+	@sed 's|vendorHash = "[^"]*"|vendorHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="|' \
+		flake.nix > /tmp/hecate-flake-probe.nix
+	@cp flake.nix /tmp/hecate-flake-real.nix && cp /tmp/hecate-flake-probe.nix flake.nix; \
+		out=$$(nix build .#default --no-link 2>&1 | grep -oP 'got: *\K\S+' | head -1); \
+		cp /tmp/hecate-flake-real.nix flake.nix; \
+		if [ -n "$$out" ]; then echo "vendorHash = \"$$out\";"; \
+		else echo "vendorHash is already correct"; fi
 
 generate: ## Regenerate deepcopy, CRDs and RBAC from the API and controller markers
 	$(CONTROLLER_GEN) \
