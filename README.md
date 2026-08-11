@@ -12,6 +12,7 @@
 
 [Website](https://olafkfreund.github.io/Hecate/) ·
 [Architecture](docs/ARCHITECTURE.md) ·
+[Steps](docs/STEPS.md) ·
 [Product plan](docs/PRODUCT-PLAN.md) ·
 [Development plan](docs/DEVELOPMENT-PLAN.md) ·
 [Decisions](docs/DECISIONS.md) ·

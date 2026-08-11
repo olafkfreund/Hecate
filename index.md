@@ -247,6 +247,7 @@ If you run Flux across more than one environment and have opinions about how pro
 exactly the moment when that input changes the design.
 
 - 🏛 [Architecture](https://github.com/olafkfreund/Hecate/blob/main/docs/ARCHITECTURE.md)
+- 🧩 [Step reference](https://github.com/olafkfreund/Hecate/blob/main/docs/STEPS.md)
 - 📄 [Product plan](https://github.com/olafkfreund/Hecate/blob/main/docs/PRODUCT-PLAN.md)
 - 🔧 [Development plan](https://github.com/olafkfreund/Hecate/blob/main/docs/DEVELOPMENT-PLAN.md)
 - ⚖️ [Decision record](https://github.com/olafkfreund/Hecate/blob/main/docs/DECISIONS.md)
