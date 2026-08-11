@@ -1,0 +1,68 @@
+# A git server for the dev cluster.
+#
+# Hecate's whole model is that a promotion is a git write (D3), and until this
+# existed the deployed controller had never performed one: the e2e suite only
+# exercised flux-wait. Proving `clone → edit → commit → push → Flux syncs`
+# needs a git host that both go-git and Flux's source-controller can reach, over
+# a protocol they both speak. That rules out `git daemon`, which is lighter but
+# serves git:// only — a protocol Flux does not accept.
+#
+# Gitea, not a hand-rolled HTTP git server, because it also authenticates: the
+# credentialsRef path is where real users break, and testing pushes to an
+# anonymous server would not exercise it.
+#
+# Ephemeral by design: SQLite on emptyDir, no persistence. The cluster is
+# disposable and so is this.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hecate-git
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitea
+  namespace: hecate-git
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: gitea }
+  template:
+    metadata:
+      labels: { app: gitea }
+    spec:
+      containers:
+        - name: gitea
+          image: gitea/gitea:1.22
+          env:
+            # No setup wizard: the cluster script creates the user itself.
+            - { name: GITEA__security__INSTALL_LOCK, value: "true" }
+            - { name: GITEA__database__DB_TYPE, value: sqlite3 }
+            - { name: GITEA__server__ROOT_URL, value: "http://gitea.hecate-git.svc.cluster.local:3000/" }
+            - { name: GITEA__service__DISABLE_REGISTRATION, value: "true" }
+            # Off by default in 1.22, and a promotion pushing to a branch that
+            # is checked out server-side would be refused without it.
+            - { name: GITEA__repository__ENABLE_PUSH_CREATE_USER, value: "true" }
+          ports:
+            - { containerPort: 3000, name: http }
+          readinessProbe:
+            httpGet: { path: /api/healthz, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 2
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitea
+  namespace: hecate-git
+spec:
+  selector: { app: gitea }
+  ports:
+    - { port: 3000, targetPort: http, name: http }

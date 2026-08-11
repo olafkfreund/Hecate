@@ -7,6 +7,15 @@
 CONTROLLER_GEN ?= controller-gen
 CHART_DIR      := charts/hecate
 
+# A unique tag per build, evaluated once per make run.
+#
+# Reusing one `dev` tag meant `helm upgrade` saw an unchanged Deployment and
+# never restarted the pod, so the cluster kept running the previous binary
+# while the build appeared to succeed. imagePullPolicy=Always does not help:
+# it only applies when a pod is created. Two different builds are two different
+# images, and giving them the same tag was the mistake.
+DEV_TAG        := dev-$(shell date +%s)
+
 # The dev shell sets this; default it so the cluster targets also work from a
 # bare shell and from CI, and never touch a real cluster by accident.
 export KUBECONFIG ?= $(CURDIR)/.dev/kubeconfig
@@ -74,13 +83,13 @@ cluster-rm: ## Delete the k3d dev cluster
 	./scripts/dev-cluster.sh down
 
 cluster-load: ## Build the controller image and push it to the cluster registry
-	./scripts/dev-cluster.sh load
+	HECATE_DEV_TAG=$(DEV_TAG) ./scripts/dev-cluster.sh load
 
 install: cluster-load ## Build, push and install the chart into the dev cluster
 	helm upgrade --install hecate $(CHART_DIR) \
 		--namespace hecate-system --create-namespace \
 		--set image.repository=hecate-registry:5001/hecate-controller \
-		--set image.tag=dev --set image.pullPolicy=Always \
+		--set image.tag=$(DEV_TAG) --set image.pullPolicy=Always \
 		--wait --timeout 3m
 
 uninstall: ## Remove the chart from the dev cluster (CRDs are left alone)

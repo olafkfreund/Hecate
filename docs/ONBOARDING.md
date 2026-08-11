@@ -101,7 +101,14 @@ $ make cluster
 
 This creates a k3d cluster in Docker, installs Flux into it, applies Hecate's
 CRDs, and writes `./.dev/kubeconfig`. It also starts a local container registry
-on `localhost:5001` so images never leave the machine.
+on `localhost:5001` and a git server, so images and commits never leave the
+machine.
+
+The git server matters more than it sounds. A promotion *is* a git write, so
+without somewhere to push, the deployed controller could only ever be tested
+doing the one thing that is not a git write — waiting for Flux. It is seeded
+with a `fleet` repository the e2e promotion edits, and Flux reads the same
+repository back.
 
 ```console
 $ kubectl get pods -n flux-system
@@ -115,8 +122,11 @@ $ make e2e
 ```
 
 This drives a Bundle from discovery through two Gates against the real API
-server. It is what catches CRD drift — a generated CRD that no longer matches
-the Go types is invisible to unit tests and fatal in a cluster.
+server, and then runs a full promotion through the deployed controller: clone,
+repin, edit, commit, push, and wait for Flux to apply that exact commit. It is
+what catches CRD drift — a generated CRD that no longer matches the Go types is
+invisible to unit tests and fatal in a cluster — and it is the only place the
+product's central claim is actually demonstrated rather than asserted.
 
 Tear down with `make cluster-rm`. It costs nothing to recreate.
 

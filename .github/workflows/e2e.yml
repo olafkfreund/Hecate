@@ -22,7 +22,7 @@ jobs:
       # Which e2e tests run in which phase. Every test in the package must
       # appear in one of these; a step below enforces that.
       BEFORE_INSTALL: 'TestCrossingAgainstRealAPI|TestFidesEnvironmentIsValidatedAtAdmission'
-      AFTER_INSTALL: 'TestDeployedControllerCrossesAGate'
+      AFTER_INSTALL: 'TestDeployedControllerCrossesAGate|TestDeployedControllerPromotesThroughGit'
     strategy:
       fail-fast: false
       matrix:
