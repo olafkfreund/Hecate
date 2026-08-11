@@ -177,7 +177,7 @@ func New(kind Kind, cfg Config) (Provider, error) {
 	case GitHub:
 		return newGitHub(cfg)
 	case GitLab:
-		return nil, fmt.Errorf("the gitlab provider is not implemented yet")
+		return newGitLab(cfg)
 	case "":
 		return nil, errors.New("no provider given, and the host is not one whose flavour can be guessed — " +
 			"set provider: github or provider: gitlab")

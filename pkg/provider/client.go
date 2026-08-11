@@ -131,7 +131,9 @@ func (c *client) do(ctx context.Context, method, path string, body, out any) err
 // useful part ("A pull request already exists for acme:hecate/x").
 func apiMessage(payload []byte) string {
 	var body struct {
-		Message string `json:"message"`
+		// GitHub sends a string here; GitLab sends a string for some failures
+		// and an array of them for validation ones, so it cannot be typed.
+		Message any `json:"message"`
 		Errors  []struct {
 			Message string `json:"message"`
 			Field   string `json:"field"`
@@ -142,8 +144,8 @@ func apiMessage(payload []byte) string {
 		return strings.TrimSpace(truncate(string(payload), 200))
 	}
 	var parts []string
-	if body.Message != "" {
-		parts = append(parts, body.Message)
+	if m := flatten(body.Message); m != "" {
+		parts = append(parts, m)
 	}
 	for _, e := range body.Errors {
 		switch {
@@ -154,6 +156,24 @@ func apiMessage(payload []byte) string {
 		}
 	}
 	return strings.Join(parts, ": ")
+}
+
+// flatten renders a message that is either a string or a list of them.
+func flatten(v any) string {
+	switch v := v.(type) {
+	case string:
+		return v
+	case []any:
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				parts = append(parts, s)
+			}
+		}
+		return strings.Join(parts, "; ")
+	default:
+		return ""
+	}
 }
 
 func truncate(s string, n int) string {

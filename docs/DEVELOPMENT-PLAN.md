@@ -14,7 +14,7 @@ This is the *how*.
 | `pkg/health` — Checker interface, registry, Flux checker | ✅ done |
 | `pkg/passage` — Step interface, registry, execution engine | ✅ done |
 | `pkg/passage/steps` — `flux-wait`, the git steps, `edit-yaml`, `set-image` | ✅ done |
-| `pkg/provider` — GitHub pull requests, `git-pull-request` step | ✅ done |
+| `pkg/provider` — GitHub and GitLab pull requests, `git-pull-request` step | ✅ done |
 | `pkg/beacon` — discovery, image resolution, Beacon controller | ✅ done |
 | `pkg/gate` — eligibility, promotion windows, Gate controller | ✅ done |
 | `pkg/passage` — execution engine and Passage controller | ✅ done |
@@ -31,7 +31,7 @@ This is the *how*.
 | API server | M7 |
 | UI | M8 |
 
-176 tests, no cluster required, ~1s.
+180 tests, no cluster required, ~1s.
 
 ## 2. Technology
 
