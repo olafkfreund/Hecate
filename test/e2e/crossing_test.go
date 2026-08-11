@@ -32,7 +32,9 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -121,6 +123,13 @@ func localRegistry(t *testing.T, tags ...string) (repo string, digests map[strin
 func TestCrossingAgainstRealAPI(t *testing.T) {
 	ctx := context.Background()
 	c := newClient(t)
+
+	// This test drives the reconcilers itself. If Hecate is also deployed, both
+	// write the same objects' status and collide — not a flake, just two
+	// controllers for one resource. The in-cluster test covers this ground once
+	// Hecate is installed; run this one before installing.
+	skipIfHecateInstalled(t, c)
+
 	freshNamespace(t, c)
 
 	repo, digests := localRegistry(t, "1.0.0", "1.1.0")
@@ -283,6 +292,21 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	os.Exit(m.Run())
+}
+
+// skipIfHecateInstalled skips when a deployed controller would race this test.
+func skipIfHecateInstalled(t *testing.T, c client.Client) {
+	t.Helper()
+	var deployments unstructured.UnstructuredList
+	deployments.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "apps", Version: "v1", Kind: "DeploymentList",
+	})
+	if err := c.List(context.Background(), &deployments,
+		client.InNamespace("hecate-system"),
+		client.MatchingLabels{"app.kubernetes.io/name": "hecate"},
+	); err == nil && len(deployments.Items) > 0 {
+		t.Skip("Hecate is deployed in-cluster; it would race this test's own reconcilers")
+	}
 }
 
 // jsonOf marshals a value into the apiextensions JSON wrapper the API uses for

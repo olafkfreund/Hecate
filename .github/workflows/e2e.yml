@@ -60,11 +60,17 @@ jobs:
       - name: Create the cluster
         run: ./scripts/dev-cluster.sh up
 
+      # Before installing: the API-contract test drives the reconcilers itself,
+      # so a deployed controller would race it.
+      - name: E2E — API contract (no controller deployed)
+        run: go test -tags e2e -count=1 -timeout 10m -v -run TestCrossingAgainstRealAPI ./test/e2e/...
+
       - name: Build and install Hecate
         run: make install
 
-      - name: Run e2e
-        run: go test -tags e2e -count=1 -timeout 20m -v ./test/e2e/...
+      # After installing: the whole product as a deployment.
+      - name: E2E — deployed controller
+        run: go test -tags e2e -count=1 -timeout 20m -v -run TestDeployedControllerCrossesAGate ./test/e2e/...
 
       - name: Diagnostics on failure
         if: failure()
