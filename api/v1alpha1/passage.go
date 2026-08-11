@@ -39,6 +39,11 @@ type PassageSpec struct {
 	//
 	// +kubebuilder:validation:MinItems=1
 	Steps []Step `json:"steps"`
+	// Vars are the Gate's variables, copied at creation for the same reason the
+	// steps are: editing a Gate must not change what an in-flight Passage sees.
+	//
+	// +optional
+	Vars []Var `json:"vars,omitempty"`
 	// Actor is who initiated this Passage — a username, or "controller" for
 	// automatic crossings.
 	//

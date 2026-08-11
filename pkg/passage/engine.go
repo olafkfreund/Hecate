@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/olafkfreund/hecate/api/v1alpha1"
+	"github.com/olafkfreund/hecate/pkg/expr"
 )
 
 // Engine advances a Passage by running its steps in order.
@@ -24,8 +25,13 @@ type Engine struct {
 	Now func() time.Time
 }
 
-// ReasonUnregisteredStep is set when a Passage names a step that does not exist.
-const ReasonUnregisteredStep = "UnregisteredStep"
+const (
+	// ReasonUnregisteredStep is set when a Passage names a step that does not exist.
+	ReasonUnregisteredStep = "UnregisteredStep"
+	// ReasonBadExpression is set when a step's `with:` or `if:` cannot be
+	// evaluated. A malformed expression will not become valid by retrying.
+	ReasonBadExpression = "BadExpression"
+)
 
 // Outcome is what Advance concluded.
 type Outcome struct {
@@ -87,6 +93,11 @@ func (e *Engine) Advance(
 	outputs := collectOutputs(status.Steps)
 	var watch []v1alpha1.HealthCheck
 
+	vars := make(map[string]string, len(p.Spec.Vars))
+	for _, v := range p.Spec.Vars {
+		vars[v.Name] = v.Value
+	}
+
 	for i := int(status.CurrentStep); i < len(p.Spec.Steps); i++ {
 		step := p.Spec.Steps[i]
 		st := &status.Steps[i]
@@ -111,9 +122,40 @@ func (e *Engine) Advance(
 		st.Phase = v1alpha1.StepRunning
 		st.Attempts++
 
+		// Rebuilt per step, because `steps.<alias>` grows as earlier steps
+		// finish — an env computed once at the top would hide every output.
+		env := expr.Env{
+			Bundle: bundle, Steps: outputs, Vars: vars,
+			Gate: p.Spec.Gate, Passage: p.Name, Actor: p.Spec.Actor, Namespace: p.Namespace,
+		}
+
+		// A step gated off is recorded as Skipped, never silently omitted: a
+		// Passage whose status does not mention a step is indistinguishable
+		// from one where the step was deleted.
+		if step.If != "" {
+			run, err := expr.Bool(step.If, env)
+			if err != nil {
+				st.Reason = ReasonBadExpression
+				e.finishStep(st, v1alpha1.StepFailed, fmt.Sprintf("condition: %s", err), now)
+				return Outcome{Status: e.fail(status, st.Message, now), Watch: watch}
+			}
+			if !run {
+				e.finishStep(st, v1alpha1.StepSkipped, fmt.Sprintf("condition %q was false", step.If), now)
+				continue
+			}
+		}
+
 		var cfg json.RawMessage
 		if step.With != nil {
-			cfg = step.With.Raw
+			// Interpolated here rather than in each step, so every step gets it
+			// and a step added later cannot forget.
+			interpolated, err := expr.InterpolateJSON(step.With.Raw, env)
+			if err != nil {
+				st.Reason = ReasonBadExpression
+				e.finishStep(st, v1alpha1.StepFailed, err.Error(), now)
+				return Outcome{Status: e.fail(status, st.Message, now), Watch: watch}
+			}
+			cfg = interpolated
 		}
 
 		res, err := runner.Run(ctx, &StepContext{

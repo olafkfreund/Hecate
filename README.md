@@ -106,6 +106,7 @@ Most naive Flux health checks are wrong in the same ways. These are all tested:
 ```
 api/v1alpha1/         Beacon, Bundle, Gate, Passage. The whole API.
 pkg/beacon/           Artifact discovery: tag selection, image resolution, controller.
+pkg/expr/             ${{ }} evaluation. Sandboxed; no I/O, no arbitrary code.
 pkg/flux/             Flux status evaluation. Pure; no client, no I/O.
 pkg/gate/             Eligibility, promotion windows, Gate controller.
 pkg/health/           Checker interface, registry, and the Flux checker.
@@ -153,7 +154,7 @@ ok  github.com/olafkfreund/hecate/pkg/passage
 ok  github.com/olafkfreund/hecate/pkg/passage/steps
 ```
 
-120 tests, no cluster required, ~1s. That is the bar: anything testable without a
+134 tests, no cluster required, ~1s. That is the bar: anything testable without a
 cluster must be. Image resolution is tested against a real in-memory registry rather
 than a mock.
 
@@ -165,7 +166,7 @@ controller-gen — at the versions CI uses.
 ```bash
 nix develop          # or: direnv allow
 
-make test            # 120 tests, ~1s, no cluster
+make test            # 134 tests, ~1s, no cluster
 make cluster         # k3d in Docker, with Flux installed
 make install         # build, push and install the chart into the dev cluster
 make e2e             # drive a Bundle through two Gates on a real API server

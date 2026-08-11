@@ -389,3 +389,154 @@ func TestContinueOnErrorStillRecordsTheReason(t *testing.T) {
 		t.Errorf("forgiven failure lost its reason: %q", out.Status.Steps[0].Reason)
 	}
 }
+
+// bundleWith builds a Bundle carrying one image, for expression tests.
+func bundleWith(repo, tag string) *v1alpha1.Bundle {
+	return &v1alpha1.Bundle{
+		ObjectMeta: metav1.ObjectMeta{Name: "b1", Namespace: "acme"},
+		Spec: v1alpha1.BundleSpec{
+			Artifacts: []v1alpha1.Artifact{
+				{Image: &v1alpha1.ImageArtifact{Repo: repo, Tag: tag}},
+			},
+		},
+	}
+}
+
+func withConfig(t *testing.T, raw string) *apiextensionsv1.JSON {
+	t.Helper()
+	return &apiextensionsv1.JSON{Raw: []byte(raw)}
+}
+
+// Interpolation happens in the engine, so a step receives resolved config and
+// never has to ask for it.
+func TestConfigIsInterpolatedBeforeTheStepRuns(t *testing.T) {
+	var seen string
+	spy := runnerFunc{name: "spy", fn: func(_ context.Context, sc *StepContext) (StepResult, error) {
+		seen = string(sc.Config)
+		return ok(""), nil
+	}}
+	e := newEngine(spy)
+
+	p := passageWith(v1alpha1.Step{
+		Uses: "spy",
+		With: withConfig(t, `{"image":"${{ bundle.image('ghcr.io/acme/api').tag }}","gate":"${{ gate }}"}`),
+	})
+	p.Spec.Vars = []v1alpha1.Var{{Name: "region", Value: "eu-west-1"}}
+
+	out := e.Advance(context.Background(), p, bundleWith("ghcr.io/acme/api", "1.2.3"), "")
+	if out.Status.Phase != v1alpha1.PassageSucceeded {
+		t.Fatalf("phase = %s (%s)", out.Status.Phase, out.Status.Message)
+	}
+	if !contains(seen, `"1.2.3"`) || !contains(seen, `"production"`) {
+		t.Errorf("step saw unresolved config: %s", seen)
+	}
+}
+
+// An earlier step's output must be visible to a later one, which is the whole
+// point of `as:`.
+func TestOutputsAreVisibleToLaterExpressions(t *testing.T) {
+	producer := &scripted{name: "producer", results: []StepResult{
+		{Phase: v1alpha1.StepSucceeded, Output: map[string]any{"sha": "deadbeef"}},
+	}}
+	var seen string
+	consumer := runnerFunc{name: "consumer", fn: func(_ context.Context, sc *StepContext) (StepResult, error) {
+		seen = string(sc.Config)
+		return ok(""), nil
+	}}
+	e := newEngine(producer, consumer)
+
+	out := e.Advance(context.Background(), passageWith(
+		v1alpha1.Step{Uses: "producer", As: "commit"},
+		v1alpha1.Step{Uses: "consumer", With: withConfig(t, `{"rev":"${{ steps.commit.sha }}"}`)},
+	), nil, "")
+
+	if out.Status.Phase != v1alpha1.PassageSucceeded {
+		t.Fatalf("phase = %s (%s)", out.Status.Phase, out.Status.Message)
+	}
+	if !contains(seen, "deadbeef") {
+		t.Errorf("later step could not see the earlier output: %s", seen)
+	}
+}
+
+// step.if was declared in the API and ignored until now — a Gate could set it
+// and nothing happened.
+func TestStepIfGatesExecution(t *testing.T) {
+	t.Run("false skips, and is recorded", func(t *testing.T) {
+		skipped := &scripted{name: "skipped", results: []StepResult{ok("")}}
+		after := &scripted{name: "after", results: []StepResult{ok("")}}
+		e := newEngine(skipped, after)
+
+		out := e.Advance(context.Background(), passageWith(
+			v1alpha1.Step{Uses: "skipped", If: `gate == "staging"`},
+			v1alpha1.Step{Uses: "after"},
+		), nil, "")
+
+		if skipped.calls != 0 {
+			t.Error("a step whose condition is false must not run")
+		}
+		if after.calls != 1 {
+			t.Error("a skipped step must not stop the Passage")
+		}
+		// Recorded, never silently omitted.
+		if out.Status.Steps[0].Phase != v1alpha1.StepSkipped {
+			t.Errorf("step 0 phase = %s, want Skipped", out.Status.Steps[0].Phase)
+		}
+		if out.Status.Steps[0].Message == "" {
+			t.Error("a skipped step should say which condition excluded it")
+		}
+		if out.Status.Phase != v1alpha1.PassageSucceeded {
+			t.Errorf("phase = %s, want Succeeded", out.Status.Phase)
+		}
+	})
+
+	t.Run("true runs", func(t *testing.T) {
+		gated := &scripted{name: "gated", results: []StepResult{ok("")}}
+		e := newEngine(gated)
+		e.Advance(context.Background(), passageWith(
+			v1alpha1.Step{Uses: "gated", If: `gate == "production"`},
+		), nil, "")
+		if gated.calls != 1 {
+			t.Error("a step whose condition is true must run")
+		}
+	})
+
+	t.Run("a broken condition fails rather than guessing", func(t *testing.T) {
+		gated := &scripted{name: "gated", results: []StepResult{ok("")}}
+		e := newEngine(gated)
+		out := e.Advance(context.Background(), passageWith(
+			v1alpha1.Step{Uses: "gated", If: `"not a boolean"`},
+		), nil, "")
+
+		if out.Status.Phase != v1alpha1.PassageFailed {
+			t.Fatalf("phase = %s, want Failed", out.Status.Phase)
+		}
+		if out.Status.Steps[0].Reason != ReasonBadExpression {
+			t.Errorf("reason = %q, want %q", out.Status.Steps[0].Reason, ReasonBadExpression)
+		}
+		if gated.calls != 0 {
+			t.Error("the step ran despite an unusable condition")
+		}
+	})
+}
+
+// A bad expression will not become valid by retrying, and must not reach the
+// step with half-resolved config.
+func TestBadInterpolationIsTerminal(t *testing.T) {
+	spy := &scripted{name: "spy", results: []StepResult{ok("")}}
+	e := newEngine(spy)
+
+	out := e.Advance(context.Background(), passageWith(v1alpha1.Step{
+		Uses: "spy",
+		With: withConfig(t, `{"tag":"${{ bundle.image('absent').tag }}"}`),
+	}), bundleWith("ghcr.io/acme/api", "1.2.3"), "")
+
+	if out.Status.Phase != v1alpha1.PassageFailed {
+		t.Fatalf("phase = %s, want Failed", out.Status.Phase)
+	}
+	if out.Status.Steps[0].Reason != ReasonBadExpression {
+		t.Errorf("reason = %q, want %q", out.Status.Steps[0].Reason, ReasonBadExpression)
+	}
+	if spy.calls != 0 {
+		t.Error("the step ran with unresolved configuration")
+	}
+}

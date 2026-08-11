@@ -454,3 +454,39 @@ and `IsTerminal` are unchanged for callers.
 
 **Not in metrics.** Reason is unbounded by design, and unbounded label values are
 how a metrics backend falls over. It is for diagnosis, not aggregation.
+
+---
+
+## D22 — Expressions are evaluated by the engine, not by steps
+
+**2026-08-11 · accepted**
+
+`${{ ... }}` is interpolated into a step's `with:` block by the engine, before the
+step runs. `step.if` is evaluated the same way. No step opts in, and no step can
+forget.
+
+**Why not per step.** Eleven steps land in M2. Interpolation done in each is
+eleven chances to skip it, and the twelfth step someone adds later would be the
+one that silently does not support variables.
+
+**Whole-string expressions keep their type.** `${{ vars.replicas }}` yields the
+number; `"v${{ vars.major }}"` yields a string. Configuration is JSON, so
+stringifying everything would break every numeric and boolean field.
+
+**expr-lang, not Go templates.** These expressions are evaluated over data an
+attacker can influence — image tags, commit messages, pull request titles. expr
+is sandboxed with no I/O and no arbitrary code; a template engine over cluster
+data is an escalation path. The environment exposes only the Bundle, prior step
+outputs, the Gate's vars, and a few strings about the crossing.
+
+**Artifacts are looked up by repository, not by index.** `bundle.image('ghcr.io/acme/api')`
+says what it means; `artifacts[0]` would silently pick the wrong one the day
+somebody reorders a Beacon's watch list. A lookup that finds nothing returns nil
+and the expression fails, rather than interpolating an empty string — promoting
+`image:` with no tag is precisely the failure worth being loud about.
+
+**A non-boolean `if` is an error**, not a truthiness guess. `if: "1"` is a
+mistake, and treating it as true runs a step the author meant to gate.
+
+**Vars are copied into the Passage** at creation, like steps, for the same
+reason: editing a Gate must not change what an in-flight crossing sees.

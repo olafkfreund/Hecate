@@ -30,7 +30,7 @@ This is the *how*.
 | API server | M7 |
 | UI | M8 |
 
-120 tests, no cluster required, ~1s.
+134 tests, no cluster required, ~1s.
 
 ## 2. Technology
 

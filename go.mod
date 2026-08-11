@@ -4,6 +4,7 @@ go 1.26.5
 
 require (
 	github.com/Masterminds/semver/v3 v3.5.0
+	github.com/expr-lang/expr v1.17.8
 	github.com/google/go-containerregistry v0.21.9
 	github.com/prometheus/client_golang v1.22.0
 	github.com/prometheus/client_model v0.6.1

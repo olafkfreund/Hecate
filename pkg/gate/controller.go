@@ -188,6 +188,7 @@ func (r *Reconciler) startPassage(
 			Gate:   gate.Name,
 			Bundle: bundle.Name,
 			Steps:  gate.Spec.Passage.Steps,
+			Vars:   gate.Spec.Vars,
 			Actor:  "controller",
 		},
 	}

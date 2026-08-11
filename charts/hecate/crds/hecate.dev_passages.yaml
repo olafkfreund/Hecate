@@ -120,6 +120,22 @@ spec:
                   type: object
                 minItems: 1
                 type: array
+              vars:
+                description: |-
+                  Vars are the Gate's variables, copied at creation for the same reason the
+                  steps are: editing a Gate must not change what an in-flight Passage sees.
+                items:
+                  description: Var is a named value usable in expressions.
+                  properties:
+                    name:
+                      type: string
+                    value:
+                      type: string
+                  required:
+                  - name
+                  - value
+                  type: object
+                type: array
             required:
             - bundle
             - gate
