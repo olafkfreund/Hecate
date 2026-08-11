@@ -13,7 +13,6 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/random"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -172,61 +171,6 @@ func TestPlatformIsRefusedNotIgnored(t *testing.T) {
 	if !errors.As(err, &unsupported) {
 		t.Fatalf("want ErrUnsupported, got %T: %v", err, err)
 	}
-}
-
-func TestKeychainFromSecret(t *testing.T) {
-	t.Run("dockerconfigjson", func(t *testing.T) {
-		kc, err := keychainFromSecret(&corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: "pull"},
-			Data: map[string][]byte{
-				corev1.DockerConfigJsonKey: []byte(
-					`{"auths":{"https://ghcr.io":{"username":"u","password":"p"}}}`),
-			},
-		})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		reg, _ := name.NewRegistry("ghcr.io")
-		auth, err := kc.Resolve(reg)
-		if err != nil {
-			t.Fatal(err)
-		}
-		cfg, err := auth.Authorization()
-		if err != nil {
-			t.Fatal(err)
-		}
-		// The https:// prefix real dockerconfigjson files carry must not defeat
-		// the lookup.
-		if cfg.Username != "u" || cfg.Password != "p" {
-			t.Errorf("got %+v, want username u / password p", cfg)
-		}
-	})
-
-	t.Run("username and password", func(t *testing.T) {
-		kc, err := keychainFromSecret(&corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: "basic"},
-			Data:       map[string][]byte{"username": []byte("u"), "password": []byte("p")},
-		})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		reg, _ := name.NewRegistry("example.com")
-		auth, _ := kc.Resolve(reg)
-		cfg, _ := auth.Authorization()
-		if cfg.Username != "u" {
-			t.Errorf("got %+v, want username u", cfg)
-		}
-	})
-
-	t.Run("empty secret is an error", func(t *testing.T) {
-		_, err := keychainFromSecret(&corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: "empty"},
-			Data:       map[string][]byte{},
-		})
-		if err == nil {
-			t.Error("expected an error for a Secret with no usable credentials")
-		}
-	})
 }
 
 func TestKeychainMissingSecretIsReported(t *testing.T) {

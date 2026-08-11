@@ -269,6 +269,57 @@ after something arbitrary.
 
 **Reasons:** `RenderFailed`, `NothingRendered`, `FileNotFound`, `InvalidConfig`.
 
+## oci-push / oci-pull
+
+For a fleet whose source of truth is an OCI registry rather than git.
+
+```yaml
+- uses: oci-push
+  with:
+    path: repo/rendered
+    repo: ghcr.io/acme/manifests
+    tag: "${{ bundle.image('ghcr.io/acme/api').tag }}"
+    source: https://github.com/acme/fleet
+    revision: ${{ steps.commit.sha }}
+    credentialsRef: { name: registry }
+```
+
+| `oci-push` | type | default |
+|---|---|---|
+| `path` | string | required — the directory to package |
+| `repo`, `tag` | string | required |
+| `source`, `revision` | string | recorded as annotations |
+| `insecure` | bool | `false` |
+| `credentialsRef` | `{name}` | ambient credentials |
+
+| `oci-pull` | type | default |
+|---|---|---|
+| `repo` | string | required |
+| `tag` **or** `digest` | string | one of them, not both |
+| `out` | string | required |
+
+The artifact is the one Flux's `OCIRepository` consumes — the media types were
+read from an artifact `flux push artifact` produced, not from documentation. Its
+`revision` annotation is what Flux reports as the revision it applied, so that
+is how a deployment traces back to what produced it.
+
+**The digest is deterministic**: timestamps come from the Passage and tar entries
+are walked in order, so re-running a crossing republishes the identical digest
+rather than a new revision for Flux to deploy ([D37](DECISIONS.md)).
+
+`oci-pull` replaces its target directory rather than merging, so a retry after a
+partial unpack cannot leave a mixture of two artifacts, and an entry naming `../`
+is refused rather than quietly relocated.
+
+`insecure` allows a plain-HTTP registry and is always opt-in. Loopback registries
+are already treated as insecure by the underlying library, so the option is for
+named hosts.
+
+**Output (push):** `repo`, `tag`, `digest`, `url`.
+**Output (pull):** `digest`, `out`, `files`.
+
+**Reasons:** `RegistryAuthFailed`, `RegistryFailed`, `FileNotFound`, `InvalidConfig`.
+
 ## flux-reconcile
 
 Asks Flux to sync now rather than at its next interval.
@@ -413,7 +464,5 @@ capped at 4KB and reports `truncated`.
 
 ## Not here yet
 
-`oci-push` and `oci-pull` ([#69]).
-
-[#67]: https://github.com/olafkfreund/Hecate/issues/67
-[#69]: https://github.com/olafkfreund/Hecate/issues/69
+The step library is complete. New steps are added when something needs one, not
+in anticipation.

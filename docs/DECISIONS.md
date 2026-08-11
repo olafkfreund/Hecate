@@ -938,3 +938,38 @@ re-run leaves the tree clean (D23).
 **Load restrictions stay on by default**, matching kustomize's own default and
 Flux's: a build that can read anywhere in the checkout can read a file the
 author did not mean to publish.
+
+## D37 — The rendezvous is a versioned content store, and OCI proves it
+
+**Decision:** `oci-push` publishes a directory as a Flux OCI artifact, and
+`oci-pull` unpacks one. Registry credentials live in `pkg/registry`, used by both
+these steps and the Beacon's resolver.
+
+D3 says Hecate writes to a place Flux reads, and never speaks to Flux directly.
+Git is the usual place, not the required one — but until something else worked,
+that was a claim about intent rather than about the code. These steps make it a
+property: the same promotion can land in a registry instead of a repository, and
+nothing else about the model changes.
+
+**The media types were read from Flux, not from documentation.** An artifact
+Flux will not consume is worth nothing, so `application/vnd.cncf.flux.config.v1+json`
+and `application/vnd.cncf.flux.content.v1.tar+gzip` were taken from an artifact
+`flux push artifact` had actually produced into the dev registry.
+
+**The artifact is byte-deterministic**, and this matters more here than for
+rendering. An OCI artifact is addressed by a digest over its content, and the
+manifest carries an `org.opencontainers.image.created` annotation — so a
+wall-clock timestamp would mint a new digest on every attempt, and Flux would
+treat a re-run of the same crossing as a new revision to deploy. Timestamps come
+from the Passage (D23), tar entries are walked in lexical order, and ownership is
+zeroed.
+
+**A pulled archive is not trusted to stay inside its directory.** An entry naming
+`../` is refused rather than normalised: joining against a cleaned absolute path
+would silently relocate it, which is safe but hides that the artifact was
+malformed, and an artifact carrying traversal entries is worth failing over.
+
+**`insecure` is opt-in, always.** Falling back to plain HTTP without being asked
+would send registry credentials in clear. Note that go-containerregistry already
+treats a loopback registry as insecure, so the option is for named hosts — an
+internal registry terminating TLS elsewhere, or an air-gapped one.

@@ -115,6 +115,8 @@ func run() error {
 	stepRunners.MustRegister(steps.NewSetImage())
 	stepRunners.MustRegister(steps.NewRenderKustomize())
 	stepRunners.MustRegister(steps.NewRenderHelm())
+	stepRunners.MustRegister(steps.NewOCIPush(mgr.GetClient()))
+	stepRunners.MustRegister(steps.NewOCIPull(mgr.GetClient()))
 	stepRunners.MustRegister(steps.NewGitPullRequest(mgr.GetClient()))
 	stepRunners.MustRegister(steps.NewFluxReconcile(mgr.GetClient(), !opts.noCrossNS))
 	stepRunners.MustRegister(steps.NewHTTP(mgr.GetClient()))
