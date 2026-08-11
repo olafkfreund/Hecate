@@ -419,8 +419,26 @@ func bundleForensics(t *testing.T, c client.Client) string {
 	err := c.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &bundle)
 	switch {
 	case err == nil:
-		out += fmt.Sprintf("  GET by name: found it, created %s, deletionTimestamp %v\n",
-			bundle.CreationTimestamp, bundle.DeletionTimestamp)
+		out += fmt.Sprintf("  GET by name: found it, created %s, deletionTimestamp %v, rv %s\n",
+			bundle.CreationTimestamp, bundle.DeletionTimestamp, bundle.ResourceVersion)
+
+		// The heart of #110: a GET by name finds a Bundle that a LIST does not
+		// return, from the same uncached client, in the same namespace. Both
+		// should be quorum reads, so this should be impossible.
+		//
+		// Comparing resourceVersions says which story to believe. A list whose
+		// own rv is older than the object's is a stale read — k3d runs k3s,
+		// which is backed by kine rather than etcd, and that is where a
+		// list/get disagreement would come from. An rv at or past the object's
+		// means the list was current and genuinely did not contain it, which
+		// would be a much stranger bug and worth knowing early.
+		var again v1alpha1.BundleList
+		if err := c.List(ctx, &again, client.InNamespace(namespace)); err != nil {
+			out += fmt.Sprintf("  re-LIST: %s\n", err)
+		} else {
+			out += fmt.Sprintf("  re-LIST now: %d item(s), list rv %s\n",
+				len(again.Items), again.ResourceVersion)
+		}
 	default:
 		out += fmt.Sprintf("  GET by name: %s\n", err)
 	}
