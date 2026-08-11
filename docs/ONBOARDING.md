@@ -183,3 +183,9 @@ reason; if you applied them by hand, repeat it with
 
 **`nix build` fails on a vendor hash mismatch.** A dependency changed. Nix
 prints the correct hash — put it in `flake.nix` as `vendorHash`.
+
+**...but it passed locally and failed in CI.** Expected, and worth knowing: Nix
+treats a fixed-output derivation as already realised when an output with the
+specified hash exists in the store, so a stale `vendorHash` can validate against
+a leftover result on your machine. Only a clean store catches it, which is what
+the Nix workflow is for. Trust CI over a local pass here.
