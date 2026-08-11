@@ -75,12 +75,18 @@ notification-controller handles alerting ([D12](DECISIONS.md)).
 running Flux, in CI.
 
 ### M2 — Step library
-`flux-reconcile`, `git-clone`, `git-commit`, `git-push`, `git-pull-request`,
-`render-kustomize`, `render-helm`, `oci-push`, `http`.
-Expression evaluation over Bundle artifacts and prior step outputs. Per-step JSON
-Schema for validation and UI form generation.
+Done: `flux-wait`, `flux-reconcile`, `git-clone`, `git-commit`, `git-push`,
+`git-pull-request`, `edit-yaml`, `set-image`, and expression evaluation over
+Bundle artifacts and prior step outputs.
+
+Left: `render-kustomize`, `render-helm` ([#67](https://github.com/olafkfreund/Hecate/issues/67)),
+`oci-push`/`oci-pull` ([#69](https://github.com/olafkfreund/Hecate/issues/69)),
+`http` ([#70](https://github.com/olafkfreund/Hecate/issues/70)), and per-step JSON
+Schema validated at admission ([#71](https://github.com/olafkfreund/Hecate/issues/71),
+[#97](https://github.com/olafkfreund/Hecate/issues/97)).
 
 **Exit:** a Gate can render, commit, push, open a PR, wait for merge, and wait for Flux.
+Everything but rendering is there.
 
 ### M3 — Providers
 **GitHub and GitLab first**, both including their self-hosted forms (Enterprise Server,
