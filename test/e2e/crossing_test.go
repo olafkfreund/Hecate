@@ -186,7 +186,8 @@ func TestCrossingAgainstRealAPI(t *testing.T) {
 			return false
 		}
 		return len(bundles.Items) > 0
-	}, func() string { return beaconStatus(t, c) }, func() string { return everyBundle(t, c) })
+	}, func() string { return beaconStatus(t, c) }, func() string { return everyBundle(t, c) },
+		func() string { return bundleForensics(t, c) })
 	if len(bundles.Items) != 1 {
 		t.Fatalf("got %d Bundles, want 1: %s", len(bundles.Items), beaconStatus(t, c))
 	}
@@ -387,6 +388,60 @@ func beaconStatus(t *testing.T, c client.Client) string {
 // everyBundle lists Bundles across all namespaces. If the Beacon recorded a
 // latestBundle but the namespaced List sees nothing, the object either went
 // somewhere unexpected or was removed after creation — and which one matters.
+// bundleForensics answers the question the Bundle listing cannot: was the
+// Bundle never created, or created and then removed?
+//
+// #110 recurred after a fix based on the listing alone, which was not enough
+// evidence to diagnose from. The Beacon reports a latestBundle that no listing
+// finds, and these two facts separate the cases:
+//
+//   - a GET by that exact name is the API server's own answer, not a list that
+//     might lag;
+//   - the controller emits BundleEmitted only when its Create actually created
+//     something, so no event means Create returned AlreadyExists for an object
+//     that does not exist — a very different bug from one that deletes it.
+func bundleForensics(t *testing.T, c client.Client) string {
+	t.Helper()
+	ctx := context.Background()
+
+	var beacon v1alpha1.Beacon
+	if err := c.Get(ctx, types.NamespacedName{Name: "app", Namespace: namespace}, &beacon); err != nil {
+		return "the Beacon itself is unreadable: " + err.Error()
+	}
+	name := beacon.Status.LatestBundle
+	if name == "" {
+		return "the Beacon reports no latestBundle, so it never got as far as emitting"
+	}
+
+	out := fmt.Sprintf("namespace %s, latestBundle %s\n", namespace, name)
+
+	var bundle v1alpha1.Bundle
+	err := c.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &bundle)
+	switch {
+	case err == nil:
+		out += fmt.Sprintf("  GET by name: found it, created %s, deletionTimestamp %v\n",
+			bundle.CreationTimestamp, bundle.DeletionTimestamp)
+	default:
+		out += fmt.Sprintf("  GET by name: %s\n", err)
+	}
+
+	var events corev1.EventList
+	if err := c.List(ctx, &events, client.InNamespace(namespace)); err != nil {
+		out += "  events unlistable: " + err.Error()
+		return out
+	}
+	if len(events.Items) == 0 {
+		out += "  no events at all in the namespace"
+		return out
+	}
+	out += "  events:"
+	for i := range events.Items {
+		e := &events.Items[i]
+		out += fmt.Sprintf("\n    %s %s/%s: %s", e.Reason, e.InvolvedObject.Kind, e.InvolvedObject.Name, e.Message)
+	}
+	return out
+}
+
 func everyBundle(t *testing.T, c client.Client) string {
 	t.Helper()
 	var all v1alpha1.BundleList

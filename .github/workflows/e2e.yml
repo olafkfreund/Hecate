@@ -15,6 +15,10 @@ jobs:
   crossing:
     name: Crossing on k3d (Flux ${{ matrix.flux }})
     runs-on: ubuntu-latest
+    # A hung step otherwise runs until GitHub's six-hour default. k3d cluster
+    # creation has hung here once, mid-"Starting agents", which burned twenty
+    # minutes of a runner and told us nothing we could not have learnt in five.
+    timeout-minutes: 30
     # Scoped to the workspace, matching the dev shell: no step can reach a real
     # cluster even by accident.
     env:
