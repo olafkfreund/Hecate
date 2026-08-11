@@ -88,7 +88,10 @@ per-step JSON Schema validated at admission
 [#97](https://github.com/olafkfreund/Hecate/issues/97)).
 
 **Exit:** a Gate can render, commit, push, open a PR, wait for merge, and wait for Flux.
-Everything but rendering is there.
+Everything but rendering is there, and the rest is demonstrated rather than
+asserted: `TestDeployedControllerPromotesThroughGit` runs clone → repin → edit →
+commit → push → reconcile → wait in the deployed controller against a real git
+host, and asserts on the state Flux applied.
 
 ### M3 — Providers
 **GitHub and GitLab first**, both including their self-hosted forms (Enterprise Server,
