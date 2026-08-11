@@ -230,6 +230,27 @@ spec:
                   promotion can be correlated with the CI run that produced the artifact
                   and the reconciliation that applied it.
                 type: string
+              watch:
+                description: |-
+                  Watch are the health checks this Passage's steps asked the Gate to adopt.
+
+                  A step that waited for something — `flux-wait` waiting on a Kustomization,
+                  say — already knows what to watch, and the Gate should keep watching it
+                  afterwards. Without this the Gate goes blind the moment the Passage ends,
+                  and the operator has to restate the same resources in `gate.spec.watch`.
+                items:
+                  description: HealthCheck asks a registered checker to assess something.
+                  properties:
+                    uses:
+                      description: Uses names a registered health checker, e.g. "flux".
+                      type: string
+                    with:
+                      description: With is the checker's configuration.
+                      x-kubernetes-preserve-unknown-fields: true
+                  required:
+                  - uses
+                  type: object
+                type: array
             type: object
         required:
         - spec

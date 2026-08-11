@@ -34,6 +34,7 @@ rules:
   - beacons/status
   - bundles/status
   - gates/status
+  - passages/status
   verbs:
   - get
   - patch
@@ -42,9 +43,18 @@ rules:
   - hecate.dev
   resources:
   - bundles
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - hecate.dev
+  resources:
   - passages
   verbs:
   - create
   - get
   - list
+  - update
   - watch

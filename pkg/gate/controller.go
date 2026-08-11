@@ -82,12 +82,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// Record finished crossings before judging eligibility, so a Passage that
 	// just succeeded is reflected in `current` rather than leaving its Bundle
 	// looking eligible for a Gate it is already in.
-	active, err := r.observePassages(ctx, &gate)
+	active, latest, err := r.observePassages(ctx, &gate)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
-	gate.Status.Health = r.assess(ctx, &gate)
+	gate.Status.Health = r.assess(ctx, &gate, adopted(latest))
 
 	var bundles v1alpha1.BundleList
 	if err := r.List(ctx, &bundles, client.InNamespace(gate.Namespace)); err != nil {
@@ -189,17 +189,19 @@ func (r *Reconciler) startPassage(
 }
 
 // observePassages finds this Gate's Passages, records any completed crossing
-// that has not been recorded yet, and returns the one still running, if any.
-func (r *Reconciler) observePassages(ctx context.Context, gate *v1alpha1.Gate) (*v1alpha1.Passage, error) {
+// that has not been recorded yet, and returns the one still running (if any)
+// together with the most recent finished one.
+func (r *Reconciler) observePassages(
+	ctx context.Context, gate *v1alpha1.Gate,
+) (active, latest *v1alpha1.Passage, err error) {
 	var passages v1alpha1.PassageList
 	if err := r.List(ctx, &passages,
 		client.InNamespace(gate.Namespace),
 		client.MatchingLabels{LabelGate: gate.Name},
 	); err != nil {
-		return nil, fmt.Errorf("listing Passages: %w", err)
+		return nil, nil, fmt.Errorf("listing Passages: %w", err)
 	}
 
-	var active *v1alpha1.Passage
 	var newest *v1alpha1.Passage
 
 	for i := range passages.Items {
@@ -215,10 +217,23 @@ func (r *Reconciler) observePassages(ctx context.Context, gate *v1alpha1.Gate) (
 
 	if newest != nil {
 		if err := r.recordOutcome(ctx, gate, newest); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
-	return active, nil
+	return active, newest, nil
+}
+
+// adopted returns the health checks a finished Passage asked the Gate to keep
+// watching.
+//
+// Only from a *successful* crossing: a Passage that failed may have got no
+// further than cloning a repository, and adopting whatever it managed to emit
+// would have the Gate reporting on resources the crossing never reached.
+func adopted(latest *v1alpha1.Passage) []v1alpha1.HealthCheck {
+	if latest == nil || latest.Status.Phase != v1alpha1.PassageSucceeded {
+		return nil
+	}
+	return latest.Status.Watch
 }
 
 // recordOutcome writes a finished Passage into the Gate's status and the
@@ -286,11 +301,20 @@ func (r *Reconciler) recordOutcome(ctx context.Context, gate *v1alpha1.Gate, pas
 	return nil
 }
 
-func (r *Reconciler) assess(ctx context.Context, gate *v1alpha1.Gate) *v1alpha1.HealthReport {
+// assess reports the Gate's health, over both what the operator declared and
+// what the last successful crossing asked it to watch.
+//
+// The adopted checks are what stop a Gate going blind: a `flux-wait` step
+// already names the resources it waited for, so restating them in
+// `spec.watch` would be duplication that drifts.
+func (r *Reconciler) assess(
+	ctx context.Context, gate *v1alpha1.Gate, adopted []v1alpha1.HealthCheck,
+) *v1alpha1.HealthReport {
 	if r.Health == nil {
 		return &v1alpha1.HealthReport{Status: v1alpha1.HealthNotApplicable}
 	}
-	report := r.Health.Assess(ctx, gate.Namespace, gate.Name, gate.Spec.Watch)
+	checks := append(append([]v1alpha1.HealthCheck{}, gate.Spec.Watch...), adopted...)
+	report := r.Health.Assess(ctx, gate.Namespace, gate.Name, checks)
 	report.ObservedAt = &metav1.Time{Time: r.now()}
 	return &report
 }

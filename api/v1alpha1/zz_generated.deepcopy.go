@@ -805,6 +805,13 @@ func (in *PassageStatus) DeepCopyInto(out *PassageStatus) {
 		in, out := &in.FinishedAt, &out.FinishedAt
 		*out = (*in).DeepCopy()
 	}
+	if in.Watch != nil {
+		in, out := &in.Watch, &out.Watch
+		*out = make([]HealthCheck, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
 	if in.Evidence != nil {
 		in, out := &in.Evidence, &out.Evidence
 		*out = new(EvidenceRef)

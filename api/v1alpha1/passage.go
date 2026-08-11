@@ -109,6 +109,15 @@ type PassageStatus struct {
 	//
 	// +optional
 	FinishedAt *metav1.Time `json:"finishedAt,omitempty"`
+	// Watch are the health checks this Passage's steps asked the Gate to adopt.
+	//
+	// A step that waited for something — `flux-wait` waiting on a Kustomization,
+	// say — already knows what to watch, and the Gate should keep watching it
+	// afterwards. Without this the Gate goes blind the moment the Passage ends,
+	// and the operator has to restate the same resources in `gate.spec.watch`.
+	//
+	// +optional
+	Watch []HealthCheck `json:"watch,omitempty"`
 	// TraceID is the OpenTelemetry trace this Passage belongs to, so a
 	// promotion can be correlated with the CI run that produced the artifact
 	// and the reconciliation that applied it.

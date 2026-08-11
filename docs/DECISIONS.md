@@ -366,3 +366,53 @@ the audit.
 **Consequence.** Cleanup is explicit, and belongs to the garbage collector under
 [D13](#d13--bundles-are-garbage-collected-status-lists-are-capped)'s safety rule.
 Controllers use label-based `Watches` rather than `Owns` to react to their children.
+
+---
+
+## D19 — Passage scratch space is local and disposable
+
+**2026-08-11 · accepted**
+
+Each Passage gets a directory keyed by its UID, created on first use and removed
+when the Passage reaches a terminal phase. No PersistentVolume, no shared storage.
+
+**Why UID and not name.** A recreated Passage must never inherit a previous one's
+leftovers.
+
+**What happens on a controller restart.** The directory is gone, and the Passage
+resumes at the step it had reached — with an empty work dir. That is survivable
+because [D5](#d5--steps-are-polled-not-blocked) already requires steps to be
+re-entrant: `git-clone` clones again if the checkout is not there. Making scratch
+durable would mean a PersistentVolume per Passage, which is a great deal of machinery
+to avoid re-running a clone.
+
+**The step contract this creates**, and the thing to get right in every step written
+from here on: *a step must tolerate an empty work directory on any invocation, not just
+the first.* A step that assumes an earlier step's output is still on disk will work in
+testing and fail after a restart.
+
+Revisit only if a step appears whose work genuinely cannot be redone — a very large
+artifact download, say. The answer then is a cache keyed by content, not a durable
+work dir.
+
+---
+
+## D20 — A Gate adopts the health checks its crossing emitted
+
+**2026-08-11 · accepted**
+
+A step may return health checks alongside its result. The Passage records them in
+`status.watch`, and the Gate assesses them **in addition to** its own `spec.watch` —
+but only from a Passage that *succeeded*.
+
+**Why.** A `flux-wait` step already names the resources it waited for. Requiring the
+operator to restate the same list in `gate.spec.watch` is duplication, and duplicated
+configuration drifts: the day someone adds a HelmRelease to the step and forgets the
+Gate is the day the Gate stops noticing it is broken.
+
+**Why only on success.** A crossing that failed may have got no further than cloning a
+repository. Adopting whatever it managed to emit would have the Gate reporting on
+resources the crossing never reached.
+
+**Why not have the step write `gate.spec.watch` directly.** Controllers do not write
+user spec. The Passage records what it observed; the Gate decides what to do with it.

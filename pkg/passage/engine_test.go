@@ -64,7 +64,7 @@ func TestAdvanceRunsAllStepsToSuccess(t *testing.T) {
 
 	out := e.Advance(context.Background(), passageWith(
 		v1alpha1.Step{Uses: "a"}, v1alpha1.Step{Uses: "b"},
-	), nil)
+	), nil, "")
 
 	if out.Status.Phase != v1alpha1.PassageSucceeded {
 		t.Fatalf("phase = %s, want Succeeded (%s)", out.Status.Phase, out.Status.Message)
@@ -87,7 +87,7 @@ func TestAdvanceWaitsOnRunningStepAndResumes(t *testing.T) {
 	e := newEngine(waiter, after)
 	p := passageWith(v1alpha1.Step{Uses: "wait"}, v1alpha1.Step{Uses: "after"})
 
-	out := e.Advance(context.Background(), p, nil)
+	out := e.Advance(context.Background(), p, nil, "")
 	if out.Status.Phase != v1alpha1.PassageRunning {
 		t.Fatalf("phase = %s, want Running", out.Status.Phase)
 	}
@@ -100,7 +100,7 @@ func TestAdvanceWaitsOnRunningStepAndResumes(t *testing.T) {
 
 	// Persist the status the way the controller would, then resume.
 	p.Status = out.Status
-	out = e.Advance(context.Background(), p, nil)
+	out = e.Advance(context.Background(), p, nil, "")
 	if out.Status.Phase != v1alpha1.PassageSucceeded {
 		t.Fatalf("phase = %s, want Succeeded (%s)", out.Status.Phase, out.Status.Message)
 	}
@@ -123,7 +123,7 @@ func TestAdvanceStopsAtFailure(t *testing.T) {
 
 	out := e.Advance(context.Background(), passageWith(
 		v1alpha1.Step{Uses: "bad"}, v1alpha1.Step{Uses: "never"},
-	), nil)
+	), nil, "")
 
 	if out.Status.Phase != v1alpha1.PassageFailed {
 		t.Fatalf("phase = %s, want Failed", out.Status.Phase)
@@ -147,7 +147,7 @@ func TestContinueOnErrorProceeds(t *testing.T) {
 
 	out := e.Advance(context.Background(), passageWith(
 		v1alpha1.Step{Uses: "flaky", ContinueOnError: true}, v1alpha1.Step{Uses: "next"},
-	), nil)
+	), nil, "")
 
 	if out.Status.Phase != v1alpha1.PassageSucceeded {
 		t.Fatalf("phase = %s, want Succeeded", out.Status.Phase)
@@ -173,7 +173,7 @@ func TestTerminalErrorIgnoresContinueOnError(t *testing.T) {
 
 	out := e.Advance(context.Background(), passageWith(
 		v1alpha1.Step{Uses: "broken", ContinueOnError: true}, v1alpha1.Step{Uses: "next"},
-	), nil)
+	), nil, "")
 
 	if out.Status.Phase != v1alpha1.PassageFailed {
 		t.Fatalf("phase = %s, want Failed", out.Status.Phase)
@@ -186,7 +186,7 @@ func TestTerminalErrorIgnoresContinueOnError(t *testing.T) {
 func TestUnknownStepFailsWithAvailableNames(t *testing.T) {
 	e := newEngine(&scripted{name: "known", results: []StepResult{ok("")}})
 
-	out := e.Advance(context.Background(), passageWith(v1alpha1.Step{Uses: "typo"}), nil)
+	out := e.Advance(context.Background(), passageWith(v1alpha1.Step{Uses: "typo"}), nil, "")
 
 	if out.Status.Phase != v1alpha1.PassageFailed {
 		t.Fatalf("phase = %s, want Failed", out.Status.Phase)
@@ -209,7 +209,7 @@ func TestOutputsFlowBetweenSteps(t *testing.T) {
 
 	e.Advance(context.Background(), passageWith(
 		v1alpha1.Step{Uses: "producer", As: "commit"}, v1alpha1.Step{Uses: "consumer"},
-	), nil)
+	), nil, "")
 
 	if seen["commit"]["sha"] != "9f8c1a2b" {
 		t.Fatalf("consumer saw outputs %v, want commit.sha=9f8c1a2b", seen)
@@ -237,7 +237,7 @@ func TestOutputsSurviveResume(t *testing.T) {
 		},
 	}
 
-	out := e.Advance(context.Background(), p, nil)
+	out := e.Advance(context.Background(), p, nil, "")
 	if out.Status.Phase != v1alpha1.PassageSucceeded {
 		t.Fatalf("phase = %s, want Succeeded (%s)", out.Status.Phase, out.Status.Message)
 	}
@@ -258,7 +258,7 @@ func TestAbortStopsAndMarksUnfinishedSteps(t *testing.T) {
 		},
 	}
 
-	out := e.Advance(context.Background(), p, nil)
+	out := e.Advance(context.Background(), p, nil, "")
 
 	if out.Status.Phase != v1alpha1.PassageAborted {
 		t.Fatalf("phase = %s, want Aborted", out.Status.Phase)
@@ -278,7 +278,7 @@ func TestTerminalPassageIsNotRerun(t *testing.T) {
 	p := passageWith(v1alpha1.Step{Uses: "a"})
 	p.Status = v1alpha1.PassageStatus{Phase: v1alpha1.PassageSucceeded}
 
-	out := e.Advance(context.Background(), p, nil)
+	out := e.Advance(context.Background(), p, nil, "")
 	if r.calls != 0 {
 		t.Error("a completed Passage must never run its steps again")
 	}
@@ -294,7 +294,7 @@ func TestWatchIsCollectedFromSteps(t *testing.T) {
 	}}}
 	e := newEngine(emitter)
 
-	out := e.Advance(context.Background(), passageWith(v1alpha1.Step{Uses: "emit"}), nil)
+	out := e.Advance(context.Background(), passageWith(v1alpha1.Step{Uses: "emit"}), nil, "")
 	if len(out.Watch) != 1 || out.Watch[0].Uses != "flux" {
 		t.Fatalf("watch = %v, want one flux check for the Gate to adopt", out.Watch)
 	}

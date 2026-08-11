@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -16,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/olafkfreund/hecate/api/v1alpha1"
+	"github.com/olafkfreund/hecate/pkg/health"
 )
 
 func scheme(t *testing.T) *runtime.Scheme {
@@ -424,5 +426,79 @@ func TestHealthIsNotApplicableWithoutARegistry(t *testing.T) {
 	h := getGate(t, c, "dev").Status.Health
 	if h == nil || h.Status != v1alpha1.HealthNotApplicable {
 		t.Errorf("health = %+v, want NotApplicable reported rather than omitted", h)
+	}
+}
+
+// recordingChecker captures what it was asked to assess.
+type recordingChecker struct{ seen []health.Request }
+
+func (c *recordingChecker) Name() string { return "flux" }
+func (c *recordingChecker) Check(_ context.Context, req health.Request) v1alpha1.HealthReport {
+	c.seen = append(c.seen, req)
+	return v1alpha1.HealthReport{Status: v1alpha1.HealthHealthy}
+}
+
+// A `flux-wait` step already names the resources it waited on. The Gate must
+// adopt them, or it goes blind the moment the Passage ends.
+func TestGateAdoptsWatchFromSucceededPassage(t *testing.T) {
+	g := autoGate("staging", admits("podinfo"))
+	b := bundle("b1", "podinfo", 0)
+	r, c, _ := newReconciler(t, g, &b)
+
+	checker := &recordingChecker{}
+	reg := health.NewRegistry()
+	reg.MustRegister(checker)
+	r.Health = reg
+
+	reconcileGate(t, r, "staging")
+	p := listPassages(t, c)[0]
+	p.Status.Phase = v1alpha1.PassageSucceeded
+	p.Status.Watch = []v1alpha1.HealthCheck{{
+		Uses: "flux",
+		With: &apiextensionsv1.JSON{Raw: []byte(`{"resources":[{"kind":"Kustomization","name":"podinfo"}]}`)},
+	}}
+	if err := c.Status().Update(context.Background(), &p); err != nil {
+		t.Fatal(err)
+	}
+
+	checker.seen = nil
+	reconcileGate(t, r, "staging")
+
+	if len(checker.seen) != 1 {
+		t.Fatalf("checker invoked %d times, want 1 — the Passage's watch was not adopted", len(checker.seen))
+	}
+	if !strings.Contains(string(checker.seen[0].Config), "podinfo") {
+		t.Errorf("adopted config = %s, want the Kustomization the step waited on", checker.seen[0].Config)
+	}
+	if got := getGate(t, c, "staging").Status.Health; got == nil || got.Status != v1alpha1.HealthHealthy {
+		t.Errorf("health = %+v, want Healthy", got)
+	}
+}
+
+// A crossing that failed may not have got past cloning a repository; adopting
+// whatever it emitted would report on resources it never reached.
+func TestGateIgnoresWatchFromFailedPassage(t *testing.T) {
+	g := autoGate("staging", admits("podinfo"))
+	b := bundle("b1", "podinfo", 0)
+	r, c, _ := newReconciler(t, g, &b)
+
+	checker := &recordingChecker{}
+	reg := health.NewRegistry()
+	reg.MustRegister(checker)
+	r.Health = reg
+
+	reconcileGate(t, r, "staging")
+	p := listPassages(t, c)[0]
+	p.Status.Phase = v1alpha1.PassageFailed
+	p.Status.Watch = []v1alpha1.HealthCheck{{Uses: "flux"}}
+	if err := c.Status().Update(context.Background(), &p); err != nil {
+		t.Fatal(err)
+	}
+
+	checker.seen = nil
+	reconcileGate(t, r, "staging")
+
+	if len(checker.seen) != 0 {
+		t.Errorf("adopted a watch from a failed crossing: %+v", checker.seen)
 	}
 }

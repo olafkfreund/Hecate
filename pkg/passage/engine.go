@@ -20,8 +20,6 @@ import (
 // process memory, so a restart resumes mid-Passage instead of starting over.
 type Engine struct {
 	Registry *Registry
-	// WorkDirFor supplies the scratch directory shared by a Passage's steps.
-	WorkDirFor func(p *v1alpha1.Passage) string
 	// Now is the clock, injectable for tests.
 	Now func() time.Time
 }
@@ -46,7 +44,14 @@ func (e *Engine) now() time.Time {
 }
 
 // Advance runs the Passage from wherever it left off.
-func (e *Engine) Advance(ctx context.Context, p *v1alpha1.Passage, bundle *v1alpha1.Bundle) Outcome {
+//
+// workDir is the scratch directory shared by this Passage's steps; the caller
+// owns its lifecycle. Passed in rather than resolved through a callback,
+// because the caller already knows it and a callback would only add a way to
+// forget to set it.
+func (e *Engine) Advance(
+	ctx context.Context, p *v1alpha1.Passage, bundle *v1alpha1.Bundle, workDir string,
+) Outcome {
 	status := *p.Status.DeepCopy()
 	now := e.now()
 
@@ -113,7 +118,7 @@ func (e *Engine) Advance(ctx context.Context, p *v1alpha1.Passage, bundle *v1alp
 			Passage:   p.Name,
 			Bundle:    bundle,
 			Actor:     p.Spec.Actor,
-			WorkDir:   e.workDir(p),
+			WorkDir:   workDir,
 			Config:    cfg,
 			Outputs:   outputs,
 			Attempt:   st.Attempts - 1,
@@ -170,13 +175,6 @@ func (e *Engine) Advance(ctx context.Context, p *v1alpha1.Passage, bundle *v1alp
 	status.Message = fmt.Sprintf("crossed %s", p.Spec.Gate)
 	status.FinishedAt = &metav1.Time{Time: now}
 	return Outcome{Status: status, Watch: watch}
-}
-
-func (e *Engine) workDir(p *v1alpha1.Passage) string {
-	if e.WorkDirFor != nil {
-		return e.WorkDirFor(p)
-	}
-	return ""
 }
 
 func (e *Engine) finishStep(st *v1alpha1.StepStatus, phase v1alpha1.StepPhase, msg string, now time.Time) {

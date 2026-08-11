@@ -16,7 +16,8 @@ This is the *how*.
 | `pkg/passage/steps` — `flux-wait` | ✅ done |
 | `pkg/beacon` — discovery, image resolution, Beacon controller | ✅ done |
 | `pkg/gate` — eligibility, promotion windows, Gate controller | ✅ done |
-| Passage controller | M1 |
+| `pkg/passage` — execution engine and Passage controller | ✅ done |
+| Helm chart, RBAC wiring, e2e | M1 |
 | Step library (git, render, OCI) | M2 |
 | Providers (git hosts, registries) | M3 |
 | Fides evidence | M4 |
@@ -26,7 +27,7 @@ This is the *how*.
 | API server | M7 |
 | UI | M8 |
 
-85 tests, no cluster required, ~1s.
+97 tests, no cluster required, ~1s.
 
 ## 2. Technology
 
