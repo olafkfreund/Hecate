@@ -91,6 +91,11 @@ EOF
 # in the cluster the deployed controller had never performed one. See
 # scripts/git-server.yaml for why Gitea rather than something smaller.
 git_server() {
+  # Seeding talks to Gitea's API rather than cloning, so it needs these two.
+  # Named here rather than at the top: nothing else in the script uses them, and
+  # a missing tool should say which step wanted it.
+  require curl base64
+
   if kubectl get namespace hecate-git >/dev/null 2>&1; then
     log "git server already installed"
     return
