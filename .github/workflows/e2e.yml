@@ -19,6 +19,10 @@ jobs:
     # cluster even by accident.
     env:
       KUBECONFIG: ${{ github.workspace }}/.dev/kubeconfig
+      # Which e2e tests run in which phase. Every test in the package must
+      # appear in one of these; a step below enforces that.
+      BEFORE_INSTALL: 'TestCrossingAgainstRealAPI|TestFidesEnvironmentIsValidatedAtAdmission'
+      AFTER_INSTALL: 'TestDeployedControllerCrossesAGate'
     strategy:
       fail-fast: false
       matrix:
@@ -60,17 +64,34 @@ jobs:
       - name: Create the cluster
         run: ./scripts/dev-cluster.sh up
 
-      # Before installing: the API-contract test drives the reconcilers itself,
-      # so a deployed controller would race it.
+      # The two phases below select tests by name, because one needs Hecate
+      # deployed and the other must not have it. That makes it possible to add a
+      # test that never runs while the job stays green — which happened. This
+      # step fails if any test in the package matches neither phase.
+      - name: Every e2e test is claimed by a phase
+        run: |
+          set -euo pipefail
+          all=$(go test -tags e2e -list '.*' ./test/e2e/... | grep '^Test' | sort)
+          claimed=$(printf '%s\n' $BEFORE_INSTALL $AFTER_INSTALL | tr '|' '\n' | sort)
+          orphans=$(comm -23 <(echo "$all") <(echo "$claimed"))
+          if [ -n "$orphans" ]; then
+            echo "These e2e tests are in neither phase, so they never run:"
+            echo "$orphans"
+            echo "Add each to BEFORE_INSTALL or AFTER_INSTALL in this workflow."
+            exit 1
+          fi
+
+      # Before installing: these drive the reconcilers themselves, or need only
+      # the CRDs, so a deployed controller would race them.
       - name: E2E — API contract (no controller deployed)
-        run: go test -tags e2e -count=1 -timeout 10m -v -run TestCrossingAgainstRealAPI ./test/e2e/...
+        run: go test -tags e2e -count=1 -timeout 10m -v -run "^($BEFORE_INSTALL)$" ./test/e2e/...
 
       - name: Build and install Hecate
         run: make install
 
       # After installing: the whole product as a deployment.
       - name: E2E — deployed controller
-        run: go test -tags e2e -count=1 -timeout 20m -v -run TestDeployedControllerCrossesAGate ./test/e2e/...
+        run: go test -tags e2e -count=1 -timeout 20m -v -run "^($AFTER_INSTALL)$" ./test/e2e/...
 
       - name: Diagnostics on failure
         if: failure()
