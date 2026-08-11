@@ -182,6 +182,12 @@ func (e *Engine) Advance(
 			}
 		}
 		watch = append(watch, res.Watch...)
+		// Last writer wins: a step that re-read the change gate has a fresher
+		// verdict than the one before it, and an evidence record that lagged
+		// behind the crossing would be worse than none.
+		if res.Evidence != nil {
+			status.Evidence = res.Evidence
+		}
 
 		switch {
 		case err != nil && (IsTerminal(err) || !step.ContinueOnError):

@@ -79,10 +79,26 @@ spec:
           expectedRevision: ${{ steps.commit.sha }}
 ```
 
-### Verifying what crossed
+### Compliance as a gate, not a report
 
-Hecate records each crossing in [Fides](https://github.com/olafkfreund/evidance-vault)
-as an attestation trail. A Gate says which Fides environment it is:
+A Gate can refuse a crossing on evidence. All four of
+[Fides](https://github.com/olafkfreund/evidance-vault)'s gates are available as
+one step — is the artifact compliant, is it approved for this environment, does
+the environment's policy accept the build, and what does the change gate say:
+
+```yaml
+    steps:
+      - uses: evidence-gate
+        with:
+          gates: [assert, allowlist, policy, change]
+          maxRisk: 40
+```
+
+A `hold` waits for the human to sign off rather than failing the promotion; the
+other three end it. The evidence judged is the trail CI recorded when it built
+the image, so the gates see the SBOM and scans that actually exist.
+
+A Gate says which Fides environment it is:
 
 ```yaml
 spec:
@@ -190,7 +206,7 @@ ok  github.com/olafkfreund/hecate/pkg/passage
 ok  github.com/olafkfreund/hecate/pkg/passage/steps
 ```
 
-204 tests, no cluster required, ~1s. That is the bar: anything testable without a
+220 tests, no cluster required, ~1s. That is the bar: anything testable without a
 cluster must be. Image resolution is tested against a real in-memory registry rather
 than a mock.
 
@@ -202,7 +218,7 @@ controller-gen — at the versions CI uses.
 ```bash
 nix develop          # or: direnv allow
 
-make test            # 204 tests, ~1s, no cluster
+make test            # 220 tests, ~1s, no cluster
 make cluster         # k3d in Docker, with Flux installed
 make install         # build, push and install the chart into the dev cluster
 make e2e             # drive a Bundle through two Gates on a real API server

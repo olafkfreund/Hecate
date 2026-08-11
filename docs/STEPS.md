@@ -233,6 +233,57 @@ after the Passage ends ([D20](DECISIONS.md)).
 
 **Reasons:** `FluxDegraded`, `InvalidConfig`.
 
+## evidence-gate
+
+Consults [Fides](https://github.com/olafkfreund/evidance-vault) before a
+crossing proceeds. The Gate must carry `evidence.fidesEnvironment` and
+`evidence.credentialsRef` ([D27](DECISIONS.md)).
+
+```yaml
+- uses: evidence-gate
+  with:
+    gates: [assert, allowlist, policy, change]
+    policy: production-baseline
+    maxRisk: 40
+    holdTimeout: 48h
+```
+
+| field | type | default |
+|---|---|---|
+| `gates` | \[assert \| allowlist \| policy \| change] | required |
+| `policy` | string | every policy that applies |
+| `maxRisk` | 0–100 | none |
+| `holdTimeout` | duration | `24h` |
+| `pollInterval` | duration | `1m` |
+
+| gate | asks | scoped by |
+|---|---|---|
+| `assert` | is this artifact compliant with a policy? | the Bundle's image digests |
+| `allowlist` | is this artifact approved for this environment? | digest + environment |
+| `policy` | does the environment's policy accept this build? | environment + the build's trail |
+| `change` | evidence-backed approval verdict and 0–100 risk score | the build's trail |
+
+The trail is the one **CI** recorded when it built the image, found from the
+digest — not one Hecate opened. A fresh trail would carry none of the SBOM and
+scan attestations the last two gates judge, so both would refuse every promotion
+([D29](DECISIONS.md)). An artifact Fides has never seen is a refusal: approving
+what cannot be seen is the failure the system exists to prevent.
+
+**A `hold` waits, a refusal does not** ([D30](DECISIONS.md)). The first three
+gates end the crossing when they say no — the answer will not change until a
+human changes something. A held change gate reports `Running` and polls, because
+a hold usually means every control passed and Fides wants a second signature.
+The wait is bounded by `holdTimeout`. `maxRisk` is terminal even when Fides
+approved, since the score is about evidence that already exists.
+
+An unreachable Fides is retryable; a rejected token is not.
+
+**Output:** `trail`, `verdict`, `risk`. Also written to
+`passage.status.evidence`, which is what `hecate verify` reads.
+
+**Reasons:** `NotCompliant`, `NotAllowlisted`, `NoEvidence`, `ChangeHeld`,
+`EvidenceUnavailable`, `InvalidConfig`.
+
 ## http
 
 Calls an external system: notify, trigger, query.

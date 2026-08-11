@@ -13,6 +13,7 @@
 package fides
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -69,6 +70,7 @@ func New(cfg Config) (*Client, error) {
 // a rejected token from a trail that is not there.
 type Error struct {
 	Status int
+	Method string
 	Path   string
 	Body   string
 }
@@ -78,7 +80,7 @@ func (e *Error) Error() string {
 	if body == "" {
 		body = http.StatusText(e.Status)
 	}
-	return fmt.Sprintf("fides: GET %s: %d: %s", e.Path, e.Status, body)
+	return fmt.Sprintf("fides: %s %s: %d: %s", e.Method, e.Path, e.Status, body)
 }
 
 // IsNotFound reports whether Fides says the thing is not there.
@@ -205,16 +207,33 @@ func (c *Client) Allowlisted(ctx context.Context, environment, sha256 string) (b
 }
 
 func (c *Client) get(ctx context.Context, path string, out any) error {
+	return c.do(ctx, http.MethodGet, path, nil, out)
+}
+
+// do sends a request and decodes the response into out, which may be nil.
+func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
+	var payload io.Reader
+	if body != nil {
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("fides: encoding the request: %w", err)
+		}
+		payload = bytes.NewReader(encoded)
+	}
+
 	ref, err := url.Parse(path)
 	if err != nil {
 		return fmt.Errorf("fides: path %q: %w", path, err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base.ResolveReference(ref).String(), nil)
+	req, err := http.NewRequestWithContext(ctx, method, c.base.ResolveReference(ref).String(), payload)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -224,15 +243,18 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 
 	// Capped: a reverse proxy answering with a login page should not become a
 	// megabyte in an error message.
-	payload, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	answer, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return fmt.Errorf("fides: reading the response: %w", err)
 	}
 	if resp.StatusCode >= 300 {
-		return &Error{Status: resp.StatusCode, Path: path, Body: string(payload)}
+		return &Error{Status: resp.StatusCode, Method: method, Path: path, Body: string(answer)}
 	}
-	if err := json.Unmarshal(payload, out); err != nil {
-		return fmt.Errorf("fides: GET %s: decoding the response: %w", path, err)
+	if out == nil {
+		return nil
+	}
+	if err := json.Unmarshal(answer, out); err != nil {
+		return fmt.Errorf("fides: %s %s: decoding the response: %w", method, path, err)
 	}
 	return nil
 }

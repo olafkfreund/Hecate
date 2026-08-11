@@ -665,3 +665,52 @@ success is how a pipeline ends up green over an empty audit trail.
 **Every crossing is checked before it returns**, and the worst verdict decides
 the exit code. Stopping at the first broken chain would hide how much of the
 history is affected.
+
+## D29 — A crossing gates on the build's trail, not one of its own
+
+**Decision:** `evidence-gate` resolves the Bundle's image digest to the Fides
+trail CI recorded when it built that image, and gates on that. Hecate does not
+open a trail per crossing.
+
+The obvious design is the wrong one. A trail Hecate opened for the crossing
+would be empty: the SBOM, the scans, the signatures — everything an environment
+policy requires and the change gate scores — were attested by CI onto the
+*build's* trail. Gating on a fresh trail means `policy check` refuses for
+missing everything and `change-gate` scores maximum risk on every promotion. A
+control that always says no is a control somebody switches off, which is worse
+than not having built it.
+
+Resolving by digest also means the evidence follows the artifact rather than the
+process. The same image promoted through four Gates is judged against the same
+attestations each time, and an auditor asking "what was known about this image
+when it went to production" gets one answer.
+
+**An artifact Fides has never seen is a refusal, not a pass.** If CI did not
+report the artifact there is no evidence, and approving what cannot be seen is
+the failure the whole system exists to prevent.
+
+## D30 — A held change waits; a refused one does not
+
+**Decision:** of the four Fides gates, three fail terminally and one waits. A
+`hold` from the change gate returns `Running` and polls; `assert`, `allowlist`
+and `policy check` saying no ends the crossing.
+
+They are different kinds of no. A non-compliant artifact, a digest missing from
+the allowlist and an unsatisfied environment policy are all statements about
+evidence that already exists — retrying changes nothing until a human changes
+something, and a Passage that retried would just fail more slowly. A hold is
+usually the opposite: every control is satisfied and Fides is waiting for a
+second person to sign off, which is segregation of duties working exactly as
+intended. Failing there would make the control unusable, because every promotion
+requiring approval would fail before anyone could approve it.
+
+**But not forever** (D6). `holdTimeout` bounds the wait at 24h by default, and
+the failure names how long it waited and what was blocking it.
+
+**`maxRisk` is terminal even when Fides approved.** The score is computed from
+evidence that already exists, so waiting will not lower it.
+
+**An unreachable Fides is not a refusal.** It is retryable, because permanently
+blocking every promotion in the fleet whenever the compliance system restarts is
+its own outage. A rejected *token* is terminal — that will not start working on
+its own.

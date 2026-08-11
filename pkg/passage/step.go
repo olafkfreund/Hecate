@@ -82,6 +82,14 @@ type StepResult struct {
 	// monitoring what the step waited for. Without this a Gate goes blind the
 	// moment its Passage finishes.
 	Watch []v1alpha1.HealthCheck
+	// Evidence is the compliance record this step produced or consulted, copied
+	// onto the Passage's status.
+	//
+	// Carried here rather than dug out of Output by the controller, for the same
+	// reason as Watch: a step knows what it recorded, and a controller matching
+	// on well-known output keys would break the moment a step chose a different
+	// name for them.
+	Evidence *v1alpha1.EvidenceRef
 	// RetryAfter suggests how long to wait before the next invocation.
 	RetryAfter time.Duration
 }

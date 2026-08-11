@@ -35,6 +35,7 @@ type options struct {
 	leaderID    string
 	workRoot    string
 	noCrossNS   bool
+	fidesServer string
 	showVersion bool
 }
 
@@ -60,6 +61,9 @@ func run() error {
 	flag.BoolVar(&opts.noCrossNS, "no-cross-namespace-refs", true,
 		"Refuse a Gate watching resources outside its own namespace. Matches Flux's own "+
 			"posture; set false only on a single-tenant cluster.")
+	flag.StringVar(&opts.fidesServer, "fides-server", os.Getenv("FIDES_SERVER_URL"),
+		"Default Fides server for evidence-gate steps. A Gate may override it with "+
+			"evidence.serverURL; a fleet with one Fides sets it here instead of on every Gate.")
 	flag.BoolVar(&opts.showVersion, "version", false, "Print the version and exit.")
 
 	zapOpts := zap.Options{Development: false}
@@ -112,6 +116,7 @@ func run() error {
 	stepRunners.MustRegister(steps.NewGitPullRequest(mgr.GetClient()))
 	stepRunners.MustRegister(steps.NewFluxReconcile(mgr.GetClient(), !opts.noCrossNS))
 	stepRunners.MustRegister(steps.NewHTTP(mgr.GetClient()))
+	stepRunners.MustRegister(steps.NewEvidenceGate(mgr.GetClient(), opts.fidesServer))
 
 	if err := (&beacon.Reconciler{
 		Client:   mgr.GetClient(),
