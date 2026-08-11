@@ -114,6 +114,13 @@ cluster-load: ## Build the controller image and push it to the cluster registry
 	HECATE_DEV_TAG=$(DEV_TAG) ./scripts/dev-cluster.sh load
 
 install: cluster-load ## Build, push and install the chart into the dev cluster
+	@# Helm installs crds/ once and never touches it again on upgrade, so a new
+	@# API field would be silently pruned by the API server and the controller
+	@# would see a zero value. That cost an hour: watch[].image.insecure was set
+	@# in the object, absent from the cluster's CRD, and the Beacon kept trying
+	@# HTTPS. Applied explicitly here, and server-side so Helm's field ownership
+	@# does not conflict.
+	kubectl apply --server-side --force-conflicts -f $(CHART_DIR)/crds/
 	helm upgrade --install hecate $(CHART_DIR) \
 		--namespace hecate-system --create-namespace \
 		--set image.repository=hecate-registry:5001/hecate-controller \

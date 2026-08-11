@@ -217,6 +217,13 @@ client-side first. `make cluster` uses server-side apply for exactly this
 reason; if you applied them by hand, repeat it with
 `kubectl apply --server-side --force-conflicts`.
 
+**A new API field is silently ignored in the cluster.** Helm installs `crds/`
+once and never updates it on upgrade, so the API server prunes a field its CRD
+does not declare — no error, just a zero value in the controller. `make install`
+applies the CRDs explicitly for this reason; if you are upgrading a real
+installation, `kubectl apply --server-side -f charts/hecate/crds/` first. See
+[#117](https://github.com/olafkfreund/Hecate/issues/117).
+
 **`nix build` fails on a vendor hash mismatch.** A dependency changed. Nix
 prints the correct hash — put it in `flake.nix` as `vendorHash`.
 

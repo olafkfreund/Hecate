@@ -127,6 +127,15 @@ type ImageWatch struct {
 	//
 	// +optional
 	CredentialsRef *LocalSecretRef `json:"credentialsRef,omitempty"`
+	// Insecure allows a plain-HTTP registry: one that terminates TLS elsewhere,
+	// an air-gapped one, or a local development registry.
+	//
+	// False unless asked for, and deliberately so — downgrading to HTTP without
+	// being told to would send the registry credentials above in clear. Matches
+	// Flux's own `OCIRepository.spec.insecure`.
+	//
+	// +optional
+	Insecure bool `json:"insecure,omitempty"`
 }
 
 // TagSelection is how to choose among available tags.

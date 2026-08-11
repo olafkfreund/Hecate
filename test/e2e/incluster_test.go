@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/google/go-containerregistry/pkg/v1/random"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -38,6 +41,38 @@ var (
 		Group: "kustomize.toolkit.fluxcd.io", Version: "v1", Kind: "Kustomization",
 	}
 )
+
+// publishImages pushes tagged images into the cluster's registry, so the
+// deployed Beacon has something to discover without reaching the internet.
+//
+// Two addresses for one registry, which is not obvious: the test pushes from the
+// host on :5001, and the Beacon in the cluster reads it as
+// hecate-registry:5000. See the constants above.
+func publishImages(t *testing.T, repo string, tags ...string) map[string]string {
+	t.Helper()
+	digests := map[string]string{}
+	for i, tag := range tags {
+		img, err := random.Image(int64(64+i), 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Insecure because the k3d registry is plain HTTP — the same reason the
+		// Beacon needs spec.watch[].image.insecure to read it.
+		ref, err := name.NewTag(registryFromHost+"/"+repo+":"+tag, name.Insecure)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := remote.Write(ref, img); err != nil {
+			t.Fatalf("pushing %s: %v", ref, err)
+		}
+		d, err := img.Digest()
+		if err != nil {
+			t.Fatal(err)
+		}
+		digests[tag] = d.String()
+	}
+	return digests
+}
 
 // requireHecateInstalled skips unless the controller is actually deployed. The
 // out-of-cluster test in crossing_test.go covers the API contract without it;
@@ -154,11 +189,13 @@ func TestDeployedControllerCrossesAGate(t *testing.T) {
 	publishArtifact(t, "v1")
 	applyFluxSource(t, c, "v1")
 
-	// A real registry, not the in-process one: the Beacon runs *in the cluster*
-	// here and cannot reach the test process's loopback. The k3d registry is not
-	// an option either — it is plain HTTP and the image resolver has no insecure
-	// mode (#109). So this test needs the network, unlike every other one.
-	const podinfo = "ghcr.io/stefanprodan/podinfo"
+	// The cluster's own registry, not the internet. The Beacon runs *in the
+	// cluster* here so it cannot reach the test process's loopback, and the k3d
+	// registry is plain HTTP — which is exactly what watch[].image.insecure is
+	// for (#109). Before that field existed this test pulled from ghcr.io and
+	// was the only one in the suite that needed the network.
+	const app = "e2e/podinfo"
+	publishImages(t, app, "6.0.0", "6.1.0")
 
 	// No spec.watch on the Gate: health must come from what flux-wait emits.
 	if err := c.Create(ctx, &v1alpha1.Beacon{
@@ -166,7 +203,7 @@ func TestDeployedControllerCrossesAGate(t *testing.T) {
 		Spec: v1alpha1.BeaconSpec{
 			Interval: metav1.Duration{Duration: 30 * time.Second},
 			Watch: []v1alpha1.WatchSource{{Image: &v1alpha1.ImageWatch{
-				Repo: podinfo, Constraint: "^6.0.0",
+				Repo: registryFromCluster + "/" + app, Constraint: "^6.0.0", Insecure: true,
 			}}},
 		},
 	}); err != nil {

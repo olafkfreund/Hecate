@@ -53,7 +53,7 @@ func (r *Resolver) resolveImage(ctx context.Context, namespace string, w v1alpha
 		return v1alpha1.Artifact{}, &ErrUnsupported{What: "platform-specific digest resolution"}
 	}
 
-	repo, err := name.NewRepository(w.Repo)
+	repo, err := name.NewRepository(w.Repo, registry.NameOptions(w.Insecure)...)
 	if err != nil {
 		return v1alpha1.Artifact{}, fmt.Errorf("invalid repository %q: %w", w.Repo, err)
 	}
@@ -62,7 +62,7 @@ func (r *Resolver) resolveImage(ctx context.Context, namespace string, w v1alpha
 	if err != nil {
 		return v1alpha1.Artifact{}, err
 	}
-	opts := []remote.Option{remote.WithContext(ctx), remote.WithAuthFromKeychain(keychain)}
+	opts := registry.RemoteOptions(ctx, keychain)
 
 	tags, err := remote.List(repo, opts...)
 	if err != nil {
