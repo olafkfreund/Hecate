@@ -17,6 +17,7 @@ import (
 
 	"github.com/olafkfreund/hecate/api/v1alpha1"
 	"github.com/olafkfreund/hecate/pkg/health"
+	"github.com/olafkfreund/hecate/pkg/metrics"
 )
 
 const (
@@ -70,6 +71,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	var gate v1alpha1.Gate
 	if err := r.Get(ctx, req.NamespacedName, &gate); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			// Stop reporting a deleted Gate's health, or an alert on it never
+			// clears.
+			metrics.ForgetGate(req.Namespace, req.Name)
+		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	gate.Status.ObservedGeneration = gate.Generation
@@ -88,7 +94,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, err
 	}
 
+	previous := currentHealth(&gate)
 	gate.Status.Health = r.assess(ctx, &gate, adopted(latest))
+	r.announceHealth(&gate, previous)
 
 	var bundles v1alpha1.BundleList
 	if err := r.List(ctx, &bundles, client.InNamespace(gate.Namespace)); err != nil {
@@ -308,6 +316,43 @@ func (r *Reconciler) recordOutcome(ctx context.Context, gate *v1alpha1.Gate, pas
 // The adopted checks are what stop a Gate going blind: a `flux-wait` step
 // already names the resources it waited for, so restating them in
 // `spec.watch` would be duplication that drifts.
+// currentHealth reads the last recorded health, for transition detection.
+func currentHealth(gate *v1alpha1.Gate) v1alpha1.Health {
+	if gate.Status.Health == nil {
+		return ""
+	}
+	return gate.Status.Health.Status
+}
+
+// announceHealth publishes the health gauge, and records an Event when the
+// state actually changes.
+//
+// On the transition only: a Gate is reconciled every minute, and an Event per
+// reconcile would drown notification-controller and make the useful ones
+// invisible. A Gate going Degraded after a crossing is the alert worth having.
+func (r *Reconciler) announceHealth(gate *v1alpha1.Gate, previous v1alpha1.Health) {
+	now := currentHealth(gate)
+	metrics.RecordGateHealth(gate.Namespace, gate.Name, now)
+
+	if now == previous || now == "" {
+		return
+	}
+	// First observation is not a transition worth alerting on.
+	if previous == "" {
+		return
+	}
+
+	eventType := corev1.EventTypeNormal
+	if now == v1alpha1.HealthDegraded || now == v1alpha1.HealthUnknown {
+		eventType = corev1.EventTypeWarning
+	}
+	message := fmt.Sprintf("health changed from %s to %s", previous, now)
+	if issues := gate.Status.Health.Issues; len(issues) > 0 {
+		message = fmt.Sprintf("%s: %s", message, issues[0])
+	}
+	r.event(gate, eventType, "HealthChanged", message)
+}
+
 func (r *Reconciler) assess(
 	ctx context.Context, gate *v1alpha1.Gate, adopted []v1alpha1.HealthCheck,
 ) *v1alpha1.HealthReport {

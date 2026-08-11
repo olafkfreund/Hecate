@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/olafkfreund/hecate/api/v1alpha1"
+	"github.com/olafkfreund/hecate/pkg/metrics"
 )
 
 // Reconciler drives a Passage's steps to completion.
@@ -116,6 +117,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	if passage.Status.Phase.Terminal() {
 		r.announce(&passage, before)
+		recordMetrics(&passage)
 		r.cleanup(ctx, &passage)
 		logger.Info("passage finished",
 			"phase", passage.Status.Phase, "gate", passage.Spec.Gate, "bundle", passage.Spec.Bundle)
@@ -174,6 +176,28 @@ func (r *Reconciler) announce(p *v1alpha1.Passage, before v1alpha1.PassagePhase)
 		r.event(p, corev1.EventTypeWarning, "PassageFailed",
 			fmt.Sprintf("crossing %s failed: %s", p.Spec.Gate, p.Status.Message))
 	}
+}
+
+// recordMetrics publishes the finished crossing and each of its steps.
+//
+// Called only on the transition to terminal, from the same branch as the event,
+// so a Passage reconciled again after finishing is not counted twice.
+func recordMetrics(p *v1alpha1.Passage) {
+	metrics.RecordPassage(p.Namespace, p.Spec.Gate, p.Status.Phase, span(p.Status.StartedAt, p.Status.FinishedAt))
+	for _, st := range p.Status.Steps {
+		if st.Phase.Terminal() {
+			metrics.RecordStep(p.Namespace, p.Spec.Gate, st.Uses, st.Phase, span(st.StartedAt, st.FinishedAt))
+		}
+	}
+}
+
+// span returns the seconds between two timestamps, or -1 when either is unset
+// so the caller can skip rather than record a nonsense observation.
+func span(from, to *metav1.Time) float64 {
+	if from == nil || to == nil {
+		return -1
+	}
+	return to.Sub(from.Time).Seconds()
 }
 
 func (r *Reconciler) event(p *v1alpha1.Passage, eventType, reason, message string) {

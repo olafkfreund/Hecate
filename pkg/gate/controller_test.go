@@ -502,3 +502,74 @@ func TestGateIgnoresWatchFromFailedPassage(t *testing.T) {
 		t.Errorf("adopted a watch from a failed crossing: %+v", checker.seen)
 	}
 }
+
+// A Gate going Degraded after a crossing is the alert worth having — but only
+// on the transition. A Gate reconciles every minute, and an event per reconcile
+// would drown notification-controller and hide the useful ones.
+func TestHealthTransitionRecordsOneEvent(t *testing.T) {
+	g := gateAdmitting("production", admits("podinfo"))
+	r, c, rec := newReconciler(t, g)
+
+	swing := &swingingChecker{status: v1alpha1.HealthHealthy}
+	reg := health.NewRegistry()
+	reg.MustRegister(swing)
+	r.Health = reg
+	g.Spec.Watch = []v1alpha1.HealthCheck{{Uses: "flux"}}
+	if err := c.Update(context.Background(), g); err != nil {
+		t.Fatal(err)
+	}
+
+	// First observation establishes a baseline; it is not a transition.
+	reconcileGate(t, r, "production")
+	drain(rec)
+
+	// Steady state must stay quiet.
+	reconcileGate(t, r, "production")
+	if e := next(rec); e != "" {
+		t.Errorf("unchanged health recorded an event: %q", e)
+	}
+
+	// Now it breaks.
+	swing.status = v1alpha1.HealthDegraded
+	reconcileGate(t, r, "production")
+
+	e := next(rec)
+	if !strings.Contains(e, "HealthChanged") || !strings.Contains(e, "Degraded") {
+		t.Errorf("event = %q, want a HealthChanged event naming Degraded", e)
+	}
+	if !strings.Contains(e, "Warning") {
+		t.Errorf("event = %q, want Warning severity for a Degraded Gate", e)
+	}
+
+	// And staying broken must not re-fire.
+	reconcileGate(t, r, "production")
+	if e := next(rec); e != "" {
+		t.Errorf("still-Degraded recorded a repeat event: %q", e)
+	}
+}
+
+type swingingChecker struct{ status v1alpha1.Health }
+
+func (s *swingingChecker) Name() string { return "flux" }
+func (s *swingingChecker) Check(context.Context, health.Request) v1alpha1.HealthReport {
+	return v1alpha1.HealthReport{Status: s.status}
+}
+
+func drain(rec *record.FakeRecorder) {
+	for {
+		select {
+		case <-rec.Events:
+		default:
+			return
+		}
+	}
+}
+
+func next(rec *record.FakeRecorder) string {
+	select {
+	case e := <-rec.Events:
+		return e
+	default:
+		return ""
+	}
+}

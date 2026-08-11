@@ -111,6 +111,7 @@ pkg/gate/             Eligibility, promotion windows, Gate controller.
 pkg/health/           Checker interface, registry, and the Flux checker.
 pkg/passage/          Step interface, registry, execution engine, Passage controller.
 pkg/passage/steps/    Built-in steps.
+pkg/metrics/          Delivery metrics: crossings, step durations, Gate health.
 charts/hecate/        Helm chart. CRDs and RBAC are generated, never hand-edited.
 charts/hecate/crds/   Generated CRDs.
 ```
@@ -152,7 +153,7 @@ ok  github.com/olafkfreund/hecate/pkg/passage
 ok  github.com/olafkfreund/hecate/pkg/passage/steps
 ```
 
-106 tests, no cluster required, ~1s. That is the bar: anything testable without a
+113 tests, no cluster required, ~1s. That is the bar: anything testable without a
 cluster must be. Image resolution is tested against a real in-memory registry rather
 than a mock.
 
