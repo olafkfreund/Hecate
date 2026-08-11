@@ -226,6 +226,49 @@ files outside its own directory; off by default, matching kustomize and Flux.
 
 **Reasons:** `RenderFailed`, `NothingRendered`, `FileNotFound`, `InvalidConfig`.
 
+## render-helm
+
+Templates a chart and writes the result into the checkout.
+
+```yaml
+- uses: render-helm
+  with:
+    chart: repo/charts/api
+    out: repo/rendered/production.yaml
+    releaseName: api
+    valuesFiles: [repo/values/production.yaml]
+    values: { image: { tag: "${{ bundle.image('ghcr.io/acme/api').tag }}" } }
+```
+
+| field | type | default |
+|---|---|---|
+| `chart` | string | required — a directory in the checkout |
+| `out` | string | required |
+| `releaseName` | string | required |
+| `valuesFiles` | \[string] | — applied in order |
+| `values` | object | — applied last, so it overrides a file |
+| `namespace` | string | the Gate's namespace |
+| `includeCRDs` | bool | `false`, matching `helm template` |
+| `kubeVersion` | string | Helm's default, **not the cluster's** |
+| `apiVersions` | \[string] | — |
+
+Templating only: it never contacts a cluster, installs anything, or reads
+release history. `.Capabilities` comes from configuration rather than from
+wherever the controller happens to run, so the same commit renders the same
+bytes anywhere — which is what makes the output safe to commit.
+
+The chart is a **directory in the checkout**, not a repository reference: what
+is rendered has to be what was reviewed, and a chart pulled at render time could
+differ between the pull request and the crossing.
+
+`releaseName` is required rather than defaulted, because chart templates
+routinely name resources after it and a guess would silently name everything
+after something arbitrary.
+
+**Output:** `changed`, `file`.
+
+**Reasons:** `RenderFailed`, `NothingRendered`, `FileNotFound`, `InvalidConfig`.
+
 ## flux-reconcile
 
 Asks Flux to sync now rather than at its next interval.
@@ -370,8 +413,7 @@ capped at 4KB and reports `truncated`.
 
 ## Not here yet
 
-`render-helm` ([#67] — it needs a Kubernetes library upgrade across the project,
-see [D36](DECISIONS.md)), and `oci-push` and `oci-pull` ([#69]).
+`oci-push` and `oci-pull` ([#69]).
 
 [#67]: https://github.com/olafkfreund/Hecate/issues/67
 [#69]: https://github.com/olafkfreund/Hecate/issues/69

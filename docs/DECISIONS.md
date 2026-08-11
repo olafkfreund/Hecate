@@ -907,8 +907,11 @@ Hecate does.
 ## D36 — Rendering ships in two halves, because Helm costs more than kustomize
 
 **Decision:** `render-kustomize` uses `sigs.k8s.io/kustomize/api` in-process, as
-planned. `render-helm` does not ship with it, because the Helm SDK is not the
+planned. `render-helm` shipped separately, because the Helm SDK is not the
 comparable dependency the issue assumed.
+
+*(Both have since landed: the library upgrade in its own commit, then the step.
+The record below is why they were separated.)*
 
 Measured rather than guessed: kustomize adds 5 modules and changes nothing else.
 `helm.sh/helm/v4` adds 72 **and force-upgrades `k8s.io/api`, `client-go` and

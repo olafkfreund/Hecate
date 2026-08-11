@@ -36,7 +36,7 @@ This is the *how*.
 | API server | M7 |
 | UI | M8 |
 
-292 tests, no cluster required, ~1s.
+300 tests, no cluster required, ~1s.
 
 ## 2. Technology
 
@@ -81,15 +81,15 @@ running Flux, in CI.
 
 ### M2 — Step library
 Done: `flux-wait`, `flux-reconcile`, `git-clone`, `git-commit`, `git-push`,
-`git-pull-request`, `edit-yaml`, `set-image`, `http`, and expression evaluation
-over Bundle artifacts and prior step outputs.
+`git-pull-request`, `edit-yaml`, `set-image`, `http`, `render-kustomize`,
+`render-helm`, and expression evaluation over Bundle artifacts and prior step
+outputs.
 
 Step configuration is checked when a Gate is applied, by the controller rather
 than a webhook ([D31](DECISIONS.md)): a bad step marks the Gate `InvalidSteps`
 and it opens no Passage.
 
-Left: `render-helm` ([#67](https://github.com/olafkfreund/Hecate/issues/67)) and
-`oci-push`/`oci-pull` ([#69](https://github.com/olafkfreund/Hecate/issues/69)).
+Left: `oci-push`/`oci-pull` ([#69](https://github.com/olafkfreund/Hecate/issues/69)).
 
 **Exit:** a Gate can render, commit, push, open a PR, wait for merge, and wait for Flux.
 Everything but rendering is there, and the rest is demonstrated rather than

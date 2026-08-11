@@ -23,6 +23,7 @@ func all() []passage.Runner {
 		NewEditYAML(),
 		NewSetImage(),
 		NewRenderKustomize(),
+		NewRenderHelm(),
 		NewHTTP(nil),
 		NewEvidenceGate(nil, ""),
 	}
@@ -81,6 +82,7 @@ func TestCheckersAcceptValidConfiguration(t *testing.T) {
 		{NewSetImage(), `{"path":"repo/k.yaml","image":"ghcr.io/acme/api"}`},
 		{NewEditYAML(), `{"path":"repo/v.yaml","edits":[{"key":"image.tag","value":"1.0"}]}`},
 		{NewRenderKustomize(), `{"path":"repo/base","out":"repo/rendered.yaml"}`},
+		{NewRenderHelm(), `{"chart":"repo/chart","out":"repo/r.yaml","releaseName":"api"}`},
 		{NewFluxWait(nil), `{"resources":[{"kind":"Kustomization","name":"app"}]}`},
 		{NewFluxReconcile(nil, false), `{"resources":[{"kind":"GitRepository","name":"fleet"}]}`},
 		{NewHTTP(nil), `{"url":"https://x.test","successIf":"status == 200"}`},
@@ -108,6 +110,7 @@ func TestCheckersCatchMissingAndWrongValues(t *testing.T) {
 		{"commit without a message", NewGitCommit(), `{"message":"  "}`, "message is required"},
 		{"set-image without an image", NewSetImage(), `{"path":"k.yaml"}`, "image is required"},
 		{"render without an out", NewRenderKustomize(), `{"path":"repo/base"}`, "out is required"},
+		{"a helm render with no release name", NewRenderHelm(), `{"chart":"repo/c","out":"r.yaml"}`, "releaseName is required"},
 		{"edit-yaml with no edits", NewEditYAML(), `{"path":"v.yaml","edits":[]}`, "no edits"},
 		{"edit-yaml with a keyless edit", NewEditYAML(), `{"path":"v.yaml","edits":[{"value":"1"}]}`, "key is required"},
 		{"flux-wait with no resources", NewFluxWait(nil), `{"resources":[]}`, "at least one resource"},
