@@ -1,0 +1,403 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.21.0
+  name: beacons.hecate.dev
+spec:
+  group: hecate.dev
+  names:
+    kind: Beacon
+    listKind: BeaconList
+    plural: beacons
+    shortNames:
+    - bcn
+    singular: beacon
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.interval
+      name: Interval
+      type: string
+    - jsonPath: .status.latestBundle
+      name: Latest
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Beacon watches artifact sources and emits a Bundle whenever it sees a new
+          combination worth promoting.
+
+          One Beacon per set of artifacts that move together. Two services released on
+          independent schedules want two Beacons, so a change to one does not drag the
+          other through the pipeline with it.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: BeaconSpec describes what to watch and when to emit.
+            properties:
+              emit:
+                default: Automatic
+                description: Emit controls when Bundles are created.
+                enum:
+                - Automatic
+                - Manual
+                type: string
+              interval:
+                default: 5m
+                description: |-
+                  Interval is how often to poll the watched sources. Sources that support
+                  webhooks will also emit on push; the interval is the safety net, not the
+                  primary mechanism.
+                type: string
+              retain:
+                default: 10
+                description: |-
+                  Retain bounds how many *unreferenced* Bundles from this Beacon are kept.
+
+                  A Beacon polling every couple of minutes emits indefinitely; unbounded,
+                  that is etcd growth with no ceiling and a `kubectl get bundles` nobody can
+                  read. Zero disables collection entirely.
+
+                  Bundles in use are never collected regardless of this value — see the
+                  safety rule in D13. The long-term record belongs in the evidence store,
+                  not in etcd.
+                format: int32
+                minimum: 0
+                type: integer
+              suspend:
+                description: |-
+                  Suspend stops this Beacon from discovering anything new, without
+                  deleting it. Existing Bundles are unaffected.
+                type: boolean
+              watch:
+                description: Watch lists the artifact sources to observe.
+                items:
+                  description: WatchSource is one artifact source. Exactly one field
+                    must be set.
+                  maxProperties: 1
+                  minProperties: 1
+                  properties:
+                    chart:
+                      description: ChartWatch watches a Helm chart repository.
+                      properties:
+                        constraint:
+                          description: Constraint is a semantic version range, e.g.
+                            "^6.0.0".
+                          type: string
+                        credentialsRef:
+                          description: LocalSecretRef names a Secret in the same namespace.
+                          properties:
+                            name:
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        name:
+                          description: Name is the chart name. Omit for OCI, where
+                            Repo identifies the chart.
+                          type: string
+                        repo:
+                          description: Repo is an HTTPS Helm repository or an OCI
+                            registry reference.
+                          type: string
+                      required:
+                      - repo
+                      type: object
+                    git:
+                      description: GitWatch watches a git repository.
+                      properties:
+                        branch:
+                          description: Branch to follow. Mutually exclusive with Tags.
+                          type: string
+                        credentialsRef:
+                          description: LocalSecretRef names a Secret in the same namespace.
+                          properties:
+                            name:
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        ignorePaths:
+                          description: IgnorePaths is the inverse, applied after Paths.
+                          items:
+                            type: string
+                          type: array
+                        paths:
+                          description: |-
+                            Paths restricts which changes count as new. A commit touching nothing in
+                            these paths produces no Bundle — this is what keeps a monorepo from
+                            promoting every service on every commit.
+                          items:
+                            type: string
+                          type: array
+                        repo:
+                          description: Repo is the repository URL.
+                          type: string
+                        tags:
+                          description: Tags selects by tag instead of by branch head.
+                          properties:
+                            allow:
+                              type: string
+                            constraint:
+                              type: string
+                            ignore:
+                              items:
+                                type: string
+                              type: array
+                            select:
+                              default: SemVer
+                              description: TagSelection is how to choose among available
+                                tags.
+                              enum:
+                              - SemVer
+                              - Lexical
+                              - NewestBuild
+                              - Digest
+                              type: string
+                          type: object
+                      required:
+                      - repo
+                      type: object
+                    image:
+                      description: ImageWatch watches a container image repository.
+                      properties:
+                        allow:
+                          description: |-
+                            Allow is a regular expression tags must match. Use it to exclude the
+                            mutable tags that otherwise cause surprise promotions — `latest`,
+                            `main`, nightly builds.
+                          type: string
+                        constraint:
+                          description: |-
+                            Constraint narrows the selection. For SemVer this is a range such as
+                            "^6.0.0"; for Lexical and NewestBuild it is ignored.
+                          type: string
+                        credentialsRef:
+                          description: |-
+                            CredentialsRef names a Secret holding registry credentials. Omit it to
+                            use the controller's ambient cloud identity (IRSA, Workload Identity,
+                            Managed Identity).
+                          properties:
+                            name:
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        ignore:
+                          description: Ignore lists exact tags to never select.
+                          items:
+                            type: string
+                          type: array
+                        insecure:
+                          description: |-
+                            Insecure allows a plain-HTTP registry: one that terminates TLS elsewhere,
+                            an air-gapped one, or a local development registry.
+
+                            False unless asked for, and deliberately so — downgrading to HTTP without
+                            being told to would send the registry credentials above in clear. Matches
+                            Flux's own `OCIRepository.spec.insecure`.
+                          type: boolean
+                        platform:
+                          description: |-
+                            Platform restricts digest resolution to one platform for multi-arch
+                            images, e.g. "linux/amd64".
+                          type: string
+                        repo:
+                          description: Repo is the image repository, e.g. ghcr.io/acme/podinfo.
+                          type: string
+                        select:
+                          default: SemVer
+                          description: Select is how to pick the newest tag.
+                          enum:
+                          - SemVer
+                          - Lexical
+                          - NewestBuild
+                          - Digest
+                          type: string
+                      required:
+                      - repo
+                      type: object
+                  type: object
+                minItems: 1
+                type: array
+            required:
+            - watch
+            type: object
+          status:
+            description: BeaconStatus reports what the Beacon has seen.
+            properties:
+              conditions:
+                description: Conditions follow the standard Kubernetes convention.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              discovered:
+                description: |-
+                  Discovered is the newest artifact version seen per source, whether or not
+                  it produced a Bundle. Useful for answering "why has nothing been emitted?"
+                items:
+                  description: Artifact is one versioned thing. Exactly one field
+                    must be set.
+                  maxProperties: 1
+                  minProperties: 1
+                  properties:
+                    chart:
+                      description: ChartArtifact is a Helm chart at a specific version.
+                      properties:
+                        name:
+                          description: |-
+                            Name is the chart name. Empty for OCI charts, where the repo already
+                            identifies the chart.
+                          type: string
+                        repo:
+                          description: Repo is the chart repository — an HTTPS Helm
+                            repo or an OCI registry.
+                          type: string
+                        version:
+                          description: Version is the resolved chart version.
+                          type: string
+                      required:
+                      - repo
+                      - version
+                      type: object
+                    commit:
+                      description: CommitArtifact is a git commit.
+                      properties:
+                        branch:
+                          description: Branch or Tag records how the commit was found,
+                            for display.
+                          type: string
+                        message:
+                          description: Message is the commit subject, for display.
+                          type: string
+                        repo:
+                          description: Repo is the git repository URL.
+                          type: string
+                        sha:
+                          description: SHA is the full commit SHA.
+                          type: string
+                        tag:
+                          type: string
+                      required:
+                      - repo
+                      - sha
+                      type: object
+                    image:
+                      description: ImageArtifact is a container image at a specific
+                        version.
+                      properties:
+                        digest:
+                          description: |-
+                            Digest is the image digest, e.g. sha256:abc... This is what gets reported
+                            to Fides as an artifact, and what makes the promotion auditable — a tag
+                            can be moved, a digest cannot.
+                          type: string
+                        repo:
+                          description: Repo is the image repository, e.g. ghcr.io/acme/podinfo.
+                          type: string
+                        tag:
+                          description: Tag is the resolved tag.
+                          type: string
+                      required:
+                      - repo
+                      type: object
+                  type: object
+                type: array
+              lastPolled:
+                description: LastPolled is when the sources were last checked.
+                format: date-time
+                type: string
+              latestBundle:
+                description: LatestBundle is the most recent Bundle this Beacon emitted.
+                type: string
+              observedGeneration:
+                description: |-
+                  ObservedGeneration is the spec generation this status describes. If it
+                  lags metadata.generation, this status is about the previous spec.
+                format: int64
+                type: integer
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

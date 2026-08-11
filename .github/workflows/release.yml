@@ -131,6 +131,21 @@ jobs:
           helm package charts/hecate --version "$v" --app-version "$v" --destination dist
           helm lint charts/hecate
 
+      # Helm installs a chart's crds/ once and never upgrades them, so an
+      # upgrading user needs the CRDs as something they can apply themselves.
+      # Shipped as one file because `kubectl apply -f` should be one command.
+      - name: Collect the CRDs as a release asset
+        run: |
+          set -euo pipefail
+          : > dist/crds.yaml
+          for crd in charts/hecate/crds/*.yaml; do
+            echo "---" >> dist/crds.yaml
+            cat "$crd" >> dist/crds.yaml
+          done
+          # An asset that does not apply is worse than none: it would be found
+          # mid-upgrade, by someone whose controller is already rolling out.
+          kubectl apply --dry-run=client -f dist/crds.yaml
+
       - name: Push as an OCI artifact
         if: needs.version.outputs.publish == 'true'
         run: |
@@ -148,7 +163,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: chart
-          path: dist/*.tgz
+          path: |
+            dist/*.tgz
+            dist/crds.yaml
 
   cli:
     name: CLI binaries
@@ -210,6 +227,23 @@ jobs:
           helm install hecate oci://${{ env.REGISTRY }}/${{ env.CHART }}/hecate --version $v \\
             --namespace hecate-system --create-namespace
           \`\`\`
+
+          ## Upgrading
+
+          Apply the CRDs first. Helm installs a chart's \`crds/\` once and never
+          touches them again, so \`helm upgrade\` alone ships a new controller
+          against the old API — and the API server prunes unknown fields
+          silently rather than rejecting them.
+
+          \`\`\`console
+          kubectl apply --server-side -f \\
+            https://github.com/${{ github.repository }}/releases/download/$GITHUB_REF_NAME/crds.yaml
+          helm upgrade hecate oci://${{ env.REGISTRY }}/${{ env.CHART }}/hecate --version $v \\
+            --namespace hecate-system
+          \`\`\`
+
+          Hecate refuses to start against CRDs older than itself, so skipping
+          this is a failed rollout rather than a silent behaviour change.
 
           Image: \`${{ env.REGISTRY }}/${{ env.IMAGE }}:$v\`
           Digest: \`${{ needs.image.outputs.digest }}\`

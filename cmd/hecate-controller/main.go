@@ -3,22 +3,29 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	"github.com/go-logr/logr"
+
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/olafkfreund/hecate/api/v1alpha1"
 	"github.com/olafkfreund/hecate/pkg/beacon"
+	"github.com/olafkfreund/hecate/pkg/crds"
 	"github.com/olafkfreund/hecate/pkg/gate"
 	"github.com/olafkfreund/hecate/pkg/health"
 	"github.com/olafkfreund/hecate/pkg/passage"
@@ -29,14 +36,15 @@ import (
 var version = "dev"
 
 type options struct {
-	metricsAddr string
-	probeAddr   string
-	leaderElect bool
-	leaderID    string
-	workRoot    string
-	noCrossNS   bool
-	fidesServer string
-	showVersion bool
+	metricsAddr  string
+	probeAddr    string
+	leaderElect  bool
+	leaderID     string
+	workRoot     string
+	noCrossNS    bool
+	skipCRDCheck bool
+	fidesServer  string
+	showVersion  bool
 }
 
 func main() {
@@ -64,6 +72,9 @@ func run() error {
 	flag.StringVar(&opts.fidesServer, "fides-server", os.Getenv("FIDES_SERVER_URL"),
 		"Default Fides server for evidence-gate steps. A Gate may override it with "+
 			"evidence.serverURL; a fleet with one Fides sets it here instead of on every Gate.")
+	flag.BoolVar(&opts.skipCRDCheck, "skip-crd-check", false,
+		"Start even if the cluster's CRDs are older than this build. The escape hatch for "+
+			"someone who cannot apply CRDs; expect fields to be silently dropped.")
 	flag.BoolVar(&opts.showVersion, "version", false, "Print the version and exit.")
 
 	zapOpts := zap.Options{Development: false}
@@ -84,6 +95,14 @@ func run() error {
 	restCfg, err := ctrl.GetConfig()
 	if err != nil {
 		return fmt.Errorf("loading Kubernetes configuration: %w", err)
+	}
+
+	// Before the manager, so a stale API is a failed rollout rather than a
+	// controller that runs and misbehaves. Helm never upgrades a chart's CRDs,
+	// and the API server prunes unknown fields silently (#117).
+	ctx := ctrl.SetupSignalHandler()
+	if err := checkCRDs(ctx, restCfg, opts.skipCRDCheck, logger); err != nil {
+		return err
 	}
 
 	mgr, err := ctrl.NewManager(restCfg, ctrl.Options{
@@ -161,7 +180,7 @@ func run() error {
 		"workRoot", opts.workRoot,
 		"crossNamespaceRefs", map[bool]string{true: "refused", false: "allowed"}[opts.noCrossNS])
 
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(ctx); err != nil {
 		return fmt.Errorf("running manager: %w", err)
 	}
 	return nil
@@ -170,6 +189,34 @@ func run() error {
 // newScheme registers everything the controllers read or write: Hecate's own
 // types, plus core types for the Secrets credentials are read from and the
 // Events the controllers emit.
+// checkCRDs compares the cluster's CRDs against the ones this build ships.
+//
+// Its own client rather than the manager's: the manager's is cache-backed and
+// the cache is not running yet, and this has to answer before anything starts.
+func checkCRDs(ctx context.Context, restCfg *rest.Config, skip bool, logger logr.Logger) error {
+	scheme := k8sruntime.NewScheme()
+	utilruntime.Must(apiextensionsv1.AddToScheme(scheme))
+	c, err := client.New(restCfg, client.Options{Scheme: scheme})
+	if err != nil {
+		return fmt.Errorf("connecting to the cluster: %w", err)
+	}
+
+	err = crds.Check(ctx, c)
+	switch {
+	case err == nil:
+		return nil
+	case skip:
+		// Logged at every start, not once: someone who set this flag to get
+		// past an upgrade should keep being told what they are running with.
+		logger.Info("WARNING: starting against CRDs this build does not match, "+
+			"because --skip-crd-check was set. Fields will be dropped silently.",
+			"detail", err.Error())
+		return nil
+	default:
+		return err
+	}
+}
+
 func newScheme() *k8sruntime.Scheme {
 	scheme := k8sruntime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))

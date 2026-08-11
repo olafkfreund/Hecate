@@ -1033,3 +1033,55 @@ A promotion is a compliance record, and a self-declared identity is not one.
 **A refusal answers 409, not 400 or 500.** "This Bundle has not cleared staging"
 is an answer: the request was well-formed and the state of the system declined
 it. A client that cannot tell that from a malfunction will retry the wrong ones.
+
+## D39 — The controller refuses to run against CRDs older than itself
+
+**Decision:** `hecate-controller` embeds the CRDs its build ships and, before
+starting the manager, checks that the cluster declares every field they do. If
+anything is missing it exits with the missing paths and the command that fixes
+them. `--skip-crd-check` overrides it.
+
+Helm installs a chart's `crds/` directory once and never touches it again on
+upgrade. That is documented Helm behaviour, and the usual answer — tell people
+to `kubectl apply --server-side` the CRDs first, as Flux and cert-manager do —
+is the right one, because it is honest about who owns the CRDs.
+
+What makes it insufficient on its own is the failure mode when someone forgets.
+The API server does not reject an unknown field; it **prunes** it. `kubectl
+apply` reports success, the object stores without the field, and the controller
+reads a zero value. There is no error, no event and no log line anywhere. This
+happened during development: `watch[].image.insecure` was set on a Beacon,
+absent from the cluster's CRD, and the Beacon went on negotiating HTTPS against
+a plain-HTTP registry with nothing to explain why (#117, found via #109).
+
+A failed rollout naming the field is worth much more than that silence.
+
+**Property paths, not a hash.** A schema hash would be smaller, but it fails on
+any cosmetic regeneration — a controller-gen bump rewording a description — and
+the consequence here is a controller that will not boot. A one-directional path
+comparison can only fail when the cluster genuinely lacks something.
+
+**One-directional on purpose.** A cluster whose CRDs are *newer* than the binary
+starts normally; the extra fields are simply unread. Failing on that would make
+every rollback an outage, and rolling back is precisely what someone does when
+an upgrade has gone wrong.
+
+**Not moving CRDs into `templates/`.** Helm would then manage them properly, and
+`helm uninstall` would delete them — and with them every Beacon, Bundle, Gate
+and Passage in the cluster. That failure is far worse than the one being fixed.
+
+**Not a pre-upgrade hook Job either.** It would remove the manual step at the
+cost of handing the chart cluster-wide CRD write permission. Hecate reads CRDs
+and never writes them; whoever owns the cluster's CRDs keeps owning them.
+
+**`--skip-crd-check` exists because the alternative is unrecoverable.** A gate
+that can block startup needs a way past it — for someone who cannot apply CRDs
+themselves, or if the check is ever wrong. It logs the full diagnosis on every
+start rather than once, because a flag set to get through an upgrade is a flag
+that gets forgotten.
+
+**The embedded copies are a duplicate**, since `go:embed` cannot reach outside
+its own package and does not follow symlinks. `make generate` writes both and
+`make check` fails if they drift — two copies of a generated file being exactly
+the kind of thing that drifts, and a stale embedded copy would make the check
+pass while the real CRDs were old, which is worse than not checking.

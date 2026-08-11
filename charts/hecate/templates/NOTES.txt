@@ -2,6 +2,23 @@ Hecate {{ .Chart.AppVersion }} is installed in {{ .Release.Namespace }}.
 
   kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "hecate.fullname" . }}
   kubectl get beacons,bundles,gates,passages -A
+{{- if .Release.IsUpgrade }}
+
+  CRDs WERE NOT UPGRADED. Helm installs a chart's crds/ once and never touches
+  them again, so this upgrade shipped a new controller against the old API. If
+  this release added or changed a field, the API server will prune it silently:
+  kubectl accepts it, the object stores without it, and Hecate reads a zero
+  value with nothing logged anywhere.
+
+  Apply them yourself, before or just after the upgrade:
+
+    kubectl apply --server-side -f \
+      https://github.com/olafkfreund/Hecate/releases/download/v{{ .Chart.AppVersion }}/crds.yaml
+
+  Hecate checks this at startup and refuses to run against an API it does not
+  recognise, so a missed upgrade is a failed rollout rather than a Beacon that
+  quietly stops honouring one of its fields. See #117.
+{{- end }}
 
 Cross-namespace references are {{ if .Values.hecate.noCrossNamespaceRefs }}REFUSED{{ else }}ALLOWED{{ end }}.
 {{- if not .Values.hecate.noCrossNamespaceRefs }}

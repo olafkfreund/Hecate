@@ -44,8 +44,19 @@ lint: ## Lint Go and Nix
 	statix check .
 	deadnix --fail .
 
-check: vet test flake-hash-check ## Everything CI enforces, locally
+check: vet test flake-hash-check crd-embed-check ## Everything CI enforces, locally
 	@test -z "$$(gofmt -l .)" || { echo "gofmt needed:"; gofmt -l .; exit 1; }
+
+crd-embed-check: ## Fail if the embedded CRDs have drifted from the chart's
+	@# Two copies of a generated file is a thing that drifts. If it did, the
+	@# controller would check the cluster against CRDs nobody installs, which is
+	@# worse than not checking at all — it would pass while the real ones were stale.
+	@for crd in $(CHART_DIR)/crds/*.yaml; do \
+	  if ! cmp -s "$$crd" "pkg/crds/$$(basename $$crd)"; then \
+	    echo "pkg/crds/$$(basename $$crd) differs from the chart's. Run 'make generate'."; \
+	    exit 1; \
+	  fi; \
+	done
 
 flake-hash-check: ## Fail if flake.nix's vendorHash is stale
 	@# This has broken the build three times, and each time the reasoning that
@@ -93,6 +104,10 @@ generate: ## Regenerate deepcopy, CRDs and RBAC from the API and controller mark
 		crd output:crd:dir=$(CHART_DIR)/crds \
 		rbac:roleName=hecate-controller output:rbac:dir=$(CHART_DIR)/rbac \
 		paths=./pkg/...
+	@# The controller embeds the CRDs so it can refuse to run against an older
+	@# API (#117), and go:embed cannot reach outside its own package. Copied
+	@# rather than symlinked because embed does not follow symlinks either.
+	cp $(CHART_DIR)/crds/*.yaml pkg/crds/
 
 build: ## Build the controller and the CLI
 	go build -o bin/hecate-controller ./cmd/hecate-controller
