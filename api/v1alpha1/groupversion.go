@@ -23,7 +23,10 @@ import (
 var GroupVersion = schema.GroupVersion{Group: "hecate.dev", Version: "v1alpha1"}
 
 // SchemeBuilder registers the Hecate types with a runtime.Scheme.
-var SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion}
+// Deprecated on the grounds that an api package should have minimal
+// dependencies; replacing it means constructing the scheme by hand.
+// Tracked in #116 with the events migration, which touches the same area.
+var SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion} //nolint:staticcheck // see #116
 
 // AddToScheme adds the Hecate types to a runtime.Scheme.
 var AddToScheme = SchemeBuilder.AddToScheme

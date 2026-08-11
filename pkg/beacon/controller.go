@@ -241,7 +241,11 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 		r.Resolver = &Resolver{Client: mgr.GetClient()}
 	}
 	if r.Recorder == nil {
-		r.Recorder = mgr.GetEventRecorderFor("beacon-controller")
+		// The new events API changes Eventf's signature — it adds an `action`
+		// argument — so this is a user-visible change to the events people alert
+		// on rather than a rename. Tracked in #116; the old API is deprecated but
+		// not removed, and controller-runtime suppresses it the same way itself.
+		r.Recorder = mgr.GetEventRecorderFor("beacon-controller") //nolint:staticcheck // see #116
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.Beacon{}).

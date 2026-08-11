@@ -503,7 +503,11 @@ func (r *Reconciler) event(gate *v1alpha1.Gate, eventType, reason, message strin
 // SetupWithManager registers the controller.
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.Recorder == nil {
-		r.Recorder = mgr.GetEventRecorderFor("gate-controller")
+		// The new events API changes Eventf's signature — it adds an `action`
+		// argument — so this is a user-visible change to the events people alert
+		// on rather than a rename. Tracked in #116; the old API is deprecated but
+		// not removed, and controller-runtime suppresses it the same way itself.
+		r.Recorder = mgr.GetEventRecorderFor("gate-controller") //nolint:staticcheck // see #116
 	}
 	// Watches rather than Owns: Passages carry no owner reference, because an
 	// owner reference would cascade-delete the record of every crossing when a
