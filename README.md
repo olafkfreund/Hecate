@@ -58,9 +58,14 @@ spec:
   passage:
     steps:
       - uses: git-clone
+        with: { repo: https://github.com/acme/fleet.git }
       - uses: set-image
+        with:
+          path: repo/apps/production/kustomization.yaml
+          image: ghcr.io/acme/podinfo   # the version comes from the Bundle
       - uses: git-commit
         as: commit
+        with: { message: "promote podinfo to production" }
       - uses: git-push
       - uses: flux-wait
         with:
@@ -154,7 +159,7 @@ ok  github.com/olafkfreund/hecate/pkg/passage
 ok  github.com/olafkfreund/hecate/pkg/passage/steps
 ```
 
-145 tests, no cluster required, ~1s. That is the bar: anything testable without a
+159 tests, no cluster required, ~1s. That is the bar: anything testable without a
 cluster must be. Image resolution is tested against a real in-memory registry rather
 than a mock.
 
@@ -166,7 +171,7 @@ controller-gen — at the versions CI uses.
 ```bash
 nix develop          # or: direnv allow
 
-make test            # 145 tests, ~1s, no cluster
+make test            # 159 tests, ~1s, no cluster
 make cluster         # k3d in Docker, with Flux installed
 make install         # build, push and install the chart into the dev cluster
 make e2e             # drive a Bundle through two Gates on a real API server

@@ -5,10 +5,13 @@ go 1.26.5
 require (
 	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/expr-lang/expr v1.17.8
+	github.com/go-git/go-git/v5 v5.19.2
 	github.com/google/go-containerregistry v0.21.9
 	github.com/prometheus/client_golang v1.22.0
 	github.com/prometheus/client_model v0.6.1
 	github.com/robfig/cron/v3 v3.0.1
+	go.yaml.in/yaml/v3 v3.0.4
+	golang.org/x/crypto v0.54.0
 	k8s.io/api v0.34.3
 	k8s.io/apiextensions-apiserver v0.34.3
 	k8s.io/apimachinery v0.36.3
@@ -34,7 +37,6 @@ require (
 	github.com/fxamacker/cbor/v2 v2.9.2 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.9.0 // indirect
-	github.com/go-git/go-git/v5 v5.19.2 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/zapr v1.3.0 // indirect
 	github.com/go-openapi/jsonpointer v0.23.1 // indirect
@@ -80,8 +82,6 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.1 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect

@@ -512,3 +512,42 @@ wait on. Failing there would make every retry unrecoverable.
 
 **Pushing an already-pushed commit succeeds too.** go-git's
 `NoErrAlreadyUpToDate` is the expected outcome of a re-run, not an error.
+
+## D24 — Edits are byte surgery, not a YAML round-trip
+
+**Decision:** `edit-yaml` and `set-image` locate the scalar they are changing,
+replace exactly its span in the file's bytes, and leave every other byte alone.
+They never re-encode the parse tree.
+
+Re-encoding is the obvious implementation and the wrong one. Every YAML encoder
+normalises as it writes: comments move or vanish, quoting style changes,
+indentation and line breaks are reflowed. The result is a promotion whose diff
+touches the whole file — and a diff nobody can review is a diff nobody reviews,
+which defeats the point of writing to git rather than to the cluster.
+
+**The write is verified before it lands.** After the span is replaced, the file
+is re-parsed, the field found again, and its value compared against what was
+asked for. If it does not match, the original bytes are restored and the step
+fails. Byte surgery is only safe with that check; without it a mis-computed span
+corrupts a repository quietly.
+
+**Fields are updated, never created.** A missing key is an error naming the
+path. Creating one is a structural change that cannot be surgical, and a
+promotion that invents fields is a promotion that can invent them in the wrong
+place.
+
+**There is no `edit-json` step.** JSON is YAML, and replacing a scalar in place
+leaves a JSON document valid JSON — so `edit-yaml` already edits `.json` files.
+A second step would be a second thing to keep in sync for no new capability.
+
+**`set-image` exists alongside `edit-yaml`** because a kustomize `images:` entry
+is addressed by the repository it names, not by its position. `images[2].newTag`
+repins the wrong image the day somebody reorders the list. It writes whichever
+of `newTag` or `digest` the entry already uses: switching between them changes
+the file's shape, and that is the author's decision to make once rather than
+ours to make on every crossing.
+
+**Strings are quoted only when leaving them bare would change their type.**
+`newTag: 1.0` is a float, and kustomize would render `image:1`. The check covers
+the YAML 1.1 booleans (`yes`, `on`, `no`, `off`) too, because Flux and kustomize
+read these files with a 1.1 parser even though we write them with a 1.2 one.

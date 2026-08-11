@@ -13,7 +13,7 @@ This is the *how*.
 | `pkg/flux` — Flux status evaluation | ✅ done |
 | `pkg/health` — Checker interface, registry, Flux checker | ✅ done |
 | `pkg/passage` — Step interface, registry, execution engine | ✅ done |
-| `pkg/passage/steps` — `flux-wait`, `git-clone`, `git-commit`, `git-push` | ✅ done |
+| `pkg/passage/steps` — `flux-wait`, the git steps, `edit-yaml`, `set-image` | ✅ done |
 | `pkg/beacon` — discovery, image resolution, Beacon controller | ✅ done |
 | `pkg/gate` — eligibility, promotion windows, Gate controller | ✅ done |
 | `pkg/passage` — execution engine and Passage controller | ✅ done |
@@ -30,7 +30,7 @@ This is the *how*.
 | API server | M7 |
 | UI | M8 |
 
-145 tests, no cluster required, ~1s.
+159 tests, no cluster required, ~1s.
 
 ## 2. Technology
 
@@ -75,7 +75,7 @@ running Flux, in CI.
 
 ### M2 — Step library
 `flux-reconcile`, `git-clone`, `git-commit`, `git-push`, `git-pull-request`,
-`render-kustomize`, `render-helm`, `set-image`, `edit-yaml`, `oci-push`, `http`.
+`render-kustomize`, `render-helm`, `oci-push`, `http`.
 Expression evaluation over Bundle artifacts and prior step outputs. Per-step JSON
 Schema for validation and UI form generation.
 
