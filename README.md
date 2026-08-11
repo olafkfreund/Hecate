@@ -67,6 +67,10 @@ spec:
         as: commit
         with: { message: "promote podinfo to production" }
       - uses: git-push
+      - uses: flux-reconcile          # sync now, not at the next interval
+        with:
+          resources:
+            - { kind: GitRepository, name: fleet, namespace: flux-system }
       - uses: flux-wait
         with:
           resources:
@@ -159,7 +163,7 @@ ok  github.com/olafkfreund/hecate/pkg/passage
 ok  github.com/olafkfreund/hecate/pkg/passage/steps
 ```
 
-180 tests, no cluster required, ~1s. That is the bar: anything testable without a
+184 tests, no cluster required, ~1s. That is the bar: anything testable without a
 cluster must be. Image resolution is tested against a real in-memory registry rather
 than a mock.
 
@@ -171,7 +175,7 @@ controller-gen — at the versions CI uses.
 ```bash
 nix develop          # or: direnv allow
 
-make test            # 180 tests, ~1s, no cluster
+make test            # 184 tests, ~1s, no cluster
 make cluster         # k3d in Docker, with Flux installed
 make install         # build, push and install the chart into the dev cluster
 make e2e             # drive a Bundle through two Gates on a real API server

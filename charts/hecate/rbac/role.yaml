@@ -66,6 +66,7 @@ rules:
   verbs:
   - get
   - list
+  - patch
   - watch
 - apiGroups:
   - kustomize.toolkit.fluxcd.io
@@ -74,6 +75,7 @@ rules:
   verbs:
   - get
   - list
+  - patch
   - watch
 - apiGroups:
   - source.toolkit.fluxcd.io
@@ -86,4 +88,5 @@ rules:
   verbs:
   - get
   - list
+  - patch
   - watch

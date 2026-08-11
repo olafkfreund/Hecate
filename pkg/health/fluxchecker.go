@@ -56,7 +56,9 @@ type FluxResource struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
-func (r FluxResource) gvk() (schema.GroupVersionKind, error) {
+// GVK resolves the resource's kind, defaulting the apiVersion for the kinds
+// Flux ships.
+func (r FluxResource) GVK() (schema.GroupVersionKind, error) {
 	av := r.APIVersion
 	if av == "" {
 		var ok bool
@@ -84,7 +86,7 @@ func (c FluxConfig) Validate(gateNamespace string, allowCrossNamespace bool) err
 		if r.Name == "" {
 			return fmt.Errorf("resources[%d]: name is required", i)
 		}
-		if _, err := r.gvk(); err != nil {
+		if _, err := r.GVK(); err != nil {
 			return fmt.Errorf("resources[%d]: %w", i, err)
 		}
 		if !allowCrossNamespace && r.Namespace != "" && r.Namespace != gateNamespace {
@@ -182,7 +184,7 @@ func (f *FluxChecker) Evaluate(
 		if ns == "" {
 			ns = defaultNamespace
 		}
-		gvk, _ := ref.gvk() // Validate already accepted it
+		gvk, _ := ref.GVK() // Validate already accepted it
 
 		obj := &unstructured.Unstructured{}
 		obj.SetGroupVersionKind(gvk)

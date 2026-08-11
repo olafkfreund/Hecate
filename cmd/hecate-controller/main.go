@@ -110,6 +110,7 @@ func run() error {
 	stepRunners.MustRegister(steps.NewEditYAML())
 	stepRunners.MustRegister(steps.NewSetImage())
 	stepRunners.MustRegister(steps.NewGitPullRequest(mgr.GetClient()))
+	stepRunners.MustRegister(steps.NewFluxReconcile(mgr.GetClient(), !opts.noCrossNS))
 
 	if err := (&beacon.Reconciler{
 		Client:   mgr.GetClient(),

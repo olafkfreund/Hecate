@@ -589,3 +589,30 @@ environment before a human looked at it, which is the opposite of what asking
 for review means. It reports the *merge* commit rather than the branch's,
 because a squashing host lands the change under a hash that never existed
 locally, and that is what `flux-wait` must then wait for.
+
+## D26 — The one write against Flux is a doorbell
+
+**Decision:** `flux-reconcile` sets `reconcile.fluxcd.io/requestedAt` on a Flux
+resource. That annotation is the only thing Hecate ever writes to a Flux object,
+and Hecate's ClusterRole carries `patch` on the Flux groups and nothing else.
+
+This does not contradict "Hecate never talks to Flux" (D3), because the
+annotation changes nothing about *what* Flux will do — only *when*. The commit
+is already in git; Flux would find it at its next interval and converge to
+exactly the same state. Remove the step and the promotion still happens, just
+later. That is the test a write against Flux has to pass to be allowed: if
+skipping it changed the outcome, Hecate would be driving the cluster instead of
+writing to git.
+
+**Why it earns its place anyway.** Without it, a promotion's visible latency is
+the source interval — a minute if someone tuned it, an hour in plenty of real
+fleets. A gate that takes an hour to show a result is a gate people stop
+watching, and then stop trusting.
+
+**The stamp comes from the Passage, not the clock**, like the commits (D23).
+Flux acts on a *change* of value, so a re-run writes the same string and rings
+nothing. One nudge per attempt; `flux-wait` does the waiting.
+
+**Cross-namespace refuses by default**, on the same rule as `flux-wait`: a step
+that can annotate any namespace's Kustomization can trigger any tenant's
+deployment.
