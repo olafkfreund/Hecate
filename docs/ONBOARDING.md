@@ -226,6 +226,13 @@ specified hash exists in the store, so a stale `vendorHash` can validate against
 a leftover result on your machine. Only a clean store catches it, which is what
 the Nix workflow is for. Trust CI over a local pass here.
 
-**So: after adding a Go dependency, run `make flake-hash`** and paste the result
-into `flake.nix`. It forces the recomputation that a plain `nix build` will not
-do for you.
+**The trigger is not "adding a dependency".** That is what this page used to
+say, and it is wrong in a way that broke the build three times. `vendorHash`
+covers the set of modules actually *downloaded*, which follows the import graph
+— so importing a new package from a module already in `go.mod` moves the hash
+while `go.mod` and `go.sum` stay byte-identical. `k8s.io/client-go/util/retry`
+did exactly that.
+
+**So `make check` verifies it for you**, and `make flake-hash` prints the value
+to paste into `flake.nix`. Do not reason about whether the hash *could* have
+changed: the check is cheaper than the reasoning, and it is right.

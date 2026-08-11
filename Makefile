@@ -44,8 +44,29 @@ lint: ## Lint Go and Nix
 	statix check .
 	deadnix --fail .
 
-check: vet test ## Everything CI enforces, locally
+check: vet test flake-hash-check ## Everything CI enforces, locally
 	@test -z "$$(gofmt -l .)" || { echo "gofmt needed:"; gofmt -l .; exit 1; }
+
+flake-hash-check: ## Fail if flake.nix's vendorHash is stale
+	@# This has broken the build three times, and each time the reasoning that
+	@# let it through was "go.mod did not change, so the hash cannot have".
+	@# That is wrong: vendorHash covers the set of modules actually downloaded,
+	@# which follows the *import graph*. Importing a new package from a module
+	@# already in go.mod — k8s.io/client-go/util/retry, say — moves it while
+	@# go.mod and go.sum stay byte-identical.
+	@#
+	@# A plain `nix build` will not catch it either: a fixed-output derivation
+	@# whose hash is already in the store is treated as realised, so a stale
+	@# hash validates against a leftover build and only fails in CI.
+	@computed=$$($(MAKE) --no-print-directory flake-hash 2>/dev/null | grep -o 'sha256-[^"]*'); \
+	 declared=$$(grep -o 'sha256-[^"]*' flake.nix); \
+	 if [ "$$computed" != "$$declared" ]; then \
+	   echo "flake.nix vendorHash is stale."; \
+	   echo "  declared: $$declared"; \
+	   echo "  computed: $$computed"; \
+	   echo "Fix: set vendorHash in flake.nix to the computed value."; \
+	   exit 1; \
+	 fi
 
 flake-hash: ## Print the vendorHash flake.nix needs (run after adding a Go dependency)
 	@# A stale vendorHash cannot be detected by a plain `nix build`: Nix treats a
