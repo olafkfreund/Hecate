@@ -69,7 +69,7 @@ func (r *Reconciler) now() time.Time {
 // +kubebuilder:rbac:groups=hecate.dev,resources=gates/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=hecate.dev,resources=bundles,verbs=get;list;watch
 // +kubebuilder:rbac:groups=hecate.dev,resources=bundles/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=hecate.dev,resources=passages,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups=hecate.dev,resources=passages,verbs=get;list;watch;create;delete
 
 // Reconcile brings one Gate up to date.
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -128,6 +128,17 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	reason, message := r.advance(ctx, &gate, candidates, bundles.Items, active)
 	r.setReady(&gate, metav1.ConditionTrue, reason, message)
+
+	// After advance, so a Passage it has just opened is already named in
+	// status and protected, and after observePassages, so `current` names the
+	// crossing that put what is running where it is.
+	if deleted, err := r.collect(ctx, &gate); err != nil {
+		// Collection failing must not stop the Gate: one that cannot tidy up
+		// should still be promoting.
+		logger.Error(err, "collecting finished Passages")
+	} else if deleted > 0 {
+		logger.Info("collected finished Passages", "count", deleted)
+	}
 
 	if err := r.Status().Update(ctx, &gate); err != nil {
 		return ctrl.Result{}, err

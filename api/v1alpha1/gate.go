@@ -68,6 +68,21 @@ type GateSpec struct {
 	//
 	// +optional
 	Vars []Var `json:"vars,omitempty"`
+	// Retain bounds how many finished Passages this Gate keeps. Older ones
+	// beyond the limit are deleted, newest first.
+	//
+	// Zero means keep everything, which is what an unset-looking field should
+	// do. Unfinished Passages, and the one that produced what is currently in
+	// the Gate, are never collected whatever this says.
+	//
+	// A Passage is the record of *how* a crossing happened, so the default is
+	// higher than a Beacon's: Gates produce far fewer objects than Beacons, and
+	// each is worth more. Long-term history belongs in the evidence store
+	// rather than in etcd (D13).
+	//
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	Retain *int32 `json:"retain,omitempty"`
 	// Evidence binds this Gate to the compliance system that records what
 	// crossed it and decides what may.
 	//

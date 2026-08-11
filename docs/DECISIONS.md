@@ -1085,3 +1085,41 @@ its own package and does not follow symlinks. `make generate` writes both and
 `make check` fails if they drift — two copies of a generated file being exactly
 the kind of thing that drifts, and a stale embedded copy would make the check
 pass while the real CRDs were old, which is worse than not checking.
+
+## D40 — Passages are collected too, and the Gate owns the limit
+
+**Decision:** `Gate.spec.retain` bounds how many *finished* Passages a Gate
+keeps (default 20). A Passage that has not finished, the one the Gate is
+currently running, and the ones behind `status.current` and `status.history`
+are never collected, whatever the limit says.
+
+D13 bounded Bundles and stopped there, which left the job half done. Its own
+safety rule protects any Bundle "referenced by a Passage" — so unbounded
+Passages meant unbounded Bundles in practice, and Bundle collection could not
+make progress on a Gate that had been crossing for a while (#108).
+
+**The knob is on the Gate rather than the Beacon**, because the objects are the
+Gate's and the natural limits differ. A Beacon emits a Bundle whenever an
+artifact appears: many objects, each individually cheap. A Gate produces one
+Passage per crossing attempt: fewer objects, and each is the record of *how*
+something entered an environment. So the default is higher — 20 against the
+Beacon's 10 — rather than shared for symmetry's sake.
+
+**Zero means keep everything**, matching D13. The opposite reading would make a
+field that looks unset destroy history, and the failure would be silent and
+unrecoverable.
+
+**Protected by name, not by ordering.** The active Passage is kept because
+`status.activePassage` names it, not because it is newest. The controller lists
+from an informer cache that may not have a just-created Passage yet, and
+creation timestamps are set by the API server rather than by us — so ordering
+alone would let a Gate delete the Passage it had just opened, then open another,
+for ever. The same reasoning as the Beacon's `latestBundle`.
+
+**`status.history` is protected as well as `status.current`.** Those name the
+Passages behind previous occupants, which are the rollback targets someone reads
+when a release has gone wrong — precisely the moment they must still exist.
+`History` is itself capped at 10 (D13), so this cannot grow without bound.
+
+**Collection failing does not fail the reconcile.** A Gate that cannot tidy up
+should still be promoting; the error is logged and the Gate carries on.

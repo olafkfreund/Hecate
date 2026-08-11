@@ -74,6 +74,7 @@ rules:
   - passages
   verbs:
   - create
+  - delete
   - get
   - list
   - update

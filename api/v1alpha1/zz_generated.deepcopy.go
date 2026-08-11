@@ -536,6 +536,11 @@ func (in *GateSpec) DeepCopyInto(out *GateSpec) {
 		*out = make([]Var, len(*in))
 		copy(*out, *in)
 	}
+	if in.Retain != nil {
+		in, out := &in.Retain, &out.Retain
+		*out = new(int32)
+		**out = **in
+	}
 	if in.Evidence != nil {
 		in, out := &in.Evidence, &out.Evidence
 		*out = new(EvidenceConfig)
