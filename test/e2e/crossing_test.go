@@ -18,6 +18,7 @@ package e2e
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -160,7 +161,7 @@ func TestCrossingAgainstRealAPI(t *testing.T) {
 			return false
 		}
 		return len(bundles.Items) > 0
-	})
+	}, func() string { return beaconStatus(t, c) }, func() string { return everyBundle(t, c) })
 	if len(bundles.Items) != 1 {
 		t.Fatalf("got %d Bundles, want 1: %s", len(bundles.Items), beaconStatus(t, c))
 	}
@@ -280,7 +281,7 @@ func countPassages(t *testing.T, c client.Client, gateName string) int {
 	return len(passagesFor(t, c, gateName))
 }
 
-func waitFor(t *testing.T, timeout time.Duration, what string, done func() bool) {
+func waitFor(t *testing.T, timeout time.Duration, what string, done func() bool, diagnose ...func() string) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -289,7 +290,13 @@ func waitFor(t *testing.T, timeout time.Duration, what string, done func() bool)
 		}
 		time.Sleep(time.Second)
 	}
-	t.Fatalf("timed out after %s waiting for %s", timeout, what)
+	// A timeout with no context is the least useful failure a test can produce,
+	// and in CI it is often the only thing you get to see.
+	msg := fmt.Sprintf("timed out after %s waiting for %s", timeout, what)
+	for _, d := range diagnose {
+		msg += "\n  " + d()
+	}
+	t.Fatal(msg)
 }
 
 func TestMain(m *testing.M) {
@@ -318,6 +325,25 @@ func beaconStatus(t *testing.T, c client.Client) string {
 		}
 	}
 	return "Beacon has no Ready condition yet"
+}
+
+// everyBundle lists Bundles across all namespaces. If the Beacon recorded a
+// latestBundle but the namespaced List sees nothing, the object either went
+// somewhere unexpected or was removed after creation — and which one matters.
+func everyBundle(t *testing.T, c client.Client) string {
+	t.Helper()
+	var all v1alpha1.BundleList
+	if err := c.List(context.Background(), &all); err != nil {
+		return "Bundles unlistable: " + err.Error()
+	}
+	if len(all.Items) == 0 {
+		return "no Bundles exist in any namespace"
+	}
+	out := "Bundles cluster-wide:"
+	for _, b := range all.Items {
+		out += fmt.Sprintf(" %s/%s", b.Namespace, b.Name)
+	}
+	return out
 }
 
 // skipIfHecateInstalled skips when a deployed controller would race this test.
