@@ -1,0 +1,193 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  # Dry run without publishing, so the pipeline can be exercised before a tag
+  # commits us to a version that cannot be unpublished.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (no leading v), e.g. 0.1.0'
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ${{ github.repository_owner }}/hecate-controller
+  CHART: ${{ github.repository_owner }}/charts
+
+jobs:
+  version:
+    name: Version is consistent
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      publish: ${{ steps.v.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v6
+
+      # The tag is the source of truth, and the chart takes its version from a
+      # `helm package` flag rather than from Chart.yaml — so there is nothing to
+      # bump there and nothing to drift. flake.nix is the one other place a
+      # version lives, because a Nix build has to bake it in, so that one is
+      # asserted rather than derived.
+      - id: v
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ inputs.version }}"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            version="${GITHUB_REF_NAME#v}"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          flake=$(grep -oP 'version = "\K[^"]+' flake.nix | head -1)
+          if [ "$flake" != "$version" ]; then
+            echo "::error::flake.nix says $flake but the release is $version. Bump it and retag."
+            exit 1
+          fi
+          echo "Releasing $version"
+
+  image:
+    name: Image
+    needs: version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write       # cosign keyless: no long-lived signing key to leak
+      attestations: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v6
+      # No setup-qemu-action: the Dockerfile cross-compiles from BUILDPLATFORM,
+      # so nothing is emulated and there is no binfmt to register.
+      - uses: docker/setup-buildx-action@v3
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Log in to ${{ env.REGISTRY }}
+        if: needs.version.outputs.publish == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ needs.version.outputs.publish == 'true' }}
+          build-args: VERSION=${{ needs.version.outputs.version }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ needs.version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}:latest
+          # buildx attaches both as attestations, so no separate syft step and
+          # nothing to keep in sync with the image it describes.
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Signed by digest, not by tag: a tag can be moved to point at something
+      # else, and then the signature would vouch for the wrong image.
+      - name: Sign
+        if: needs.version.outputs.publish == 'true'
+        run: cosign sign --yes "${REGISTRY}/${IMAGE}@${{ steps.build.outputs.digest }}"
+
+      - name: Verify the signature we just made
+        if: needs.version.outputs.publish == 'true'
+        run: |
+          cosign verify "${REGISTRY}/${IMAGE}@${{ steps.build.outputs.digest }}" \
+            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+  chart:
+    name: Chart
+    needs: version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: azure/setup-helm@v4
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          v="${{ needs.version.outputs.version }}"
+          # Version comes from the flag, so Chart.yaml never needs bumping and
+          # can never disagree with the release.
+          helm package charts/hecate --version "$v" --app-version "$v" --destination dist
+          helm lint charts/hecate
+
+      - name: Push as an OCI artifact
+        if: needs.version.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          v="${{ needs.version.outputs.version }}"
+          helm registry login ${{ env.REGISTRY }} \
+            --username ${{ github.actor }} --password ${{ secrets.GITHUB_TOKEN }}
+          # OCI so Flux users can consume the chart with an OCIRepository rather
+          # than needing a chart repository to exist.
+          out=$(helm push "dist/hecate-$v.tgz" "oci://${{ env.REGISTRY }}/${{ env.CHART }}" 2>&1)
+          echo "$out"
+          digest=$(echo "$out" | grep -oP 'Digest: \K.*')
+          cosign sign --yes "${{ env.REGISTRY }}/${{ env.CHART }}/hecate@${digest}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chart
+          path: dist/*.tgz
+
+  release:
+    name: GitHub release
+    needs: [version, image, chart]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with: { name: chart, path: dist }
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          v="${{ needs.version.outputs.version }}"
+          cat > notes.md <<EOF
+          ## Install
+
+          \`\`\`console
+          helm install hecate oci://${{ env.REGISTRY }}/${{ env.CHART }}/hecate --version $v \\
+            --namespace hecate-system --create-namespace
+          \`\`\`
+
+          Image: \`${{ env.REGISTRY }}/${{ env.IMAGE }}:$v\`
+          Digest: \`${{ needs.image.outputs.digest }}\`
+
+          Signed with cosign (keyless). Verify:
+
+          \`\`\`console
+          cosign verify ${{ env.REGISTRY }}/${{ env.IMAGE }}@${{ needs.image.outputs.digest }} \\
+            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/" \\
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          \`\`\`
+          EOF
+          gh release create "$GITHUB_REF_NAME" dist/*.tgz \
+            --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag
