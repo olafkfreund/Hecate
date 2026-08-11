@@ -38,19 +38,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          curl -s https://fluxcd.io/install.sh | sudo bash
 
-          # `flux install --version` wants a full release tag; the bare minor
-          # does not exist. Resolve the newest patch of this minor at run time
-          # rather than pinning: pinned patches go stale silently, and the point
-          # of this matrix is to notice when a *current* Flux breaks us (#90).
-          FLUX_VERSION=$(gh api "repos/fluxcd/flux2/releases?per_page=100" \
+          # Resolve the newest patch of this minor at run time rather than
+          # pinning: pinned patches go stale silently, and the point of this
+          # matrix is to notice when a *current* Flux breaks us (#90).
+          TAG=$(gh api "repos/fluxcd/flux2/releases?per_page=100" \
             --jq '[.[] | select(.prerelease|not) | .tag_name | select(startswith("v${{ matrix.flux }}."))] | first')
-          test -n "$FLUX_VERSION" || { echo "no release found for v${{ matrix.flux }}"; exit 1; }
-          echo "Resolved v${{ matrix.flux }} -> $FLUX_VERSION"
+          test -n "$TAG" || { echo "no release found for v${{ matrix.flux }}"; exit 1; }
+          echo "Resolved v${{ matrix.flux }} -> $TAG"
 
-          flux install --version="$FLUX_VERSION" \
-            --components-extra=image-reflector-controller,image-automation-controller
+          # The CLI version must match the manifests it installs — flux refuses
+          # otherwise ("not compatible with your current version"). So pin the
+          # CLI itself rather than passing --version to a newer one.
+          curl -s https://fluxcd.io/install.sh | sudo FLUX_VERSION="${TAG#v}" bash
+          flux --version
+
+          flux install --components-extra=image-reflector-controller,image-automation-controller
           kubectl -n flux-system wait --for=condition=Available deploy --all --timeout=5m
 
       - name: Install Hecate CRDs
