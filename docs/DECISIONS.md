@@ -973,3 +973,63 @@ malformed, and an artifact carrying traversal entries is worth failing over.
 would send registry credentials in clear. Note that go-containerregistry already
 treats a loopback registry as insecure, so the option is for named hosts — an
 internal registry terminating TLS elsewhere, or an air-gapped one.
+
+## D38 — The API server delegates identity and permission to Kubernetes
+
+**Decision:** `hecate-api` authenticates a caller with a `TokenReview` and
+authorises every operation with a `SubjectAccessReview`, both against the
+Kubernetes API server. Hecate has no user model, no session, no role table and
+no login endpoint.
+
+The alternative is a permission model of Hecate's own, and the reason not to
+build one is not that it is work. It is that Hecate's objects *are* Kubernetes
+objects, so a second model would be a second answer to "may this person promote
+to production" — and two answers to that question do not stay in agreement.
+They diverge quietly, and the first time anyone notices is when the wrong one
+was consulted.
+
+**#74 requires that crossing rights and approval rights be separable**, "or
+four-eyes approval is theatre". Delegating gives that for free, because they are
+already different verbs on different resources:
+
+| operation | verb   | resource         |
+|-----------|--------|------------------|
+| read      | list   | gates            |
+| promote   | create | passages         |
+| approve   | update | bundles/status   |
+| abort     | update | passages         |
+
+A Role can carry `create passages` without `update bundles/status`, so a
+promoter cannot approve their own Bundle — and nothing in Hecate enforces that,
+because the API server already does. The chart ships `hecate-viewer`,
+`hecate-promoter` and `hecate-approver` unbound: who is which is a question
+about an organisation, and a default would answer it wrong.
+
+This is a different question from Fides segregation of duties, which asks
+whether the evidence has been signed off rather than whether this person may
+act. They compose; neither duplicates the other.
+
+**SubjectAccessReview, not impersonation.** Impersonation would need no verb
+mapping at all — build a client as the caller and let every call fail naturally.
+It was rejected because it requires Hecate to hold `impersonate`, which is the
+right to act as anyone in the cluster. Hecate already holds git credentials; it
+does not also need to be a universal identity. Asking whether a caller may act
+is a strictly smaller privilege than being able to act as them.
+
+**Nothing is cached.** A revoked permission that still worked for the length of
+a TTL would defeat the point of deferring to Kubernetes, which is that its
+answer is the current one.
+
+**#73's single sign-on is already satisfied, and Hecate did not implement it.**
+If a cluster authenticates with OIDC then the tokens in its users' kubeconfigs
+are OIDC tokens, and `TokenReview` validates them. What is *not* solved is a
+browser obtaining such a token for a UI that never runs `kubectl`; that is a UI
+concern, not an API one, and is left open deliberately.
+
+**The actor recorded on a write is always the authenticated caller**, never a
+field in the request body. Strict decoding means there is no such field to send.
+A promotion is a compliance record, and a self-declared identity is not one.
+
+**A refusal answers 409, not 400 or 500.** "This Bundle has not cleared staging"
+is an answer: the request was well-formed and the state of the system declined
+it. A client that cannot tell that from a malfunction will retry the wrong ones.

@@ -41,6 +41,7 @@
             "cmd/hecate-controller"
             "cmd/hecate"
             "cmd/hecate-mcp"
+            "cmd/hecate-api"
           ];
 
           # Pure Go: hermetic builds that cross-compile cleanly.

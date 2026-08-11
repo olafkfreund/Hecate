@@ -1,0 +1,70 @@
+{{- if .Values.userRoles.create }}
+{{/*
+  Roles for people, as opposed to the ClusterRole in rbac.yaml, which is what
+  Hecate itself holds.
+
+  Three of them rather than one, because #74 requires that the right to cross a
+  Gate and the right to approve a crossing be separable: an approval the
+  promoter can grant themselves is not an approval. They are different verbs on
+  different resources, so binding one does not confer the other — and nothing in
+  Hecate has to enforce that, because the API server already does.
+
+  Deliberately unbound. Who is a promoter and who is an approver is a question
+  about your organisation, and a chart that answered it with a default would be
+  answering it wrong. Bind them per namespace:
+
+    kubectl create rolebinding release-team \
+      --clusterrole=hecate-promoter --group=release-team -n production
+
+  These govern Hecate's own resources. They are not a substitute for Fides
+  segregation of duties, which asks a different question — whether the evidence
+  has been signed off, rather than whether this person may act.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "hecate.fullname" . }}-viewer
+  labels: {{- include "hecate.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["hecate.dev"]
+    resources: ["beacons", "bundles", "gates", "passages"]
+    verbs: ["get", "list", "watch"]
+---
+{{/*
+  A promoter can ask a Gate to cross a Bundle. Whether it *may* cross is a
+  separate question, judged by the same rules as an automatic crossing.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "hecate.fullname" . }}-promoter
+  labels: {{- include "hecate.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["hecate.dev"]
+    resources: ["beacons", "bundles", "gates", "passages"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["hecate.dev"]
+    resources: ["passages"]
+    # create is a promotion; update is an abort. Note that this grants the
+    # right at the Kubernetes level too, so a holder with direct cluster access
+    # can create a Passage that the eligibility rules would have refused. That
+    # is a property of the CRD being the API, not of the API server.
+    verbs: ["create", "update", "patch"]
+---
+{{/*
+  An approver can approve a Bundle for a Gate, and cannot promote. This is the
+  half that makes four-eyes real, so it grants exactly one write.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "hecate.fullname" . }}-approver
+  labels: {{- include "hecate.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["hecate.dev"]
+    resources: ["beacons", "bundles", "gates", "passages"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["hecate.dev"]
+    resources: ["bundles/status"]
+    verbs: ["update", "patch"]
+{{- end }}

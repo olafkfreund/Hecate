@@ -1,5 +1,13 @@
 /bin/
 /dist/
+
+# `go build ./cmd/X` writes ./X, not into bin/. Named rather than globbed:
+# a pattern broad enough to catch these would also catch a future directory.
+/hecate
+/hecate-api
+/hecate-controller
+/hecate-mcp
+
 *.test
 coverage.out
 .env

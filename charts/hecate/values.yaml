@@ -27,6 +27,13 @@ rbac:
   # manage the ClusterRole yourself.
   create: true
 
+userRoles:
+  # ClusterRoles for people: hecate-viewer, hecate-promoter, hecate-approver.
+  # Created unbound — who may promote and who may approve is a question about
+  # your organisation. Promoting and approving are separate on purpose; binding
+  # both to the same subject is a choice, not the default.
+  create: true
+
 hecate:
   # Refuse a Gate watching resources outside its own namespace. Matches the
   # posture Flux ships on its own controllers (D11). Set false only on a
@@ -42,6 +49,36 @@ hecate:
   logLevel: info
   # json in production; console is only readable during development.
   logFormat: json
+
+# The HTTP API, for surfaces that cannot hold a kubeconfig — a UI, a dashboard,
+# a bot. Off by default: it is a network-reachable write path, and turning one
+# on should be a decision.
+#
+# It authenticates nobody itself. A caller presents a Kubernetes bearer token
+# and Hecate asks the API server who they are and whether they may act, so
+# cluster RBAC is the permission model and there is no second one to keep in
+# step. Bind the hecate-promoter and hecate-approver ClusterRoles above.
+api:
+  enabled: false
+  replicaCount: 2
+  port: 8443
+  tls:
+    # Secret with tls.crt and tls.key — cert-manager's output works as-is.
+    # Without it Hecate serves plain HTTP and bearer tokens cross the network in
+    # clear, which the chart refuses unless you say allowInsecure.
+    secretName: ""
+  # Only for a mesh or ingress that terminates TLS in front of Hecate.
+  allowInsecure: false
+  service:
+    type: ClusterIP
+    port: 443
+    annotations: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
 
 metrics:
   enabled: true

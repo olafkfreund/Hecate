@@ -98,6 +98,7 @@ build: ## Build the controller and the CLI
 	go build -o bin/hecate-controller ./cmd/hecate-controller
 	go build -o bin/hecate ./cmd/hecate
 	go build -o bin/hecate-mcp ./cmd/hecate-mcp
+	go build -o bin/hecate-api ./cmd/hecate-api
 
 run: ## Run the controller against the current KUBECONFIG
 	go run ./cmd/hecate-controller --zap-devel

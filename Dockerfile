@@ -17,13 +17,17 @@ COPY . .
 ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION=dev
+# Both binaries, one image. They share a source tree and a release, and a
+# second image would mean a second publish pipeline shipping the same commit.
+# The API Deployment overrides the entrypoint.
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
       go build -ldflags "-s -w -X main.version=${VERSION}" \
-      -o /out/hecate-controller ./cmd/hecate-controller
+      -o /out/ ./cmd/hecate-controller ./cmd/hecate-api
 
 # Static, non-root, no shell: the controller needs a CA bundle for registries
 # and git hosts, and nothing else.
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/hecate-controller /usr/local/bin/hecate-controller
+COPY --from=build /out/hecate-api /usr/local/bin/hecate-api
 USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/hecate-controller"]
