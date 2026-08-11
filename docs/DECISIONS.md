@@ -830,3 +830,40 @@ unknown *tool* stays a protocol error, because no choice of arguments fixes it.
 **The server is read-only.** Writes are gated separately, on a question this
 layer cannot answer: if an agent can satisfy a four-eyes approval, four-eyes is
 theatre.
+
+## D34 — MCP can promote and abort; it can never approve
+
+**Decision:** `hecate-mcp` exposes `promote` and `abort` behind `--allow-writes`,
+which is off by default. It does not expose `approve`, and there is no flag that
+would make it.
+
+The two halves of that are decided differently.
+
+**Writes are opt-in** because a tool a model can call is a tool it will call.
+A server started to answer questions should not be able to move anything, and
+the default should be the safe one for the person who did not read the flags.
+Enabling them requires `--actor`: a write nobody is accountable for is exactly
+the failure an agent makes easy.
+
+**Approval is refused structurally.** Approval is a segregation-of-duties
+control — Fides' change gate withholds it until a human who is not the committer
+signs off, and a Gate's `requireApproval` exists to make a person look at a
+Bundle before it moves. An agent that can approve can be one of the two required
+eyes, and one operator driving an agent can then be both. The control would go
+on appearing in every audit trail while having stopped meaning anything, which
+is worse than not having it: an absent control is visibly absent, a hollow one
+is not.
+
+A flag to enable it would be a flag to make the guarantee untrue, and the value
+of a guarantee is that it holds without anyone having to check how the server
+was started. A test asserts no configuration produces an approve tool.
+
+**An agent acting for someone is not that person acting.** Writes are recorded
+as `mcp:<actor>`, so the trail distinguishes "olaf promoted this" from "an agent
+olaf authorised promoted this". Both are accountable; they are not the same
+event.
+
+**The rules are not re-implemented here.** A refused promotion is refused by
+pkg/ops, the same code the CLI and the controller go through, and the refusal
+reaches the model as text it can act on. An MCP client is a client, not a
+bypass.

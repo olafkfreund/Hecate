@@ -115,8 +115,13 @@ rather than parses out of prose.
 
 It speaks both MCP eras — the stateless `2026-07-28` revision and the older
 handshake-based ones — because a modern-only server cannot be used by the
-clients most people are running today ([D33](docs/DECISIONS.md)). It is
-read-only: it cannot promote, approve or abort.
+clients most people are running today ([D33](docs/DECISIONS.md)).
+
+It reads by default. `--allow-writes --actor <you>` adds `promote` and `abort`,
+judged by the same rules as every other path. **It can never approve**, and
+there is no flag for it: approval is a segregation-of-duties control, and an
+agent that could satisfy it would leave the control in every audit trail having
+stopped meaning anything ([D34](docs/DECISIONS.md)).
 
 ### Compliance as a gate, not a report
 
@@ -245,7 +250,7 @@ ok  github.com/olafkfreund/hecate/pkg/passage
 ok  github.com/olafkfreund/hecate/pkg/passage/steps
 ```
 
-264 tests, no cluster required, ~1s. That is the bar: anything testable without a
+270 tests, no cluster required, ~1s. That is the bar: anything testable without a
 cluster must be. Image resolution is tested against a real in-memory registry rather
 than a mock.
 
@@ -257,7 +262,7 @@ controller-gen — at the versions CI uses.
 ```bash
 nix develop          # or: direnv allow
 
-make test            # 264 tests, ~1s, no cluster
+make test            # 270 tests, ~1s, no cluster
 make cluster         # k3d in Docker, with Flux installed
 make install         # build, push and install the chart into the dev cluster
 make e2e             # drive a Bundle through two Gates on a real API server

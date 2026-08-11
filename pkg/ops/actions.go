@@ -5,6 +5,10 @@ import (
 	"errors"
 	"fmt"
 
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/olafkfreund/hecate/api/v1alpha1"
 	"github.com/olafkfreund/hecate/pkg/gate"
 )
@@ -110,8 +114,20 @@ func (o *Ops) Approve(ctx context.Context, namespace, bundleName, gateName, acto
 		return nil // Already approved. Asking twice is not an error.
 	}
 
-	b.Status.ApprovedFor = append(b.Status.ApprovedFor, gateName)
-	if err := o.Client.Status().Update(ctx, b); err != nil {
+	// Retried rather than patched: this appends to a list, and a merge patch
+	// would replace the whole list with the one we computed — silently dropping
+	// an approval recorded for another Gate in between.
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		fresh, err := o.Bundle(ctx, namespace, bundleName)
+		if err != nil {
+			return err
+		}
+		if fresh.IsApprovedFor(gateName) {
+			return nil
+		}
+		fresh.Status.ApprovedFor = append(fresh.Status.ApprovedFor, gateName)
+		return o.Client.Status().Update(ctx, fresh)
+	}); err != nil {
 		return fmt.Errorf("recording approval: %w", err)
 	}
 	return nil
@@ -139,8 +155,13 @@ func (o *Ops) Abort(ctx context.Context, namespace, passageName, actor string) e
 		return nil // Already asked. Asking again is not an error.
 	}
 
-	p.Spec.Abort = true
-	if err := o.Client.Update(ctx, p); err != nil {
+	// A merge patch rather than read-modify-write. A running Passage is being
+	// updated by its controller continuously, so an Update loses the race often
+	// enough to matter — the first real abort against a cluster failed with
+	// "the object has been modified". Setting one idempotent field needs no
+	// resourceVersion, so there is nothing to conflict with.
+	patch := []byte(`{"spec":{"abort":true}}`)
+	if err := o.Client.Patch(ctx, p, client.RawPatch(types.MergePatchType, patch)); err != nil {
 		return fmt.Errorf("aborting Passage: %w", err)
 	}
 	return nil

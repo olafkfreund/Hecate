@@ -1,9 +1,12 @@
 // Command hecate-mcp lets an LLM client ask Hecate what is going on.
 //
-// It speaks the Model Context Protocol over stdio and is read-only: it can
-// report what every Gate is doing and why one is stuck, and it cannot promote,
-// approve or abort anything. Those are gated separately, because an agent that
-// can satisfy a four-eyes approval makes four-eyes theatre.
+// It speaks the Model Context Protocol over stdio. By default it only reads.
+// With --allow-writes it can also promote and abort, subject to exactly the
+// rules every other path obeys.
+//
+// It can never approve. Approval is a segregation-of-duties control, and an
+// agent that can satisfy it makes four-eyes theatre — so that is not a setting
+// this server has.
 //
 // It is a transport over pkg/ops and holds no rules of its own, so what it
 // reports and what `hecate` prints cannot disagree.
@@ -33,7 +36,12 @@ var version = "dev"
 // instructions is what a client shows the model about this server. It is the
 // only chance to say what the vocabulary means before the model starts
 // guessing from tool names.
-const instructions = `Hecate is the promotion layer for FluxCD. Its vocabulary:
+// instructionsFor is what a client shows the model about this server. It is the
+// only chance to say what the vocabulary means before the model starts guessing
+// from tool names — and, when writes are on, the only place to say plainly what
+// it must not try to do.
+func instructionsFor(allowWrites bool) string {
+	instructions := `Hecate is the promotion layer for FluxCD. Its vocabulary:
 
   Beacon   watches registries and repositories, and emits a Bundle when something new appears
   Bundle   an immutable set of artifact versions — the thing that moves
@@ -46,9 +54,25 @@ syncs, and Hecate reads the result back.
 When asked why something has not deployed, call why_stuck on the Gate rather
 than piecing it together from list_gates and get_passage — it returns the
 blockers already identified, each with the command that would clear it.
+`
 
+	if !allowWrites {
+		return instructions + `
 This server is read-only. It cannot promote, approve or abort; say so rather
 than implying an action was taken.`
+	}
+
+	return instructions + `
+This server can promote and abort. It cannot approve, and there is no setting
+that would let it: approval is a segregation-of-duties control, and an agent
+that could satisfy it would make the control meaningless. When a Bundle is
+waiting for approval, say so and let a person approve it — do not look for
+another route.
+
+Promotion is judged by the same rules as an automatic crossing. A refusal is an
+answer, not an obstacle: report it rather than retrying or trying a different
+Gate.`
+}
 
 func main() {
 	// Logging goes to stderr because stdout carries the protocol, and one stray
@@ -56,6 +80,10 @@ func main() {
 	fs := flag.NewFlagSet("hecate-mcp", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	namespace := fs.String("namespace", "", "default namespace for tools that do not name one")
+	allowWrites := fs.Bool("allow-writes", false,
+		"expose promote and abort. Off by default: a tool a model can call is a tool it will call.")
+	actor := fs.String("actor", "",
+		"who authorised this server to act, recorded on every write. Required with --allow-writes.")
 	showVersion := fs.Bool("version", false, "print the version and exit")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		os.Exit(2)
@@ -65,13 +93,22 @@ func main() {
 		return
 	}
 
-	if err := run(*namespace); err != nil {
+	if err := run(*namespace, *allowWrites, *actor); err != nil {
 		fmt.Fprintf(os.Stderr, "hecate-mcp: %s\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(namespace string) error {
+func run(namespace string, allowWrites bool, actor string) error {
+	if allowWrites && actor == "" {
+		// A write with no actor is a write nobody is accountable for, and an
+		// agent acting anonymously is exactly the case where that matters.
+		return fmt.Errorf("--allow-writes needs --actor: every write records who authorised it")
+	}
+	if !allowWrites && actor != "" {
+		return fmt.Errorf("--actor has no effect without --allow-writes")
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -92,10 +129,17 @@ func run(namespace string) error {
 		namespace = kubeconfigNamespace()
 	}
 
-	server := mcp.New("hecate", version, instructions)
-	server.MustRegister(mcp.ReadTools(ops.New(c), namespace)...)
+	o := ops.New(c)
+	server := mcp.New("hecate", version, instructionsFor(allowWrites))
+	server.MustRegister(mcp.ReadTools(o, namespace)...)
 
-	fmt.Fprintf(os.Stderr, "hecate-mcp %s serving %s over stdio (read-only)\n", version, namespace)
+	mode := "read-only"
+	if allowWrites {
+		server.MustRegister(mcp.WriteTools(o, namespace, actor)...)
+		mode = "writes enabled as " + mcp.ActorPrefix + actor
+	}
+
+	fmt.Fprintf(os.Stderr, "hecate-mcp %s serving %s over stdio (%s)\n", version, namespace, mode)
 	return server.Serve(ctx, os.Stdin, os.Stdout)
 }
 
