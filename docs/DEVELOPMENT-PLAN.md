@@ -15,6 +15,7 @@ This is the *how*.
 | `pkg/passage` — Step interface, registry, execution engine | ✅ done |
 | `pkg/passage/steps` — `flux-wait`, `flux-reconcile`, the git steps, `edit-yaml`, `set-image` | ✅ done |
 | `pkg/provider` — GitHub and GitLab pull requests, `git-pull-request` step | ✅ done |
+| `pkg/fides` + `hecate verify` — evidence client and chain verification | ✅ done |
 | `pkg/beacon` — discovery, image resolution, Beacon controller | ✅ done |
 | `pkg/gate` — eligibility, promotion windows, Gate controller | ✅ done |
 | `pkg/passage` — execution engine and Passage controller | ✅ done |
@@ -31,7 +32,7 @@ This is the *how*.
 | API server | M7 |
 | UI | M8 |
 
-192 tests, no cluster required, ~1s.
+204 tests, no cluster required, ~1s.
 
 ## 2. Technology
 

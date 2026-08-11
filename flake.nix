@@ -37,7 +37,10 @@
 
           vendorHash = "sha256-R4PVGvhPlFp5WkzAjP+WWnlROugDkeeLZUymtvqLW54=";
 
-          subPackages = [ "cmd/hecate-controller" ];
+          subPackages = [
+            "cmd/hecate-controller"
+            "cmd/hecate"
+          ];
 
           # Pure Go: hermetic builds that cross-compile cleanly.
           env.CGO_ENABLED = 0;

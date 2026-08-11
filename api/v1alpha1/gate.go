@@ -68,6 +68,40 @@ type GateSpec struct {
 	//
 	// +optional
 	Vars []Var `json:"vars,omitempty"`
+	// Evidence binds this Gate to the compliance system that records what
+	// crossed it and decides what may.
+	//
+	// +optional
+	Evidence *EvidenceConfig `json:"evidence,omitempty"`
+}
+
+// EvidenceConfig binds a Gate to a Fides environment.
+//
+// One block rather than a scatter of top-level fields, because the rest of the
+// compliance settings — which flow a crossing's trail belongs to, what
+// change-gate risk score is tolerable — land here too.
+type EvidenceConfig struct {
+	// FidesEnvironment is the Fides environment this Gate corresponds to.
+	//
+	// Explicit, and a UUID, because that is what the environment-scoped Fides
+	// checks take: `/api/v1/environments/{uuid}/policy-check` and
+	// `/api/v1/environments/{uuid}/allowlist`. There is no convention that
+	// could produce one — an environment's name is not its key — and a
+	// convention that silently resolved to the wrong environment would check
+	// the wrong policy while reporting success, which is the worst failure a
+	// compliance control can have.
+	//
+	// +kubebuilder:validation:Pattern=`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`
+	FidesEnvironment string `json:"fidesEnvironment"`
+	// ServerURL is the Fides server. Empty falls back to the controller's
+	// --fides-server flag, so a fleet with one Fides says it once.
+	//
+	// +optional
+	ServerURL string `json:"serverURL,omitempty"`
+	// CredentialsRef names a Secret holding a Fides API key under `token`.
+	//
+	// +optional
+	CredentialsRef *LocalSecretRef `json:"credentialsRef,omitempty"`
 }
 
 // Admission declares one class of Bundle this Gate accepts.

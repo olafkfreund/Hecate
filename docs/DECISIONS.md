@@ -616,3 +616,52 @@ nothing. One nudge per attempt; `flux-wait` does the waiting.
 **Cross-namespace refuses by default**, on the same rule as `flux-wait`: a step
 that can annotate any namespace's Kustomization can trigger any tenant's
 deployment.
+
+## D27 — A Gate names its Fides environment explicitly, by UUID
+
+**Decision:** `gate.spec.evidence.fidesEnvironment` holds the Fides environment's
+UUID. There is no convention mapping a namespace or a Gate name to an
+environment.
+
+The issue that raised this left it open — explicit reference, or convention?
+Reading Fides settles it: an environment is addressed by UUID in every
+environment-scoped endpoint (`/api/v1/environments/{uuid}/policy-check`,
+`/api/v1/environments/{uuid}/allowlist`). An environment has a `name`, but it is
+not the API's key, so no naming convention can produce the identifier the checks
+need. Convention was not merely riskier here; it was not possible.
+
+The risk argument still holds for the shape we did pick. A convention that
+resolved to the wrong environment would check the wrong policy and report
+success — a compliance control that is silently wrong is worse than one that is
+absent, because the absent one does not get relied on.
+
+**The CRD enforces the UUID shape**, so a typo is rejected when the Gate is
+applied rather than discovered by a crossing hours later. That is admission-time
+validation, which is what #97 wants for step configuration, obtained here for
+nothing because the value has a fixed shape.
+
+**It sits in an `evidence:` block**, not as a top-level field. The rest of the
+compliance settings — which flow a crossing's trail belongs to, what change-gate
+risk score is tolerable — belong with it, and a Gate that grew five top-level
+`fides*` fields would be worse than one with a named block from the start.
+
+## D28 — Verification is a command, not a status field
+
+**Decision:** `hecate verify` checks a trail's attestation chain from outside
+the controller and exits non-zero when it is broken. The controller does not
+verify chains and does not publish a `chainValid` field.
+
+An audit trail nobody can verify is a log file with better marketing. If Hecate
+both wrote the evidence and published the verdict on whether the evidence is
+intact, the verdict would be worth exactly as much as trusting Hecate — which is
+the thing the tamper-evidence chain exists to avoid needing. The check has to be
+runnable by the person relying on it, against Fides, without Hecate in the path.
+
+**The exit codes separate "the evidence is bad" from "I could not look."** A
+broken chain exits 3; an unreachable or unauthorised Fides exits 2; a Bundle
+with no trail recorded exits 4 rather than 0. Reporting "nothing to verify" as
+success is how a pipeline ends up green over an empty audit trail.
+
+**Every crossing is checked before it returns**, and the worst verdict decides
+the exit code. Stopping at the first broken chain would hide how much of the
+history is affected.

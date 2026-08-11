@@ -299,6 +299,38 @@ func waitFor(t *testing.T, timeout time.Duration, what string, done func() bool,
 	t.Fatal(msg)
 }
 
+// The Fides environment reference is validated by the API server, not by
+// Hecate: the CRD carries a UUID pattern, so a typo is refused when the Gate is
+// applied rather than discovered by a compliance check quietly reading the
+// wrong environment's policy. That enforcement only exists against a real API
+// server, which is why this test lives here.
+func TestFidesEnvironmentIsValidatedAtAdmission(t *testing.T) {
+	ctx := context.Background()
+	c := newClient(t)
+	freshNamespace(t, c)
+
+	gate := func(name, environment string) *v1alpha1.Gate {
+		return &v1alpha1.Gate{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+			Spec: v1alpha1.GateSpec{
+				Admits:   []v1alpha1.Admission{{From: v1alpha1.BundleOrigin{Beacon: "app"}}},
+				Evidence: &v1alpha1.EvidenceConfig{FidesEnvironment: environment},
+			},
+		}
+	}
+
+	for _, environment := range []string{"production", "", "7f3a1c2e-0000-4000-8000", "not-a-uuid-at-all"} {
+		if err := c.Create(ctx, gate("rejected", environment)); err == nil {
+			t.Errorf("the API server accepted %q as a Fides environment", environment)
+			_ = c.Delete(ctx, gate("rejected", environment))
+		}
+	}
+
+	if err := c.Create(ctx, gate("accepted", "7f3a1c2e-0000-4000-8000-000000009b04")); err != nil {
+		t.Errorf("a real environment UUID was rejected: %v", err)
+	}
+}
+
 func TestMain(m *testing.M) {
 	// Fail fast and legibly rather than with a wall of connection errors.
 	if _, err := ctrl.GetConfig(); err != nil {

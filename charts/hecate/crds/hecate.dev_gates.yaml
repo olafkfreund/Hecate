@@ -97,6 +97,41 @@ spec:
                   Auto admits and crosses eligible Bundles without waiting to be asked.
                   Sensible for dev, rarely for production.
                 type: boolean
+              evidence:
+                description: |-
+                  Evidence binds this Gate to the compliance system that records what
+                  crossed it and decides what may.
+                properties:
+                  credentialsRef:
+                    description: CredentialsRef names a Secret holding a Fides API
+                      key under `token`.
+                    properties:
+                      name:
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  fidesEnvironment:
+                    description: |-
+                      FidesEnvironment is the Fides environment this Gate corresponds to.
+
+                      Explicit, and a UUID, because that is what the environment-scoped Fides
+                      checks take: `/api/v1/environments/{uuid}/policy-check` and
+                      `/api/v1/environments/{uuid}/allowlist`. There is no convention that
+                      could produce one — an environment's name is not its key — and a
+                      convention that silently resolved to the wrong environment would check
+                      the wrong policy while reporting success, which is the worst failure a
+                      compliance control can have.
+                    pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$
+                    type: string
+                  serverURL:
+                    description: |-
+                      ServerURL is the Fides server. Empty falls back to the controller's
+                      --fides-server flag, so a fleet with one Fides says it once.
+                    type: string
+                required:
+                - fidesEnvironment
+                type: object
               passage:
                 description: |-
                   Passage is the sequence of steps that moves an admitted Bundle into this

@@ -58,8 +58,9 @@ generate: ## Regenerate deepcopy, CRDs and RBAC from the API and controller mark
 		rbac:roleName=hecate-controller output:rbac:dir=$(CHART_DIR)/rbac \
 		paths=./pkg/...
 
-build: ## Build the controller binary
+build: ## Build the controller and the CLI
 	go build -o bin/hecate-controller ./cmd/hecate-controller
+	go build -o bin/hecate ./cmd/hecate
 
 run: ## Run the controller against the current KUBECONFIG
 	go run ./cmd/hecate-controller --zap-devel

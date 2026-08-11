@@ -79,6 +79,32 @@ spec:
           expectedRevision: ${{ steps.commit.sha }}
 ```
 
+### Verifying what crossed
+
+Hecate records each crossing in [Fides](https://github.com/olafkfreund/evidance-vault)
+as an attestation trail. A Gate says which Fides environment it is:
+
+```yaml
+spec:
+  evidence:
+    fidesEnvironment: 7f3a1c2e-8b41-4d6a-9e2f-0000000009b04   # validated on apply
+    credentialsRef: { name: fides }
+```
+
+The trail is tamper-evident, and the check is yours to run rather than ours to
+claim:
+
+```console
+$ hecate verify podinfo-abc123
+✓ staging (trail aaaa1111)
+  chain valid — 9 attestations, anchored 2026-08-09
+✗ production (trail 91b2ffff)
+  chain BROKEN at entry 6: content_hash does not match the recorded entry
+```
+
+Exit 3 when a chain is broken, 2 when it could not be checked, 4 when nothing
+has been recorded — never 0 for any of them.
+
 **There is no pipeline object** — the graph is implied by what each Gate admits, so it
 cannot drift out of sync with reality.
 
@@ -164,7 +190,7 @@ ok  github.com/olafkfreund/hecate/pkg/passage
 ok  github.com/olafkfreund/hecate/pkg/passage/steps
 ```
 
-192 tests, no cluster required, ~1s. That is the bar: anything testable without a
+204 tests, no cluster required, ~1s. That is the bar: anything testable without a
 cluster must be. Image resolution is tested against a real in-memory registry rather
 than a mock.
 
@@ -176,7 +202,7 @@ controller-gen — at the versions CI uses.
 ```bash
 nix develop          # or: direnv allow
 
-make test            # 192 tests, ~1s, no cluster
+make test            # 204 tests, ~1s, no cluster
 make cluster         # k3d in Docker, with Flux installed
 make install         # build, push and install the chart into the dev cluster
 make e2e             # drive a Bundle through two Gates on a real API server
