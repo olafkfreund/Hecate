@@ -109,6 +109,7 @@ func run() error {
 	stepRunners.MustRegister(steps.NewGitPush(mgr.GetClient()))
 	stepRunners.MustRegister(steps.NewEditYAML())
 	stepRunners.MustRegister(steps.NewSetImage())
+	stepRunners.MustRegister(steps.NewGitPullRequest(mgr.GetClient()))
 
 	if err := (&beacon.Reconciler{
 		Client:   mgr.GetClient(),

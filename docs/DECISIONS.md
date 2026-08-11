@@ -551,3 +551,41 @@ ours to make on every crossing.
 `newTag: 1.0` is a float, and kustomize would render `image:1`. The check covers
 the YAML 1.1 booleans (`yes`, `on`, `no`, `off`) too, because Flux and kustomize
 read these files with a 1.1 parser even though we write them with a 1.2 one.
+
+## D25 — Providers cover only what git cannot
+
+**Decision:** `pkg/provider` talks to a git host's API for pull requests and
+nothing else. Cloning, committing and pushing go over plain HTTPS or SSH, with
+no provider code and no host-specific branch in them.
+
+This is what keeps host support cheap. Most of a promotion is git, and git is
+the same everywhere; only the review is an API. A design where every step went
+through a provider would need the whole surface reimplemented per host, and
+would break against a host nobody wrote an implementation for — including the
+self-hosted ones the promotion-gate audience actually runs.
+
+**The client is hand-written, not an SDK per host.** GitHub and GitLab need
+about five endpoints between them. Two generated SDKs would be two large
+dependencies, two release cadences and two ways to configure a base URL, in
+exchange for code written once and shared.
+
+**A base URL is configurable from the first commit.** GitHub Enterprise Server
+and self-managed GitLab are the common case in organisations that care about
+promotion gates, and a base URL retrofitted later is a base URL that is wrong in
+half the code paths.
+
+**The host flavour is guessed only for the two public hosts.** An appliance at
+`git.acme.io` could be either, and guessing wrong sends GitLab requests to a
+GitHub API. It refuses and says to set `provider:`.
+
+**Opening a pull request is idempotent.** `EnsurePullRequest` returns the one
+already open for the same head branch, and adopts one the host says already
+exists — a step re-runs after every requeue, and a reviewer buried in duplicate
+pull requests stops reading them.
+
+**`git-pull-request` waits by default.** A crossing that succeeded the moment
+the pull request opened would record the Bundle as having cleared the
+environment before a human looked at it, which is the opposite of what asking
+for review means. It reports the *merge* commit rather than the branch's,
+because a squashing host lands the change under a hash that never existed
+locally, and that is what `flux-wait` must then wait for.
