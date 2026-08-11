@@ -150,12 +150,19 @@ func TestCrossingAgainstRealAPI(t *testing.T) {
 
 	reconcileBeacon(t, beaconReconciler, "app")
 
+	// Poll rather than asserting immediately. Reconcile returning nil does not
+	// guarantee the Bundle is readable yet, and a Beacon that hit a problem
+	// reports it in status instead of erroring — so a bare "want 1, got 0"
+	// tells you nothing about which happened.
 	var bundles v1alpha1.BundleList
-	if err := c.List(ctx, &bundles, client.InNamespace(namespace)); err != nil {
-		t.Fatal(err)
-	}
+	waitFor(t, 30*time.Second, "the Beacon to emit a Bundle", func() bool {
+		if err := c.List(ctx, &bundles, client.InNamespace(namespace)); err != nil {
+			return false
+		}
+		return len(bundles.Items) > 0
+	})
 	if len(bundles.Items) != 1 {
-		t.Fatalf("got %d Bundles, want 1", len(bundles.Items))
+		t.Fatalf("got %d Bundles, want 1: %s", len(bundles.Items), beaconStatus(t, c))
 	}
 	emitted := bundles.Items[0]
 	if got := emitted.Spec.Artifacts[0].Image.Digest; got != digests["1.1.0"] {
@@ -292,6 +299,25 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	os.Exit(m.Run())
+}
+
+// beaconStatus renders why a Beacon has not emitted, for failure messages. A
+// Beacon that cannot resolve a source records the reason in its Ready condition
+// rather than failing the reconcile, so without this the test reports the
+// symptom and hides the cause.
+func beaconStatus(t *testing.T, c client.Client) string {
+	t.Helper()
+	var b v1alpha1.Beacon
+	if err := c.Get(context.Background(),
+		types.NamespacedName{Name: "app", Namespace: namespace}, &b); err != nil {
+		return "Beacon unreadable: " + err.Error()
+	}
+	for _, cond := range b.Status.Conditions {
+		if cond.Type == v1alpha1.ConditionReady {
+			return "Beacon Ready=" + string(cond.Status) + " " + cond.Reason + ": " + cond.Message
+		}
+	}
+	return "Beacon has no Ready condition yet"
 }
 
 // skipIfHecateInstalled skips when a deployed controller would race this test.
