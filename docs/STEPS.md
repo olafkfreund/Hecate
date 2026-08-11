@@ -281,6 +281,9 @@ An unreachable Fides is retryable; a rejected token is not.
 **Output:** `trail`, `verdict`, `risk`. Also written to
 `passage.status.evidence`, which is what `hecate verify` reads.
 
+Checked against a live Fides with `make fides-test`; see
+[ONBOARDING](ONBOARDING.md).
+
 **Reasons:** `NotCompliant`, `NotAllowlisted`, `NoEvidence`, `ChangeHeld`,
 `EvidenceUnavailable`, `InvalidConfig`.
 

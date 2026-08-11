@@ -62,10 +62,36 @@ The shell pins `KUBECONFIG` to `./.dev/kubeconfig`. That is deliberate: a stray
 $ make test
 ```
 
-134 tests, about a second, **no cluster required**. That is the standing rule:
+220 tests, about a second, **no cluster required**. That is the standing rule:
 anything that can be tested without a cluster must be. If a change makes you
 reach for a cluster to test it, that is usually a sign the logic wants
 extracting into something pure.
+
+### Against a real Fides
+
+The suite above fakes Fides. The fake was built by reading Fides' handlers,
+which is not the same as knowing what it sends — `policy-check` returns
+`compliant`, not `passed`, and a client reading the wrong key would refuse every
+crossing while looking like it worked.
+
+If you have a Fides to point at, check the client against it:
+
+```console
+$ kubectl -n fides port-forward svc/fides-server 18080:8080 &
+$ export FIDES_SERVER_URL=http://127.0.0.1:18080
+$ export FIDES_TOKEN=$(kubectl -n fides get secret fides-secrets \
+    -o go-template='{{index .data "api-token"}}' | base64 -d)
+$ make fides-test
+```
+
+Every call is a read, so it is safe against a real compliance system — which is
+the only useful kind, since a Fides with no history has nothing to verify. The
+test discovers an environment and an artifact from the server rather than
+hardcoding UUIDs, so it runs against any instance.
+
+It has already earned its place: it found that Fides answers `200` with
+`{"valid":true,"count":0}` for a trail that does not exist, which `hecate
+verify` was reporting as a verified chain and exit 0.
 
 ## 4. Bring up a test cluster
 

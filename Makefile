@@ -90,6 +90,11 @@ e2e: ## Run the end-to-end suite against the dev cluster
 	@./scripts/dev-cluster.sh status >/dev/null || { echo "no dev cluster — run 'make cluster'"; exit 1; }
 	go test -tags e2e -count=1 -timeout 20m ./test/e2e/...
 
+fides-test: ## Check the Fides client against a real server (FIDES_SERVER_URL, FIDES_TOKEN)
+	@test -n "$$FIDES_SERVER_URL" || { echo "set FIDES_SERVER_URL (see docs/ONBOARDING.md)"; exit 1; }
+	@test -n "$$FIDES_TOKEN" || { echo "set FIDES_TOKEN"; exit 1; }
+	go test -tags fides -count=1 -v ./test/integration/...
+
 ## ------------------------------------------------------------- secrets ----
 
 secrets-edit: ## Edit an encrypted secret: make secrets-edit SECRET=github-token.age

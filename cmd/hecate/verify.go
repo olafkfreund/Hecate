@@ -100,6 +100,14 @@ func report(results ...result) int {
 			fmt.Printf("✗ %s\n  chain BROKEN at entry %d: %s\n", where, r.chain.BrokenAt, reason(r.chain))
 			code = worst(code, exitBroken)
 
+		case r.chain.Count == 0:
+			// Fides answers 200 with {"valid":true,"count":0} for a trail that
+			// does not exist — verifying an empty chain is vacuously true. An
+			// empty trail proves nothing either way, so calling it verified is
+			// the false green this command exists to avoid.
+			fmt.Printf("? %s\n  no attestations — the trail is empty, or does not exist\n", where)
+			code = worst(code, exitNoTrail)
+
 		default:
 			fmt.Printf("✓ %s\n  chain valid — %s%s\n", where,
 				plural(r.chain.Count, "attestation"), anchorNote(r.chain.ExternalAnchor))

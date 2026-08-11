@@ -73,6 +73,15 @@ func TestVerifyExitCodes(t *testing.T) {
 			exitOK, "not externally anchored",
 		},
 		{
+			// What a real Fides returns for a trail that does not exist: 200,
+			// valid, count 0 — verifying an empty chain is vacuously true.
+			// Reporting that as verified is the false green this command exists
+			// to prevent, so it must not be exitOK.
+			"a trail that does not exist",
+			`{"valid":true,"count":0,"broken_at":-1}`,
+			exitNoTrail, "no attestations",
+		},
+		{
 			"an anchor over a different head",
 			`{"valid":true,"count":3,"broken_at":-1,"external_anchor":{"anchored":true,"head_matches":false,"anchored_at":"2026-08-01T00:00:00Z"}}`,
 			exitOK, "different chain head",
