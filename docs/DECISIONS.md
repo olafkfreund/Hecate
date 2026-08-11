@@ -792,3 +792,41 @@ a failure, and a pipeline can branch on the difference.
 record, because it looks like one. The CLI defaults to the OS user and is honest
 that this is a convenience rather than an identity claim — real authentication
 belongs to the API server.
+
+## D33 — The MCP server speaks both protocol eras
+
+**Decision:** `hecate-mcp` implements MCP revision `2026-07-28` *and* the
+handshake-based revisions before it. It is hand-rolled, with no SDK.
+
+MCP changed shape in `2026-07-28`. Earlier revisions open with an `initialize`
+handshake that negotiates a version for the session; from `2026-07-28` there is
+no handshake at all — every request carries its protocol version in `_meta`,
+`server/discover` replaces `initialize`, and an unsupported version is refused
+per request with `UnsupportedProtocolVersionError`.
+
+Neither era alone is enough, and the specification's own compatibility matrix
+says so: **a legacy client against a modern-only server simply fails.** Most
+deployed clients are still legacy, so modern-only would ship something nobody
+can connect to today; legacy-only would ship something that has to be rewritten
+the first time a client updates. A dual-era server is explicitly blessed by the
+specification, and the difference between the two eras turns out to be small —
+the envelope, not the tools.
+
+**No SDK.** The wire protocol is a few hundred lines of JSON-RPC, and an SDK
+would be a dependency whose release cadence we do not control sitting on the
+path between a model and a production promotion system.
+
+**Results carry `structuredContent`, not just text.** This is the difference
+between a tool a model can reason over and one it must parse prose from. The
+`why_stuck` tool publishes an `outputSchema` too, because its blocker kinds are
+a closed set and a client should be able to branch on them rather than match
+English.
+
+**Tool failures are reported in the result with `isError`, not as JSON-RPC
+errors.** A model can correct itself from "gate is required"; the specification
+notes clients are far less likely to surface protocol errors usefully. An
+unknown *tool* stays a protocol error, because no choice of arguments fixes it.
+
+**The server is read-only.** Writes are gated separately, on a question this
+layer cannot answer: if an agent can satisfy a four-eyes approval, four-eyes is
+theatre.

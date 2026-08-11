@@ -102,6 +102,22 @@ knowing which fields matter. The answer is computed in one place —
 [`pkg/ops`](docs/DECISIONS.md) — so the CLI, the API and the UI cannot come to
 different conclusions about the same cluster.
 
+### Asking through an LLM
+
+```console
+$ hecate-mcp -namespace acme      # stdio, read-only
+```
+
+An MCP server over the same operations layer, so an agent and the CLI cannot
+come to different conclusions. `why_stuck` returns typed blockers as
+`structuredContent`, which is what makes it something a model reasons over
+rather than parses out of prose.
+
+It speaks both MCP eras — the stateless `2026-07-28` revision and the older
+handshake-based ones — because a modern-only server cannot be used by the
+clients most people are running today ([D33](docs/DECISIONS.md)). It is
+read-only: it cannot promote, approve or abort.
+
 ### Compliance as a gate, not a report
 
 A Gate can refuse a crossing on evidence. All four of
@@ -229,7 +245,7 @@ ok  github.com/olafkfreund/hecate/pkg/passage
 ok  github.com/olafkfreund/hecate/pkg/passage/steps
 ```
 
-251 tests, no cluster required, ~1s. That is the bar: anything testable without a
+264 tests, no cluster required, ~1s. That is the bar: anything testable without a
 cluster must be. Image resolution is tested against a real in-memory registry rather
 than a mock.
 
@@ -241,7 +257,7 @@ controller-gen — at the versions CI uses.
 ```bash
 nix develop          # or: direnv allow
 
-make test            # 251 tests, ~1s, no cluster
+make test            # 264 tests, ~1s, no cluster
 make cluster         # k3d in Docker, with Flux installed
 make install         # build, push and install the chart into the dev cluster
 make e2e             # drive a Bundle through two Gates on a real API server

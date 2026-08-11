@@ -40,6 +40,7 @@
           subPackages = [
             "cmd/hecate-controller"
             "cmd/hecate"
+            "cmd/hecate-mcp"
           ];
 
           # Pure Go: hermetic builds that cross-compile cleanly.
