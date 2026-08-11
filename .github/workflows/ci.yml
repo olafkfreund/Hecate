@@ -57,26 +57,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
+      - uses: cachix/install-nix-action@v31
         with:
-          go-version-file: go.mod
-          cache: true
+          extra_nix_config: |
+            experimental-features = nix-command flakes
 
-      # A CRD that has drifted from the Go types is worse than no CRD: the
-      # cluster silently rejects fields the code sets.
+      # Generated through the dev shell, not a separately pinned controller-gen.
+      # Two pinned versions of a generator is two sources of truth: each stamps
+      # its own version into the CRD annotation, so the check fails for everyone
+      # whose local toolchain differs from CI's. The flake is the one pin.
       - name: Regenerate
-        run: |
-          go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.19.0 \
-            object:headerFile=/dev/null paths=./api/... \
-            crd output:crd:dir=charts/hecate/crds \
-            rbac:roleName=hecate-controller output:rbac:dir=charts/hecate/templates \
-            paths=./pkg/...
+        run: nix develop --command make generate
 
       - name: Check for drift
         run: |
           if ! git diff --quiet; then
-            echo "Generated files are out of date. Run 'make generate' and commit:"
-            git diff --stat
+            echo "Generated files are out of date. Run 'nix develop --command make generate' and commit:"
+            git diff
             exit 1
           fi
 
