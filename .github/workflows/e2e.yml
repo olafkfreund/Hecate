@@ -15,6 +15,10 @@ jobs:
   crossing:
     name: Crossing on k3d (Flux ${{ matrix.flux }})
     runs-on: ubuntu-latest
+    # Scoped to the workspace, matching the dev shell: no step can reach a real
+    # cluster even by accident.
+    env:
+      KUBECONFIG: ${{ github.workspace }}/.dev/kubeconfig
     strategy:
       fail-fast: false
       matrix:
@@ -27,11 +31,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: azure/setup-helm@v4
 
-      - uses: nolar/setup-k3d-k3s@v1
-        with:
-          version: v1.31
-          k3d-name: hecate-dev
+      - name: Install k3d
+        run: curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
 
       - name: Install Flux ${{ matrix.flux }}
         env:
@@ -48,23 +51,25 @@ jobs:
           echo "Resolved v${{ matrix.flux }} -> $TAG"
 
           # The CLI version must match the manifests it installs — flux refuses
-          # otherwise ("not compatible with your current version"). So pin the
-          # CLI itself rather than passing --version to a newer one.
+          # otherwise. So pin the CLI itself rather than passing --version.
           curl -s https://fluxcd.io/install.sh | sudo FLUX_VERSION="${TAG#v}" bash
           flux --version
 
-          flux install --components-extra=image-reflector-controller,image-automation-controller
-          kubectl -n flux-system wait --for=condition=Available deploy --all --timeout=5m
+      # The same script developers run, so a break here is a break for them
+      # too — and the script itself gets tested rather than only the workflow.
+      - name: Create the cluster
+        run: ./scripts/dev-cluster.sh up
 
-      - name: Install Hecate CRDs
-        run: kubectl apply -f charts/hecate/crds/
+      - name: Build and install Hecate
+        run: make install
 
       - name: Run e2e
-        run: go test -tags e2e -count=1 -timeout 20m ./test/e2e/...
+        run: go test -tags e2e -count=1 -timeout 20m -v ./test/e2e/...
 
       - name: Diagnostics on failure
         if: failure()
         run: |
           kubectl get beacons,bundles,gates,passages -A -o wide || true
+          kubectl -n hecate-system logs deploy/hecate --tail=100 || true
           kubectl -n flux-system get all || true
           kubectl get events -A --sort-by=.lastTimestamp | tail -50 || true

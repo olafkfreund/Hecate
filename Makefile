@@ -7,6 +7,10 @@
 CONTROLLER_GEN ?= controller-gen
 CHART_DIR      := charts/hecate
 
+# The dev shell sets this; default it so the cluster targets also work from a
+# bare shell and from CI, and never touch a real cluster by accident.
+export KUBECONFIG ?= $(CURDIR)/.dev/kubeconfig
+
 .DEFAULT_GOAL := help
 .PHONY: help test vet fmt lint check generate build run cluster cluster-rm cluster-load install uninstall e2e secrets-edit secrets-rekey clean
 
