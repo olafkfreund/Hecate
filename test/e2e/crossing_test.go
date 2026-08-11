@@ -22,6 +22,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,7 +32,6 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
@@ -45,7 +45,10 @@ import (
 	"github.com/olafkfreund/hecate/pkg/gate"
 )
 
-const namespace = "hecate-e2e"
+// namespace is set per test by freshNamespace. A package-level var rather than
+// a parameter threaded through twenty call sites; safe because these tests run
+// sequentially, and they must — they share one cluster. Do not add t.Parallel.
+var namespace string
 
 func newClient(t *testing.T) client.Client {
 	t.Helper()
@@ -68,22 +71,44 @@ func newClient(t *testing.T) client.Client {
 	return c
 }
 
-// freshNamespace gives each run a clean slate and removes it afterwards, so a
-// failed run never poisons the next one.
+// freshNamespace gives the test a namespace of its own.
+//
+// It used to delete and recreate one shared name, waiting only for the
+// Namespace object to 404 before recreating it. Namespace teardown finalises
+// asynchronously, so a Bundle created into the new namespace could be collected
+// by the old one's GC — the Beacon reported a latestBundle that no longer
+// existed, which is #110. A name nothing has used before cannot be caught by
+// anything's teardown, and there is nothing to wait for.
 func freshNamespace(t *testing.T, c client.Client) {
 	t.Helper()
 	ctx := context.Background()
-	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
 
-	_ = c.Delete(ctx, ns)
-	waitFor(t, 2*time.Minute, "old namespace to go away", func() bool {
-		err := c.Get(ctx, types.NamespacedName{Name: namespace}, &corev1.Namespace{})
-		return apierrors.IsNotFound(err)
-	})
+	namespace = uniqueNamespace(t)
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
 	if err := c.Create(ctx, ns); err != nil {
-		t.Fatalf("creating namespace: %v", err)
+		t.Fatalf("creating namespace %s: %v", namespace, err)
 	}
+	// Best effort, and deliberately not waited on: the next test uses a
+	// different name, so nothing depends on this finishing.
 	t.Cleanup(func() { _ = c.Delete(context.Background(), ns) })
+}
+
+// uniqueNamespace names it after the test, so a failure says which test left
+// the objects behind, with a suffix so a re-run never reuses a name that may
+// still be finalising.
+func uniqueNamespace(t *testing.T) string {
+	t.Helper()
+	name := strings.ToLower(t.Name())
+	name = strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			return r
+		}
+		return '-'
+	}, name)
+	if len(name) > 40 {
+		name = name[:40]
+	}
+	return fmt.Sprintf("%s-%d", strings.Trim(name, "-"), time.Now().UnixNano()%1_000_000)
 }
 
 // localRegistry serves images from inside the test process. The Beacon resolver
