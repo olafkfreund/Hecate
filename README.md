@@ -165,7 +165,7 @@ controller-gen — at the versions CI uses.
 ```bash
 nix develop          # or: direnv allow
 
-make test            # 97 tests, ~1s, no cluster
+make test            # 120 tests, ~1s, no cluster
 make cluster         # k3d in Docker, with Flux installed
 make install         # build, push and install the chart into the dev cluster
 make e2e             # drive a Bundle through two Gates on a real API server
