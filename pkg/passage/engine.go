@@ -168,6 +168,7 @@ func (e *Engine) Advance(
 			Config:    cfg,
 			Outputs:   outputs,
 			Attempt:   st.Attempts - 1,
+			StartedAt: status.StartedAt.Time,
 		})
 
 		// A step that produced output records it even on failure — the output

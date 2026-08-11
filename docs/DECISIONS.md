@@ -490,3 +490,25 @@ mistake, and treating it as true runs a step the author meant to gate.
 
 **Vars are copied into the Passage** at creation, like steps, for the same
 reason: editing a Gate must not change what an in-flight crossing sees.
+
+## D23 — Commits are timestamped from the Passage, not from the clock
+
+**Decision:** `git-commit` builds its author and committer signature from
+`passage.status.startedAt`, not `time.Now()`.
+
+D19 says a step must tolerate being called again with an empty or half-populated
+work dir, so `git-commit` will re-run. If the commit carried wall-clock time, the
+second run would produce a different SHA for identical content — a second commit
+on the branch saying exactly what the first one said, and a `flux-wait` in the
+same Passage waiting on a revision that no longer exists.
+
+Deriving the timestamp from the Passage makes the commit a function of its
+inputs: same tree, same message, same Passage, same hash. Re-running a crossing
+is then a no-op rather than an accumulation, which is what makes retries safe.
+
+**A clean tree succeeds** for the same reason: the second run finds the desired
+state already committed, and reports HEAD so later steps still have a revision to
+wait on. Failing there would make every retry unrecoverable.
+
+**Pushing an already-pushed commit succeeds too.** go-git's
+`NoErrAlreadyUpToDate` is the expected outcome of a re-run, not an error.

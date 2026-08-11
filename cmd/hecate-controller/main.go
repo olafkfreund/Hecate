@@ -104,6 +104,9 @@ func run() error {
 
 	stepRunners := passage.NewRegistry()
 	stepRunners.MustRegister(steps.NewFluxWait(fluxChecker))
+	stepRunners.MustRegister(steps.NewGitClone(mgr.GetClient()))
+	stepRunners.MustRegister(steps.NewGitCommit())
+	stepRunners.MustRegister(steps.NewGitPush(mgr.GetClient()))
 
 	if err := (&beacon.Reconciler{
 		Client:   mgr.GetClient(),

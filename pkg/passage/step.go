@@ -49,6 +49,13 @@ type StepContext struct {
 	Outputs map[string]map[string]any
 	// Attempt is how many times this step has already run, starting at 0.
 	Attempt int32
+	// StartedAt is when the Passage began.
+	//
+	// Steps that produce content should derive timestamps from this rather than
+	// the wall clock, so re-running a Passage yields byte-identical output. A
+	// commit stamped with time.Now() gets a new SHA on every attempt, which
+	// turns a harmless retry into a second commit on the branch.
+	StartedAt time.Time
 }
 
 // DecodeConfig unmarshals a step's config into a typed struct.
