@@ -79,6 +79,29 @@ spec:
           expectedRevision: ${{ steps.commit.sha }}
 ```
 
+### Asking what is going on
+
+```console
+$ hecate status
+GATE        STATE     CURRENT      HEALTH   SUMMARY
+dev         Idle      podinfo-6b2  Healthy  nothing to do — everything admitted is already in this Gate
+staging     Crossing  podinfo-4a1  Healthy  crossing podinfo-6b2 — waiting on flux-wait: Kustomization not yet at the revision
+production  Blocked   podinfo-4a1  Healthy  1 Bundle cannot cross: awaiting approval
+
+$ hecate explain production
+production is Blocked
+1 Bundle cannot cross: awaiting approval
+
+  [AwaitingApproval] awaiting approval
+      → hecate approve podinfo-6b2
+  waiting:  podinfo-6b2 — awaiting approval
+```
+
+"Why is nothing crossing?" is otherwise answered by reading four resources and
+knowing which fields matter. The answer is computed in one place —
+[`pkg/ops`](docs/DECISIONS.md) — so the CLI, the API and the UI cannot come to
+different conclusions about the same cluster.
+
 ### Compliance as a gate, not a report
 
 A Gate can refuse a crossing on evidence. All four of
@@ -206,7 +229,7 @@ ok  github.com/olafkfreund/hecate/pkg/passage
 ok  github.com/olafkfreund/hecate/pkg/passage/steps
 ```
 
-231 tests, no cluster required, ~1s. That is the bar: anything testable without a
+251 tests, no cluster required, ~1s. That is the bar: anything testable without a
 cluster must be. Image resolution is tested against a real in-memory registry rather
 than a mock.
 
@@ -218,7 +241,7 @@ controller-gen — at the versions CI uses.
 ```bash
 nix develop          # or: direnv allow
 
-make test            # 231 tests, ~1s, no cluster
+make test            # 251 tests, ~1s, no cluster
 make cluster         # k3d in Docker, with Flux installed
 make install         # build, push and install the chart into the dev cluster
 make e2e             # drive a Bundle through two Gates on a real API server

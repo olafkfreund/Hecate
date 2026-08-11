@@ -17,6 +17,7 @@ This is the *how*.
 | `pkg/provider` — GitHub and GitLab pull requests, `git-pull-request` step | ✅ done |
 | `pkg/fides` + `hecate verify` — evidence client and chain verification | ✅ done |
 | `evidence-gate` — all four Fides gates | ✅ done |
+| `pkg/ops` — the operations layer every surface sits on | ✅ done |
 | `pkg/beacon` — discovery, image resolution, Beacon controller | ✅ done |
 | `pkg/gate` — eligibility, promotion windows, Gate controller | ✅ done |
 | `pkg/passage` — execution engine and Passage controller | ✅ done |
@@ -33,7 +34,7 @@ This is the *how*.
 | API server | M7 |
 | UI | M8 |
 
-231 tests, no cluster required, ~1s.
+251 tests, no cluster required, ~1s.
 
 ## 2. Technology
 

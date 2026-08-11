@@ -216,7 +216,28 @@ func (r *Reconciler) startPassage(
 		return nil, errors.New("no passage steps defined")
 	}
 
-	passage := &v1alpha1.Passage{
+	passage := NewPassage(gate, bundle, ActorController)
+	if err := r.Create(ctx, passage); err != nil {
+		return nil, fmt.Errorf("creating Passage: %w", err)
+	}
+	return passage, nil
+}
+
+// ActorController is what a crossing the controller started records as having
+// asked for it.
+const ActorController = "controller"
+
+// NewPassage builds the Passage that crosses a Bundle through a Gate.
+//
+// Exported so that a crossing requested by a human is constructed identically
+// to one the controller starts: the labels other components select on, the
+// copied steps and vars, and the generated name are all part of the contract,
+// and a second construction elsewhere would drift from this one silently.
+//
+// Steps and vars are copied rather than referenced, so editing a Gate does not
+// retroactively change what an in-flight or completed Passage did.
+func NewPassage(gate *v1alpha1.Gate, bundle *v1alpha1.Bundle, actor string) *v1alpha1.Passage {
+	return &v1alpha1.Passage{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: gate.Name + "-",
 			Namespace:    gate.Namespace,
@@ -230,13 +251,9 @@ func (r *Reconciler) startPassage(
 			Bundle: bundle.Name,
 			Steps:  gate.Spec.Passage.Steps,
 			Vars:   gate.Spec.Vars,
-			Actor:  "controller",
+			Actor:  actor,
 		},
 	}
-	if err := r.Create(ctx, passage); err != nil {
-		return nil, fmt.Errorf("creating Passage: %w", err)
-	}
-	return passage, nil
 }
 
 // observePassages finds this Gate's Passages, records any completed crossing

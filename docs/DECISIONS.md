@@ -754,3 +754,41 @@ will wait for. A check that guesses is worse than one that waits.
 **An expression is not a malformed value.** `${{ vars.endpoint }}` cannot be
 judged before the Passage runs, and refusing it would ban the interpolation the
 engine exists to provide.
+
+## D32 — Surfaces format; `pkg/ops` decides
+
+**Decision:** the CLI, the API server, the MCP server and the UI all go through
+`pkg/ops`. They may format its answers; they may not compute their own. A rule
+implemented in a surface is a bug in that surface.
+
+The rules that matter here are not incidental — what counts as eligible, who may
+approve, whether a promotion window is open, why a Gate is stuck. Four
+implementations of "eligible" is four subtly different products, and the
+divergence would be invisible until an operator was told two different things by
+two tools looking at the same cluster.
+
+**It is thin over the Kubernetes API, and defines no second data model.** Reads
+return the API types. The only shapes defined in `pkg/ops` carry derived
+information — an `Explanation` is not stored anywhere, which is exactly why it
+must be computed in one place.
+
+**It composes the controller's rules rather than restating them.** Eligibility
+comes from `gate.Evaluate`, windows from `gate.Allowed`, and a Passage is built
+by `gate.NewPassage` — the same constructor the controller uses, so a crossing
+asked for by a human carries the same labels and copied steps as one the
+controller starts. Writing a second construction was the first thing I did here,
+and it was already drifting: one label instead of two.
+
+**A promotion requested by hand is judged exactly as an automatic one is.**
+Skipping the checks for manual requests is how "promote to production" becomes
+the way around the pipeline.
+
+**A refusal is not an error.** "This Bundle has not cleared staging" is an
+answer; the surfaces present it differently from a malfunction, so `RefusedError`
+and `NotFoundError` are distinguishable. The CLI exits 5 for a refusal and 2 for
+a failure, and a pipeline can branch on the difference.
+
+**Every action records an actor.** An anonymous promotion is worth less than no
+record, because it looks like one. The CLI defaults to the OS user and is honest
+that this is a convenience rather than an identity claim — real authentication
+belongs to the API server.
