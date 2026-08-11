@@ -903,3 +903,35 @@ attempt instead, on every sample.
 That is a mitigation, not a guarantee, and it is written down as one. The
 guarantee is the paragraph at the top: nothing the model says changes what
 Hecate does.
+
+## D36 — Rendering ships in two halves, because Helm costs more than kustomize
+
+**Decision:** `render-kustomize` uses `sigs.k8s.io/kustomize/api` in-process, as
+planned. `render-helm` does not ship with it, because the Helm SDK is not the
+comparable dependency the issue assumed.
+
+Measured rather than guessed: kustomize adds 5 modules and changes nothing else.
+`helm.sh/helm/v4` adds 72 **and force-upgrades `k8s.io/api`, `client-go` and
+`controller-runtime` (0.22 → 0.24) across the whole project**. Everything still
+built and passed with those upgrades — but a controller-runtime upgrade bundled
+into "add rendering steps" is a change whose blast radius does not match its
+commit message. If a controller misbehaves next month, the commit that caused it
+should not be the one that says "rendering".
+
+**And it is `helm/v4`, not `helm/v3`.** Helm 4 is released, the SDK is at 4.2.3,
+and Helm 3 reaches end of life in November 2026 — writing against v3 now would
+mean a migration before this shipped.
+
+**Rendering happens before the write to git.** What lands in the repository is
+final state; Flux applies and never renders on our behalf, so the rendezvous
+stays a plain data format (D3). A reviewer sees the manifests that will exist
+rather than a kustomization whose effect they have to imagine.
+
+**Determinism is a requirement here, not a nicety.** This output is committed,
+so a render that reordered between runs would produce a diff on every crossing
+and teach reviewers to skim them. Unchanged output is not rewritten at all, so a
+re-run leaves the tree clean (D23).
+
+**Load restrictions stay on by default**, matching kustomize's own default and
+Flux's: a build that can read anywhere in the checkout can read a file the
+author did not mean to publish.

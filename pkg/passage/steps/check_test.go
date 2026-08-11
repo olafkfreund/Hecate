@@ -22,6 +22,7 @@ func all() []passage.Runner {
 		NewGitPullRequest(nil),
 		NewEditYAML(),
 		NewSetImage(),
+		NewRenderKustomize(),
 		NewHTTP(nil),
 		NewEvidenceGate(nil, ""),
 	}
@@ -79,6 +80,7 @@ func TestCheckersAcceptValidConfiguration(t *testing.T) {
 		{NewGitPush(nil), ``},
 		{NewSetImage(), `{"path":"repo/k.yaml","image":"ghcr.io/acme/api"}`},
 		{NewEditYAML(), `{"path":"repo/v.yaml","edits":[{"key":"image.tag","value":"1.0"}]}`},
+		{NewRenderKustomize(), `{"path":"repo/base","out":"repo/rendered.yaml"}`},
 		{NewFluxWait(nil), `{"resources":[{"kind":"Kustomization","name":"app"}]}`},
 		{NewFluxReconcile(nil, false), `{"resources":[{"kind":"GitRepository","name":"fleet"}]}`},
 		{NewHTTP(nil), `{"url":"https://x.test","successIf":"status == 200"}`},
@@ -105,6 +107,7 @@ func TestCheckersCatchMissingAndWrongValues(t *testing.T) {
 		{"clone without a repo", NewGitClone(nil), `{}`, "repo is required"},
 		{"commit without a message", NewGitCommit(), `{"message":"  "}`, "message is required"},
 		{"set-image without an image", NewSetImage(), `{"path":"k.yaml"}`, "image is required"},
+		{"render without an out", NewRenderKustomize(), `{"path":"repo/base"}`, "out is required"},
 		{"edit-yaml with no edits", NewEditYAML(), `{"path":"v.yaml","edits":[]}`, "no edits"},
 		{"edit-yaml with a keyless edit", NewEditYAML(), `{"path":"v.yaml","edits":[{"value":"1"}]}`, "key is required"},
 		{"flux-wait with no resources", NewFluxWait(nil), `{"resources":[]}`, "at least one resource"},

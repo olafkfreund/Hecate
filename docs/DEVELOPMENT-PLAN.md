@@ -36,7 +36,7 @@ This is the *how*.
 | API server | M7 |
 | UI | M8 |
 
-285 tests, no cluster required, ~1s.
+292 tests, no cluster required, ~1s.
 
 ## 2. Technology
 
@@ -88,8 +88,8 @@ Step configuration is checked when a Gate is applied, by the controller rather
 than a webhook ([D31](DECISIONS.md)): a bad step marks the Gate `InvalidSteps`
 and it opens no Passage.
 
-Left: `render-kustomize`, `render-helm` ([#67](https://github.com/olafkfreund/Hecate/issues/67))
-and `oci-push`/`oci-pull` ([#69](https://github.com/olafkfreund/Hecate/issues/69)).
+Left: `render-helm` ([#67](https://github.com/olafkfreund/Hecate/issues/67)) and
+`oci-push`/`oci-pull` ([#69](https://github.com/olafkfreund/Hecate/issues/69)).
 
 **Exit:** a Gate can render, commit, push, open a PR, wait for merge, and wait for Flux.
 Everything but rendering is there, and the rest is demonstrated rather than

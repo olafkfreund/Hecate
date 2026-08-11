@@ -195,6 +195,37 @@ kustomize read these files with a 1.1 parser.
 
 **Reasons:** `FileNotFound`, `KeyNotFound`, `EditFailed`, `InvalidConfig`.
 
+## render-kustomize
+
+Builds a kustomization and writes the result into the checkout, for the
+rendered-manifests pattern.
+
+```yaml
+- uses: render-kustomize
+  with:
+    path: repo/apps/production
+    out: repo/rendered/production.yaml
+```
+
+| field | type | default |
+|---|---|---|
+| `path` | string | required — the kustomization directory |
+| `out` | string | required — one file, not a directory |
+| `loadRestrictionsNone` | bool | `false` |
+
+Run it before `git-commit`, so what lands in git is final state and Flux applies
+without rendering anything itself ([D36](DECISIONS.md)). A reviewer then sees
+the manifests that will exist rather than a kustomization whose effect they have
+to imagine.
+
+Output is deterministic and unchanged output is not rewritten, so a re-run of a
+crossing leaves the tree clean. `loadRestrictionsNone` lets the build reference
+files outside its own directory; off by default, matching kustomize and Flux.
+
+**Output:** `changed`, `file`, `resources`.
+
+**Reasons:** `RenderFailed`, `NothingRendered`, `FileNotFound`, `InvalidConfig`.
+
 ## flux-reconcile
 
 Asks Flux to sync now rather than at its next interval.
@@ -339,8 +370,8 @@ capped at 4KB and reports `truncated`.
 
 ## Not here yet
 
-`render-kustomize` and `render-helm` ([#67]), and `oci-push` and `oci-pull`
-([#69]).
+`render-helm` ([#67] — it needs a Kubernetes library upgrade across the project,
+see [D36](DECISIONS.md)), and `oci-push` and `oci-pull` ([#69]).
 
 [#67]: https://github.com/olafkfreund/Hecate/issues/67
 [#69]: https://github.com/olafkfreund/Hecate/issues/69

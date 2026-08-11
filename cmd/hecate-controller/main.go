@@ -113,6 +113,7 @@ func run() error {
 	stepRunners.MustRegister(steps.NewGitPush(mgr.GetClient()))
 	stepRunners.MustRegister(steps.NewEditYAML())
 	stepRunners.MustRegister(steps.NewSetImage())
+	stepRunners.MustRegister(steps.NewRenderKustomize())
 	stepRunners.MustRegister(steps.NewGitPullRequest(mgr.GetClient()))
 	stepRunners.MustRegister(steps.NewFluxReconcile(mgr.GetClient(), !opts.noCrossNS))
 	stepRunners.MustRegister(steps.NewHTTP(mgr.GetClient()))
