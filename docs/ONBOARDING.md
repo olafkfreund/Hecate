@@ -62,7 +62,7 @@ The shell pins `KUBECONFIG` to `./.dev/kubeconfig`. That is deliberate: a stray
 $ make test
 ```
 
-113 tests, about a second, **no cluster required**. That is the standing rule:
+120 tests, about a second, **no cluster required**. That is the standing rule:
 anything that can be tested without a cluster must be. If a change makes you
 reach for a cluster to test it, that is usually a sign the logic wants
 extracting into something pure.

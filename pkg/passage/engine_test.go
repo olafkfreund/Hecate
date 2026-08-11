@@ -334,3 +334,58 @@ func indexOf(h, n string) int {
 	}
 	return -1
 }
+
+// The reason has to survive into status, or it is unreachable by everything
+// that needs it: diagnose, the UI, an operator asking "same problem as before?".
+func TestFailureReasonReachesStatus(t *testing.T) {
+	broken := &scripted{
+		name:    "broken",
+		results: []StepResult{{}},
+		errs:    []error{FailTerminal("InvalidConfig", "no resources configured")},
+	}
+	e := newEngine(broken)
+
+	out := e.Advance(context.Background(), passageWith(v1alpha1.Step{Uses: "broken"}), nil, "")
+
+	if out.Status.Steps[0].Reason != "InvalidConfig" {
+		t.Errorf("step reason = %q, want InvalidConfig", out.Status.Steps[0].Reason)
+	}
+	// Message stays human; reason is the machine-readable half.
+	if !contains(out.Status.Steps[0].Message, "no resources configured") {
+		t.Errorf("message = %q, should stay human-readable", out.Status.Steps[0].Message)
+	}
+}
+
+// An unregistered step is a configuration error and must be classifiable too —
+// it is one of the most common ways a Passage fails.
+func TestUnregisteredStepHasAReason(t *testing.T) {
+	e := newEngine(&scripted{name: "known", results: []StepResult{ok("")}})
+
+	out := e.Advance(context.Background(), passageWith(v1alpha1.Step{Uses: "typo"}), nil, "")
+
+	if out.Status.Steps[0].Reason != ReasonUnregisteredStep {
+		t.Errorf("reason = %q, want %q", out.Status.Steps[0].Reason, ReasonUnregisteredStep)
+	}
+}
+
+// A step allowed to fail still records why.
+func TestContinueOnErrorStillRecordsTheReason(t *testing.T) {
+	flaky := &scripted{
+		name:    "flaky",
+		results: []StepResult{{}},
+		errs:    []error{Fail("RegistryUnreachable", "connection refused")},
+	}
+	next := &scripted{name: "next", results: []StepResult{ok("")}}
+	e := newEngine(flaky, next)
+
+	out := e.Advance(context.Background(), passageWith(
+		v1alpha1.Step{Uses: "flaky", ContinueOnError: true}, v1alpha1.Step{Uses: "next"},
+	), nil, "")
+
+	if out.Status.Phase != v1alpha1.PassageSucceeded {
+		t.Fatalf("phase = %s, want Succeeded", out.Status.Phase)
+	}
+	if out.Status.Steps[0].Reason != "RegistryUnreachable" {
+		t.Errorf("forgiven failure lost its reason: %q", out.Status.Steps[0].Reason)
+	}
+}

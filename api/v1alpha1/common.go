@@ -130,6 +130,15 @@ type StepStatus struct {
 	As string `json:"as,omitempty"`
 	// Phase is the outcome.
 	Phase StepPhase `json:"phase"`
+	// Reason is a stable, machine-readable code for a failure, in PascalCase —
+	// GitAuthFailed, FluxStalled, InvalidConfig.
+	//
+	// Message is for a human reading one failure; Reason is for everything that
+	// has to reason across many: `hecate diagnose`, a dashboard counting failure
+	// classes, an operator asking "is this the same problem as yesterday?".
+	//
+	// +optional
+	Reason string `json:"reason,omitempty"`
 	// Message explains the phase.
 	//
 	// +optional

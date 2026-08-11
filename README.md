@@ -153,7 +153,7 @@ ok  github.com/olafkfreund/hecate/pkg/passage
 ok  github.com/olafkfreund/hecate/pkg/passage/steps
 ```
 
-113 tests, no cluster required, ~1s. That is the bar: anything testable without a
+120 tests, no cluster required, ~1s. That is the bar: anything testable without a
 cluster must be. Image resolution is tested against a real in-memory registry rather
 than a mock.
 

@@ -79,28 +79,78 @@ type StepResult struct {
 	RetryAfter time.Duration
 }
 
-// Terminal marks an error as not worth retrying — bad configuration, a missing
-// reference, anything that will fail identically next time.
-type Terminal struct{ Err error }
+// StepError is a step failure with a machine-readable reason.
+//
+// The reason is what makes a failure something other than prose. `hecate
+// diagnose`, a dashboard counting failure classes, and anything reasoning over
+// a stuck Passage all need to distinguish "the git host rejected our
+// credentials" from "Flux gave up" without parsing English.
+//
+// Structured detail belongs in the step's Output, not here: the engine already
+// records Output on failure, and a second place to put facts would only invite
+// the two to disagree.
+type StepError struct {
+	// Reason is a stable, machine-readable code in PascalCase, following the
+	// convention Kubernetes uses for condition reasons — GitAuthFailed,
+	// FluxStalled, InvalidConfig. Stable is the operative word: it is a
+	// contract, so renaming one breaks whatever was matching on it.
+	//
+	// Deliberately not a closed enum. Each step names its own failures; a
+	// central registry would be a bottleneck and a merge conflict, and steps
+	// live in different packages.
+	Reason string
+	// Terminal marks a failure not worth retrying — bad configuration, a
+	// missing reference, anything that will fail identically next time.
+	Terminal bool
+	Err      error
+}
 
-func (t *Terminal) Error() string {
-	if t.Err == nil {
-		return "terminal error"
+func (e *StepError) Error() string {
+	if e.Err == nil {
+		return e.Reason
 	}
-	return t.Err.Error()
+	return e.Err.Error()
 }
 
-func (t *Terminal) Unwrap() error { return t.Err }
+func (e *StepError) Unwrap() error { return e.Err }
 
-// Terminalf builds a Terminal error.
+// Fail builds a retryable step failure.
+func Fail(reason, format string, args ...any) error {
+	return &StepError{Reason: reason, Err: fmt.Errorf(format, args...)}
+}
+
+// FailTerminal builds a step failure that must not be retried.
+func FailTerminal(reason, format string, args ...any) error {
+	return &StepError{Reason: reason, Terminal: true, Err: fmt.Errorf(format, args...)}
+}
+
+// Terminalf builds a terminal failure without a reason code.
+//
+// Kept for the cases where no useful code exists, but prefer FailTerminal:
+// a failure with no reason is one nothing downstream can act on.
 func Terminalf(format string, args ...any) error {
-	return &Terminal{Err: fmt.Errorf(format, args...)}
+	return &StepError{Reason: ReasonUnknown, Terminal: true, Err: fmt.Errorf(format, args...)}
 }
+
+// ReasonUnknown is used when a step fails without naming a reason.
+const ReasonUnknown = "Unknown"
 
 // IsTerminal reports whether an error should stop retrying.
 func IsTerminal(err error) bool {
-	var t *Terminal
-	return errors.As(err, &t)
+	var e *StepError
+	return errors.As(err, &e) && e.Terminal
+}
+
+// ReasonOf extracts a failure's reason code, or ReasonUnknown.
+func ReasonOf(err error) string {
+	var e *StepError
+	if errors.As(err, &e) && e.Reason != "" {
+		return e.Reason
+	}
+	if err != nil {
+		return ReasonUnknown
+	}
+	return ""
 }
 
 // Registry holds the available step Runners.

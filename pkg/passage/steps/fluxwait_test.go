@@ -146,3 +146,26 @@ func TestFluxWaitBadConfigIsTerminal(t *testing.T) {
 		t.Errorf("bad config must be terminal, got %T: %v", err, err)
 	}
 }
+
+// The two ways flux-wait fails must be distinguishable without reading English:
+// one is a configuration mistake, the other is a broken deploy.
+func TestFluxWaitReasonCodes(t *testing.T) {
+	cl := fake.NewClientBuilder().WithScheme(newScheme()).Build()
+	step := NewFluxWait(health.NewFluxChecker(cl))
+
+	_, err := step.Run(context.Background(), stepCtx(t, health.FluxConfig{Resources: nil}))
+	if got := passage.ReasonOf(err); got != ReasonInvalidConfig {
+		t.Errorf("reason = %q, want %q", got, ReasonInvalidConfig)
+	}
+
+	// A cross-namespace reference is a configuration mistake, not a wait.
+	_, err = step.Run(context.Background(), stepCtx(t, health.FluxConfig{
+		Resources: []health.FluxResource{{Kind: "Kustomization", Name: "x", Namespace: "other"}},
+	}))
+	if got := passage.ReasonOf(err); got != ReasonInvalidConfig {
+		t.Errorf("cross-namespace reason = %q, want %q", got, ReasonInvalidConfig)
+	}
+	if !passage.IsTerminal(err) {
+		t.Error("a refused cross-namespace reference must be terminal, not retried")
+	}
+}

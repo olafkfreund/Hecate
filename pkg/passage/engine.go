@@ -24,6 +24,9 @@ type Engine struct {
 	Now func() time.Time
 }
 
+// ReasonUnregisteredStep is set when a Passage names a step that does not exist.
+const ReasonUnregisteredStep = "UnregisteredStep"
+
 // Outcome is what Advance concluded.
 type Outcome struct {
 	// Status is the Passage's updated status. The caller persists it.
@@ -96,6 +99,7 @@ func (e *Engine) Advance(
 		runner, ok := e.Registry.Get(step.Uses)
 		if !ok {
 			// An unknown step is a configuration error, not a transient fault.
+			st.Reason = ReasonUnregisteredStep
 			e.finishStep(st, v1alpha1.StepFailed, fmt.Sprintf(
 				"no step named %q is registered (available: %v)", step.Uses, e.Registry.Names()), now)
 			return Outcome{Status: e.fail(status, st.Message, now), Watch: watch}
@@ -138,14 +142,14 @@ func (e *Engine) Advance(
 
 		switch {
 		case err != nil && (IsTerminal(err) || !step.ContinueOnError):
-			e.finishStep(st, v1alpha1.StepFailed, err.Error(), now)
+			e.failStep(st, err, now)
 			if step.ContinueOnError && !IsTerminal(err) {
 				continue
 			}
 			return Outcome{Status: e.fail(status, err.Error(), now), Watch: watch}
 
 		case err != nil: // non-terminal, and the step is allowed to fail
-			e.finishStep(st, v1alpha1.StepFailed, err.Error(), now)
+			e.failStep(st, err, now)
 			continue
 
 		case res.Phase == v1alpha1.StepRunning:
@@ -181,6 +185,13 @@ func (e *Engine) finishStep(st *v1alpha1.StepStatus, phase v1alpha1.StepPhase, m
 	st.Phase = phase
 	st.Message = msg
 	st.FinishedAt = &metav1.Time{Time: now}
+}
+
+// failStep finishes a step that failed, preserving the reason code so the
+// failure is classifiable and not merely readable.
+func (e *Engine) failStep(st *v1alpha1.StepStatus, err error, now time.Time) {
+	st.Reason = ReasonOf(err)
+	e.finishStep(st, v1alpha1.StepFailed, err.Error(), now)
 }
 
 func (e *Engine) fail(status v1alpha1.PassageStatus, msg string, now time.Time) v1alpha1.PassageStatus {

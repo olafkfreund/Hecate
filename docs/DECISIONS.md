@@ -416,3 +416,41 @@ resources the crossing never reached.
 
 **Why not have the step write `gate.spec.watch` directly.** Controllers do not write
 user spec. The Passage records what it observed; the Gate decides what to do with it.
+
+---
+
+## D21 — Step failures carry a reason code, not just prose
+
+**2026-08-11 · accepted**
+
+A step failure is a `passage.StepError` with a stable, machine-readable `Reason`
+in PascalCase — `GitAuthFailed`, `FluxDegraded`, `InvalidConfig` — recorded in
+`StepStatus.Reason` alongside the human `Message`.
+
+**Why now rather than later.** Eleven steps land in M2. Decided first, each is
+written once; decided after, it is eleven retrofits — and every step written in
+between bakes in prose-only errors. The cost here is timing, not code.
+
+**Why a reason at all.** `Message` is right for a human reading one failure. It
+is useless for anything reasoning across many: `hecate diagnose`, a dashboard
+counting failure classes, an operator asking "is this the same problem as
+yesterday?", an LLM summarising a stuck Passage. Those need to distinguish "the
+git host rejected our credentials" from "Flux gave up" without parsing English.
+
+**Not a closed enum.** Each step names its own failures. A central registry
+would be a bottleneck and a permanent merge conflict, and steps live in
+different packages. The convention — PascalCase, stable, Kubernetes-condition
+style — is the whole contract. *Stable* is the operative word: a reason is
+matched on, so renaming one breaks whatever was matching.
+
+**Structured detail rides in the step's `Output`**, which already exists and
+which the engine already records on failure. A second place to put facts would
+only invite the two to disagree.
+
+**Terminality is now a field, not a second type.** `Terminal` used to be its own
+error type; it is a property of a failure, not a different kind of failure, and
+two ways to express one thing is exactly the duplication that drifts. `Terminalf`
+and `IsTerminal` are unchanged for callers.
+
+**Not in metrics.** Reason is unbounded by design, and unbounded label values are
+how a metrics backend falls over. It is for diagnosis, not aggregation.

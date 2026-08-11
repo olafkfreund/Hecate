@@ -17,6 +17,17 @@ import (
 // StepFluxWait is the value used in `steps[].uses`.
 const StepFluxWait = "flux-wait"
 
+// Failure reasons this step can report. Stable codes, not prose: they are what
+// `hecate diagnose` and a failure-class dashboard match on.
+const (
+	// ReasonInvalidConfig means the step's `with:` block is wrong. Retrying
+	// cannot help.
+	ReasonInvalidConfig = "InvalidConfig"
+	// ReasonFluxDegraded means Flux stopped retrying, or has been failing
+	// longer than failAfter. Distinct from a wait: this one needs a human.
+	ReasonFluxDegraded = "FluxDegraded"
+)
+
 // FluxWait blocks a Passage until Flux has applied the state the Passage just
 // pushed.
 //
@@ -37,12 +48,12 @@ func (f *FluxWait) Name() string { return StepFluxWait }
 func (f *FluxWait) Run(ctx context.Context, sc *passage.StepContext) (passage.StepResult, error) {
 	cfg, err := passage.DecodeConfig[health.FluxConfig](sc)
 	if err != nil {
-		return passage.StepResult{}, passage.Terminalf("%s: %s", StepFluxWait, err)
+		return passage.StepResult{}, passage.FailTerminal(ReasonInvalidConfig, "%s: %s", StepFluxWait, err)
 	}
 	if err := cfg.Validate(sc.Namespace, f.checker.AllowCrossNamespace); err != nil {
 		// Bad configuration will not become good by waiting. That includes a
 		// cross-namespace reference: it is refused, not retried.
-		return passage.StepResult{}, passage.Terminalf("%s: %s", StepFluxWait, err)
+		return passage.StepResult{}, passage.FailTerminal(ReasonInvalidConfig, "%s: %s", StepFluxWait, err)
 	}
 
 	status, issues, details := f.checker.Evaluate(ctx, cfg, sc.Namespace)
@@ -52,7 +63,7 @@ func (f *FluxWait) Run(ctx context.Context, sc *passage.StepContext) (passage.St
 	// moment the Passage ends.
 	watch, err := watchFor(cfg)
 	if err != nil {
-		return passage.StepResult{}, passage.Terminalf("%s: %s", StepFluxWait, err)
+		return passage.StepResult{}, passage.FailTerminal(ReasonInvalidConfig, "%s: %s", StepFluxWait, err)
 	}
 
 	out := map[string]any{"resources": details}
@@ -73,7 +84,7 @@ func (f *FluxWait) Run(ctx context.Context, sc *passage.StepContext) (passage.St
 			Phase:   v1alpha1.StepFailed,
 			Message: summarise(issues),
 			Output:  out,
-		}, passage.Terminalf("Flux reconciliation failed: %s", summarise(issues))
+		}, passage.FailTerminal(ReasonFluxDegraded, "Flux reconciliation failed: %s", summarise(issues))
 
 	default: // Progressing or Unknown — keep waiting.
 		return passage.StepResult{
