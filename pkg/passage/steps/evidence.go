@@ -307,7 +307,12 @@ func (e *EvidenceGate) changeGate(
 	output["risk"] = verdict.RiskScore
 
 	risk := int32(verdict.RiskScore) //nolint:gosec // Fides bounds this to 0-100
-	ref := &v1alpha1.EvidenceRef{Trail: trail, Verdict: verdict.Recommendation, Risk: &risk}
+	// Blockers travel with the verdict rather than only in this step's message:
+	// the Gate mirrors this ref, and "hold, risk 62" with no reasons is a number
+	// to escalate rather than a thing to fix.
+	ref := &v1alpha1.EvidenceRef{
+		Trail: trail, Verdict: verdict.Recommendation, Risk: &risk, Blockers: verdict.Blockers(),
+	}
 
 	// A team may be stricter than Fides' own verdict. This is terminal even
 	// though the gate approved: waiting will not lower the score, because the

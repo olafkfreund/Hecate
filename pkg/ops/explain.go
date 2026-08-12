@@ -51,6 +51,10 @@ type Explanation struct {
 	Waiting []Waiting `json:"waiting,omitempty"`
 	// Health is the Gate's own assessment of what it watches.
 	Health v1alpha1.Health `json:"health,omitempty"`
+	// Evidence is the change gate's verdict for the crossing in progress, when
+	// there is one. Carried whole so a caller can show the risk score next to
+	// the reasons rather than parsing them back out of a sentence.
+	Evidence *v1alpha1.EvidenceRef `json:"evidence,omitempty"`
 }
 
 // Blocker is one reason nothing is crossing.
@@ -77,6 +81,7 @@ const (
 	BlockerWindowClosed  BlockerKind = "WindowClosed"
 	BlockerPassageFailed BlockerKind = "PassageFailed"
 	BlockerStepWaiting   BlockerKind = "StepWaiting"
+	BlockerChangeHeld    BlockerKind = "ChangeHeld"
 	BlockerUnhealthy     BlockerKind = "Unhealthy"
 	BlockerManual        BlockerKind = "AwaitingRequest"
 )
@@ -281,6 +286,30 @@ func waitingBlockers(waiting []Waiting) []Blocker {
 func (o *Ops) explainActive(ex *Explanation, p *v1alpha1.Passage) *Explanation {
 	ex.State = StateCrossing
 	ex.Summary = fmt.Sprintf("crossing %s", p.Spec.Bundle)
+	ex.Evidence = p.Status.Evidence
+
+	// A change gate holding is a distinct answer from a step being slow: the
+	// crossing is working exactly as designed and is waiting on a person, so it
+	// gets its own code and names what would release it. Reported ahead of the
+	// generic step blocker, because "waiting on evidence-gate: change gate is
+	// holding" says less than the verdict does.
+	if ev := p.Status.Evidence; ev != nil && ev.Verdict != "" && ev.Verdict != "approve" {
+		detail := fmt.Sprintf("the change gate returned %s", ev.Verdict)
+		if ev.Risk != nil {
+			detail = fmt.Sprintf("%s (risk %d/100)", detail, *ev.Risk)
+		}
+		if len(ev.Blockers) > 0 {
+			detail = fmt.Sprintf("%s: %s", detail, strings.Join(ev.Blockers, "; "))
+		}
+		ex.Summary = fmt.Sprintf("crossing %s — held by the change gate", p.Spec.Bundle)
+		ex.Blockers = append(ex.Blockers, Blocker{
+			Kind:   BlockerChangeHeld,
+			Detail: detail,
+			Fix: "resolve what the change gate is asking for in Fides — the crossing " +
+				"re-reads the verdict and continues on its own",
+		})
+		return ex
+	}
 
 	// The step that is running is what the Gate is actually waiting for, and
 	// its message is what the step itself chose to say — a held change gate, a

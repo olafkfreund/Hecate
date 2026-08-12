@@ -172,6 +172,27 @@ func (r *Reconciler) checkSteps(gate *v1alpha1.Gate) string {
 	return strings.Join(rendered, "; ")
 }
 
+// crossingMessage says what the crossing is doing, and in particular why it is
+// not finishing.
+//
+// "Passage x is in progress" is true of a crossing that is thirty seconds old
+// and of one that has been waiting six hours for a human to sign off, and an
+// operator asking "why is this sitting there?" needs those to read differently.
+func crossingMessage(active *v1alpha1.Passage) string {
+	ev := active.Status.Evidence
+	if ev == nil || ev.Verdict == "" || ev.Verdict == "approve" {
+		return fmt.Sprintf("Passage %s is in progress", active.Name)
+	}
+	msg := fmt.Sprintf("Passage %s is held by the change gate", active.Name)
+	if ev.Risk != nil {
+		msg += fmt.Sprintf(" (risk %d)", *ev.Risk)
+	}
+	if len(ev.Blockers) > 0 {
+		msg += ": " + strings.Join(ev.Blockers, "; ")
+	}
+	return msg
+}
+
 // advance starts an automatic Passage when one is warranted, and returns the
 // condition reason and message describing what the Gate is doing or waiting on.
 func (r *Reconciler) advance(
@@ -183,9 +204,13 @@ func (r *Reconciler) advance(
 ) (reason, message string) {
 	if active != nil {
 		gate.Status.ActivePassage = active.Name
-		return "Crossing", fmt.Sprintf("Passage %s is in progress", active.Name)
+		// Mirrored while the crossing runs and cleared below when it ends, so
+		// the Gate never shows a verdict that has stopped being true.
+		gate.Status.Evidence = active.Status.Evidence
+		return "Crossing", crossingMessage(active)
 	}
 	gate.Status.ActivePassage = ""
+	gate.Status.Evidence = nil
 
 	eligible := Eligible(candidates)
 	if !gate.Spec.Auto {

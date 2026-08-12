@@ -149,6 +149,14 @@ type EvidenceRef struct {
 	//
 	// +optional
 	Risk *int32 `json:"risk,omitempty"`
+	// Blockers are the reasons the change gate is withholding approval.
+	//
+	// The verdict says a crossing is held; only these say what would unblock
+	// it. Without them "hold, risk 62" is a number to escalate rather than a
+	// thing to fix, and the reasons existed only inside a step's message.
+	//
+	// +optional
+	Blockers []string `json:"blockers,omitempty"`
 	// URL links to the full record.
 	//
 	// +optional

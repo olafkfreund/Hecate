@@ -706,3 +706,72 @@ func degradedObservations(t *testing.T) (uint64, float64) {
 	}
 	return count, sum
 }
+
+// The verdict has to be on the Gate, because that is the object an operator
+// looks at when a promotion is not moving. Reaching it through the Passage's
+// step output means knowing which Passage and which step first.
+func TestAHeldChangeGateIsVisibleOnTheGate(t *testing.T) {
+	g := autoGate("staging", admits("podinfo"))
+	b := bundle("b1", "podinfo", 0)
+	r, c, _ := newReconciler(t, g, &b)
+
+	reconcileGate(t, r, "staging")
+	p := listPassages(t, c)[0]
+
+	risk := int32(62)
+	p.Status.Phase = v1alpha1.PassageRunning
+	p.Status.Evidence = &v1alpha1.EvidenceRef{
+		Verdict: "hold", Risk: &risk, Blockers: []string{"no approver recorded"},
+	}
+	if err := c.Status().Update(context.Background(), &p); err != nil {
+		t.Fatal(err)
+	}
+	reconcileGate(t, r, "staging")
+
+	got := getGate(t, c, "staging")
+	if got.Status.Evidence == nil {
+		t.Fatal("the Gate says nothing about why the crossing is not finishing")
+	}
+	if got.Status.Evidence.Verdict != "hold" || *got.Status.Evidence.Risk != 62 {
+		t.Errorf("evidence = %+v", got.Status.Evidence)
+	}
+	// "Passage x is in progress" is equally true of a crossing thirty seconds
+	// old and one that has waited six hours for a human.
+	cond := ready(t, got)
+	for _, want := range []string{"held by the change gate", "62", "no approver recorded"} {
+		if !strings.Contains(cond.Message, want) {
+			t.Errorf("condition does not say %q: %s", want, cond.Message)
+		}
+	}
+}
+
+// A verdict that outlives its crossing is worse than none: it reads as current.
+func TestTheGatesVerdictIsClearedWhenTheCrossingEnds(t *testing.T) {
+	g := autoGate("staging", admits("podinfo"))
+	b := bundle("b1", "podinfo", 0)
+	r, c, _ := newReconciler(t, g, &b)
+
+	reconcileGate(t, r, "staging")
+	p := listPassages(t, c)[0]
+	risk := int32(62)
+	p.Status.Phase = v1alpha1.PassageRunning
+	p.Status.Evidence = &v1alpha1.EvidenceRef{Verdict: "hold", Risk: &risk}
+	if err := c.Status().Update(context.Background(), &p); err != nil {
+		t.Fatal(err)
+	}
+	reconcileGate(t, r, "staging")
+	if getGate(t, c, "staging").Status.Evidence == nil {
+		t.Fatal("the verdict was never recorded, so clearing it proves nothing")
+	}
+
+	p.Status.Phase = v1alpha1.PassageSucceeded
+	if err := c.Status().Update(context.Background(), &p); err != nil {
+		t.Fatal(err)
+	}
+	reconcileGate(t, r, "staging")
+
+	if ev := getGate(t, c, "staging").Status.Evidence; ev != nil {
+		t.Errorf("evidence = %+v after the crossing finished — a stale verdict presented "+
+			"as the current one", ev)
+	}
+}

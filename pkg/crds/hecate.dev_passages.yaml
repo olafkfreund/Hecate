@@ -152,6 +152,16 @@ spec:
                 description: Evidence references the compliance record produced for
                   this Passage.
                 properties:
+                  blockers:
+                    description: |-
+                      Blockers are the reasons the change gate is withholding approval.
+
+                      The verdict says a crossing is held; only these say what would unblock
+                      it. Without them "hold, risk 62" is a number to escalate rather than a
+                      thing to fix, and the reasons existed only inside a step's message.
+                    items:
+                      type: string
+                    type: array
                   risk:
                     description: Risk is the change-gate risk score, 0-100.
                     format: int32

@@ -235,6 +235,16 @@ type GateStatus struct {
 	//
 	// +optional
 	History []GateOccupant `json:"history,omitempty"`
+	// Evidence is the change gate's verdict for the crossing in progress.
+	//
+	// Mirrored from the active Passage and **cleared when there is no
+	// crossing**, so it can never be a stale verdict presented as current. The
+	// question it answers is "why is this sitting there?", which is asked while
+	// the crossing is stuck, not afterwards — a finished one is in `history`
+	// and in the Passage that produced it.
+	//
+	// +optional
+	Evidence *EvidenceRef `json:"evidence,omitempty"`
 }
 
 // GateOccupant records a Bundle's tenure in a Gate.

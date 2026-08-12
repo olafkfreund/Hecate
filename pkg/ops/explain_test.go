@@ -310,3 +310,63 @@ func TestUpstreamWaitIsNotAnApprovalWait(t *testing.T) {
 		t.Errorf("kind = %q, want %q", got, gate.CodeUpstreamNotCleared)
 	}
 }
+
+// "Why is this sitting there?" asked while a change gate holds.
+//
+// The generic step blocker already reported the step's own message, which is
+// prose. This is the same fact as data: a stable code, a score a UI can colour,
+// and the reasons as a list rather than a sentence to parse.
+func TestExplainAHeldChangeGate(t *testing.T) {
+	risk := int32(62)
+	p := passageFor("staging", "b1", v1alpha1.PassageRunning)
+	p.Status.Steps = []v1alpha1.StepStatus{
+		{Uses: "evidence-gate", Phase: v1alpha1.StepRunning, Message: "change gate is holding"},
+	}
+	p.Status.Evidence = &v1alpha1.EvidenceRef{
+		Trail:    "aaaa1111-0000-0000-0000-000000000000",
+		Verdict:  "hold",
+		Risk:     &risk,
+		Blockers: []string{"no approver recorded", "the SBOM has a critical finding"},
+	}
+	ex := explain(t, testGate("staging"), testBundle("b1", 0), p)
+
+	b := has(ex, BlockerChangeHeld)
+	if b == nil {
+		t.Fatalf("no ChangeHeld blocker: %+v", ex.Blockers)
+	}
+	for _, want := range []string{"hold", "62", "no approver recorded", "critical finding"} {
+		if !strings.Contains(b.Detail, want) {
+			t.Errorf("detail does not say %q: %s", want, b.Detail)
+		}
+	}
+	if b.Fix == "" {
+		t.Error("a held crossing with no fix is a number to escalate, not a thing to do")
+	}
+	// The verdict travels whole, so a caller can show the score next to the
+	// reasons without parsing them back out of Detail.
+	if ex.Evidence == nil || ex.Evidence.Risk == nil || *ex.Evidence.Risk != 62 {
+		t.Errorf("evidence = %+v, want the verdict carried through", ex.Evidence)
+	}
+	if !strings.Contains(ex.Summary, "held by the change gate") {
+		t.Errorf("summary = %q", ex.Summary)
+	}
+}
+
+// An approved verdict is not a blocker. A crossing that is simply slow must not
+// be reported as held, or every normal promotion looks like a compliance stop.
+func TestExplainDoesNotReportAnApprovedVerdictAsHeld(t *testing.T) {
+	risk := int32(5)
+	p := passageFor("staging", "b1", v1alpha1.PassageRunning)
+	p.Status.Steps = []v1alpha1.StepStatus{
+		{Uses: "flux-wait", Phase: v1alpha1.StepRunning, Message: "waiting for Kustomization"},
+	}
+	p.Status.Evidence = &v1alpha1.EvidenceRef{Verdict: "approve", Risk: &risk}
+	ex := explain(t, testGate("staging"), testBundle("b1", 0), p)
+
+	if has(ex, BlockerChangeHeld) != nil {
+		t.Error("an approved change gate was reported as holding the crossing")
+	}
+	if has(ex, BlockerStepWaiting) == nil {
+		t.Error("the step actually being waited on was not reported")
+	}
+}
