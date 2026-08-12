@@ -18,9 +18,16 @@ export interface HealthReport {
   since?: string;
 }
 
+export interface Admission {
+  from: { beacon: string };
+  /** Upstream Gates a Bundle must have cleared first. Empty is an entry point. */
+  after?: string[];
+  requireApproval?: boolean;
+}
+
 export interface Gate {
   metadata: { name: string; namespace: string };
-  spec: Record<string, unknown>;
+  spec: { admits?: Admission[]; auto?: boolean; suspend?: boolean };
   status?: {
     current?: GateOccupant;
     health?: HealthReport;

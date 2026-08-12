@@ -4,6 +4,7 @@ import Link from "next/link";
 import { api, type Gate } from "@/lib/api";
 import { Panel, useApi, useNamespace } from "@/components/loader";
 import { HealthDot } from "@/components/health";
+import { PipelineGraph } from "@/components/graph";
 
 export default function Gates() {
   const ns = useNamespace();
@@ -24,7 +25,9 @@ export default function Gates() {
                 No Gates in <code>{ns}</code>.
               </p>
             ) : (
-              <table className="w-full text-left text-sm">
+              <>
+                <PipelineGraph gates={gates} namespace={ns} />
+                <table className="mt-8 w-full text-left text-sm">
                 <thead className="text-[var(--muted)]">
                   <tr className="border-b border-[var(--line)]">
                     <th className="py-2 font-medium">Gate</th>
@@ -58,7 +61,8 @@ export default function Gates() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+                </table>
+              </>
             )
           }
         </Panel>

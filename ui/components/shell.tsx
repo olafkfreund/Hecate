@@ -74,17 +74,26 @@ export function Shell({ children }: { children: React.ReactNode }) {
  */
 function Namespace() {
   const current = useQueryParam("namespace", "default");
-  const [ns, setNs] = useState(current);
+  // `edited` is null until the field is touched, so the box follows the URL —
+  // it used to seed useState from the *hydration-time* snapshot, which is
+  // always the fallback, so it read "default" while the page was showing
+  // another namespace entirely.
+  const [edited, setEdited] = useState<string | null>(null);
+  const ns = edited ?? current;
 
   return (
     <label className="flex items-center gap-2 text-sm text-[var(--muted)]">
       <span className="sr-only">Namespace</span>
       <input
         value={ns}
-        onChange={(e) => setNs(e.target.value)}
+        onChange={(e) => setEdited(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+        }}
         onBlur={() => {
+          if (edited === null || edited === current) return;
           const url = new URL(window.location.href);
-          url.searchParams.set("namespace", ns);
+          url.searchParams.set("namespace", edited);
           window.location.href = url.toString();
         }}
         className="w-32 rounded-md border border-[var(--line)] bg-transparent px-2 py-1 text-[var(--fg)]"
