@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+/* Hand-rolled tokens rather than a component library, matching the Fides
+   portal. Both themes are defined here as variables so a component never
+   branches on the theme — it uses a token and the theme decides what it is. */
+@theme {
+  --color-ink: #0b0d10;
+  --color-surface: #ffffff;
+  --color-raised: #f6f7f9;
+  --color-line: #e3e6ea;
+  --color-muted: #5c6673;
+  --color-accent: #7c3aed;
+
+  --color-healthy: #16a34a;
+  --color-progressing: #2563eb;
+  --color-degraded: #dc2626;
+  --color-unknown: #a16207;
+}
+
+@layer base {
+  :root {
+    --bg: var(--color-surface);
+    --fg: var(--color-ink);
+    --raised: var(--color-raised);
+    --line: var(--color-line);
+    --muted: var(--color-muted);
+  }
+
+  /* class, not media: next-themes toggles it, and a viewer who has chosen
+     light on a dark system must get light. */
+  .dark {
+    --bg: #0b0d10;
+    --fg: #e8eaed;
+    --raised: #14171c;
+    --line: #242a32;
+    --muted: #98a2b3;
+  }
+
+  html {
+    color-scheme: light dark;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}

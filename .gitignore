@@ -20,3 +20,8 @@ bin/
 result
 result-*
 .direnv/
+
+# The built UI is a build artifact, not source. `make ui` produces it; the
+# placeholder that keeps `go build ./...` working is committed instead.
+pkg/api/ui/*
+!pkg/api/ui/.gitkeep

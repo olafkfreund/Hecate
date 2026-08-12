@@ -277,6 +277,7 @@ pkg/passage/          Step interface, registry, execution engine, Passage contro
 pkg/passage/steps/    Built-in steps.
 pkg/metrics/          Delivery metrics: crossings, step durations, Gate health.
 pkg/telemetry/        OpenTelemetry wiring, configured entirely by OTEL_*.
+ui/                   The web portal. Next.js, built into the API binary.
 charts/hecate/        Helm chart. CRDs and RBAC are generated, never hand-edited.
 charts/hecate/crds/   Generated CRDs.
 ```
@@ -346,6 +347,7 @@ make test            # 353 tests, ~1s, no cluster
 make cluster         # k3d in Docker, with Flux installed
 make install         # build, push and install the chart into the dev cluster
 make e2e             # drive a Bundle through two Gates on a real API server
+make ui              # build the web portal into the API binary
 make generate        # regenerate CRDs and RBAC after touching api/
 make check           # what CI enforces
 ```

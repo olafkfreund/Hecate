@@ -21,7 +21,7 @@ DEV_TAG        := dev-$(shell date +%s)
 export KUBECONFIG ?= $(CURDIR)/.dev/kubeconfig
 
 .DEFAULT_GOAL := help
-.PHONY: help test vet fmt lint check flake-hash generate build run cluster cluster-rm cluster-load install uninstall collector e2e secrets-edit secrets-rekey clean
+.PHONY: help test vet fmt lint check flake-hash generate build run ui ui-dev cluster cluster-rm cluster-load install uninstall collector e2e secrets-edit secrets-rekey clean
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -145,6 +145,22 @@ install: cluster-load ## Build, push and install the chart into the dev cluster
 
 uninstall: ## Remove the chart from the dev cluster (CRDs are left alone)
 	helm uninstall hecate --namespace hecate-system || true
+
+ui: ## Build the web UI into the API binary
+	@# --include=dev explicitly: NODE_ENV=production makes npm omit
+	@# devDependencies, and the build needs TypeScript and Tailwind from there.
+	cd ui && npm ci --include=dev --no-audit --no-fund
+	cd ui && npm run build
+	@# Replaced wholesale rather than merged, so a file deleted from the app
+	@# does not linger in the binary. Safe to wipe: the placeholder lives in
+	@# pkg/api/, not in here.
+	rm -rf pkg/api/ui && mkdir -p pkg/api/ui
+	touch pkg/api/ui/.gitkeep
+	cp -r ui/out/. pkg/api/ui/
+	@echo "UI built into pkg/api/ui — rebuild hecate-api to pick it up"
+
+ui-dev: ## Run the UI against a local hecate-api on :8080
+	cd ui && npm run dev
 
 collector: ## Deploy a span-printing OTel collector into the dev cluster
 	kubectl apply -f dev/collector.yaml

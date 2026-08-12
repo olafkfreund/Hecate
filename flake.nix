@@ -105,6 +105,11 @@
             pkgs.k3d
             pkgs.fluxcd
 
+            # The UI. Pinned here like everything else: it is built into the
+            # hecate-api binary, so a different Node in CI is a different
+            # artifact shipped to users.
+            pkgs.nodejs_24
+
             # Secrets
             agenix.packages.${pkgs.stdenv.hostPlatform.system}.default
             pkgs.age

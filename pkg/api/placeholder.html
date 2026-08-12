@@ -1,0 +1,11 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Hecate — UI not built</title>
+<body style="font:16px/1.6 system-ui;max-width:40rem;margin:4rem auto;padding:0 1rem">
+<h1>The UI was not built into this binary</h1>
+<p>The API is serving normally at <code>/api/v1alpha1/…</code> and
+<code>/healthz</code>; only the web interface is missing.</p>
+<p>Building it is a separate step, so <code>go build ./...</code> produces a
+working API without needing Node:</p>
+<pre><code>make ui</code></pre>
+<p>Release builds always include it.</p>

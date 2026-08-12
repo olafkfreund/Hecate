@@ -91,3 +91,30 @@ jobs:
           build-args: VERSION=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  ui:
+    name: UI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          # Matches pkgs.nodejs_24 in flake.nix, so CI builds what the dev
+          # shell builds. A different Node is a different artifact, and this
+          # one is embedded in a binary shipped to users.
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      # --include=dev explicitly: a runner with NODE_ENV=production omits
+      # devDependencies, and the build needs TypeScript and Tailwind from
+      # there. That failure looks like a missing module, not a config problem.
+      - run: npm ci --include=dev --no-audit --no-fund
+        working-directory: ui
+
+      - run: npm run lint
+        working-directory: ui
+      - run: npm run typecheck
+        working-directory: ui
+      - run: npm run build
+        working-directory: ui

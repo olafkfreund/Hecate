@@ -73,6 +73,16 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1alpha1/namespaces/{namespace}/passages/{name}/abort",
 		s.guard(ActionAbort, s.abort))
 
+	// Last, and on "/" so it catches everything the routes above did not.
+	// Go's mux prefers the more specific pattern, so /api/... and /healthz
+	// still reach their handlers — the UI only sees what is left.
+	//
+	// Unauthenticated, deliberately: these are HTML, CSS and JavaScript, not
+	// data. The application they make up cannot read a single Gate without a
+	// credential, and requiring one to fetch the sign-in page would leave
+	// nowhere to sign in from.
+	mux.Handle("GET /", s.uiHandler())
+
 	return mux
 }
 
