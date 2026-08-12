@@ -113,7 +113,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, err
 	}
 
-	previous := currentHealth(&gate)
+	// The whole previous report, not just its status: ending a Degraded period
+	// needs to know when that period began, and assess is about to replace it.
+	previous := gate.Status.Health
 	gate.Status.Health = r.assess(ctx, &gate, adopted(latest))
 	r.announceHealth(&gate, previous)
 
@@ -386,12 +388,13 @@ func (r *Reconciler) recordOutcome(ctx context.Context, gate *v1alpha1.Gate, pas
 // The adopted checks are what stop a Gate going blind: a `flux-wait` step
 // already names the resources it waited for, so restating them in
 // `spec.watch` would be duplication that drifts.
-// currentHealth reads the last recorded health, for transition detection.
-func currentHealth(gate *v1alpha1.Gate) v1alpha1.Health {
-	if gate.Status.Health == nil {
+// currentHealth reads a report's status, treating "no report yet" as the empty
+// status so a first observation is not mistaken for a transition.
+func currentHealth(report *v1alpha1.HealthReport) v1alpha1.Health {
+	if report == nil {
 		return ""
 	}
-	return gate.Status.Health.Status
+	return report.Status
 }
 
 // announceHealth publishes the health gauge, and records an Event when the
@@ -400,15 +403,24 @@ func currentHealth(gate *v1alpha1.Gate) v1alpha1.Health {
 // On the transition only: a Gate is reconciled every minute, and an Event per
 // reconcile would drown notification-controller and make the useful ones
 // invisible. A Gate going Degraded after a crossing is the alert worth having.
-func (r *Reconciler) announceHealth(gate *v1alpha1.Gate, previous v1alpha1.Health) {
-	now := currentHealth(gate)
+func (r *Reconciler) announceHealth(gate *v1alpha1.Gate, previous *v1alpha1.HealthReport) {
+	was, now := currentHealth(previous), currentHealth(gate.Status.Health)
 	metrics.RecordGateHealth(gate.Namespace, gate.Name, now)
 
-	if now == previous || now == "" {
+	if now == was || now == "" {
 		return
 	}
+	// A Gate leaving Degraded ends the only outage Hecate can see. The start
+	// comes from the previous report rather than from process memory, so it is
+	// still right after a restart or a leader-election handover — which is
+	// exactly when an outage is most likely to have begun under a different
+	// process (D43).
+	if was == v1alpha1.HealthDegraded && previous.Since != nil {
+		metrics.RecordGateRecovered(gate.Namespace, gate.Name,
+			r.now().Sub(previous.Since.Time).Seconds())
+	}
 	// First observation is not a transition worth alerting on.
-	if previous == "" {
+	if was == "" {
 		return
 	}
 
@@ -416,7 +428,7 @@ func (r *Reconciler) announceHealth(gate *v1alpha1.Gate, previous v1alpha1.Healt
 	if now == v1alpha1.HealthDegraded || now == v1alpha1.HealthUnknown {
 		eventType = corev1.EventTypeWarning
 	}
-	message := fmt.Sprintf("health changed from %s to %s", previous, now)
+	message := fmt.Sprintf("health changed from %s to %s", was, now)
 	if issues := gate.Status.Health.Issues; len(issues) > 0 {
 		message = fmt.Sprintf("%s: %s", message, issues[0])
 	}
@@ -431,7 +443,16 @@ func (r *Reconciler) assess(
 	}
 	checks := append(append([]v1alpha1.HealthCheck{}, gate.Spec.Watch...), adopted...)
 	report := r.Health.Assess(ctx, gate.Namespace, gate.Name, checks)
-	report.ObservedAt = &metav1.Time{Time: r.now()}
+	now := metav1.Time{Time: r.now()}
+	report.ObservedAt = &now
+	// Since tracks when the status *changed*, not when it was last looked at,
+	// so it is carried forward across every reconcile that finds the same
+	// status. Restamping it each time would make every Gate permanently
+	// "Degraded for 0 seconds".
+	report.Since = &now
+	if prev := gate.Status.Health; prev != nil && prev.Status == report.Status && prev.Since != nil {
+		report.Since = prev.Since
+	}
 	return &report
 }
 

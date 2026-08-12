@@ -16,8 +16,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
+
 	"github.com/olafkfreund/hecate/api/v1alpha1"
 	"github.com/olafkfreund/hecate/pkg/health"
+	"github.com/olafkfreund/hecate/pkg/metrics"
 )
 
 func scheme(t *testing.T) *runtime.Scheme {
@@ -572,4 +576,133 @@ func next(rec *record.FakeRecorder) string {
 	default:
 		return ""
 	}
+}
+
+// "Degraded for 40 minutes" is a different fact from "Degraded, checked 20
+// seconds ago", and only the first tells you whether to worry. Since must
+// therefore be carried forward while the status holds, not restamped every
+// reconcile.
+func TestHealthSinceMarksTheChangeNotTheCheck(t *testing.T) {
+	g := gateAdmitting("production", admits("podinfo"))
+	r, c, _ := newReconciler(t, g)
+
+	now := base
+	r.Now = func() time.Time { return now }
+	swing := &swingingChecker{status: v1alpha1.HealthHealthy}
+	reg := health.NewRegistry()
+	reg.MustRegister(swing)
+	r.Health = reg
+	g.Spec.Watch = []v1alpha1.HealthCheck{{Uses: "flux"}}
+	if err := c.Update(context.Background(), g); err != nil {
+		t.Fatal(err)
+	}
+
+	reconcileGate(t, r, "production")
+	first := getGate(t, c, "production").Status.Health.Since
+	if first == nil {
+		t.Fatal("the first assessment must record when the status began")
+	}
+
+	// Same status, later check. Since must not move; ObservedAt must.
+	now = base.Add(10 * time.Minute)
+	reconcileGate(t, r, "production")
+	after := getGate(t, c, "production").Status.Health
+	if !after.Since.Equal(first) {
+		t.Errorf("Since moved from %s to %s without the status changing",
+			first, after.Since)
+	}
+	if !after.ObservedAt.Time.Equal(now) {
+		t.Errorf("ObservedAt = %s, want the time of the check (%s)", after.ObservedAt, now)
+	}
+
+	// A real change restamps it.
+	now = base.Add(20 * time.Minute)
+	swing.status = v1alpha1.HealthDegraded
+	reconcileGate(t, r, "production")
+	if got := getGate(t, c, "production").Status.Health.Since; !got.Time.Equal(now) {
+		t.Errorf("Since = %s after a real change, want %s", got, now)
+	}
+}
+
+// Time-to-restore is measured from status, not from process memory, so it
+// survives the restart or leader handover that an outage is most likely to
+// straddle. This drives a whole Degraded period through a *second* Reconciler
+// to prove the surviving controller still gets the duration right.
+func TestGateRecoveryIsMeasuredAcrossARestart(t *testing.T) {
+	metrics.GateDegraded.Reset()
+
+	g := gateAdmitting("production", admits("podinfo"))
+	r, c, _ := newReconciler(t, g)
+
+	now := base
+	r.Now = func() time.Time { return now }
+	swing := &swingingChecker{status: v1alpha1.HealthDegraded}
+	reg := health.NewRegistry()
+	reg.MustRegister(swing)
+	r.Health = reg
+	g.Spec.Watch = []v1alpha1.HealthCheck{{Uses: "flux"}}
+	if err := c.Update(context.Background(), g); err != nil {
+		t.Fatal(err)
+	}
+
+	// The Gate breaks under one controller.
+	reconcileGate(t, r, "production")
+
+	// That controller goes away. A fresh one, with no memory of anything,
+	// picks the Gate up half an hour later and sees it recover.
+	successor := &Reconciler{Client: c, Health: reg, Now: func() time.Time { return now }}
+	now = base.Add(30 * time.Minute)
+	swing.status = v1alpha1.HealthHealthy
+	reconcileGate(t, successor, "production")
+
+	count, sum := degradedObservations(t)
+	if count != 1 {
+		t.Fatalf("recovery observations = %d, want 1", count)
+	}
+	if sum != 1800 {
+		t.Errorf("degraded for %.0fs, want 1800 — the duration must come from "+
+			"status.health.since, not from the controller's memory", sum)
+	}
+}
+
+// A Gate that is still Degraded has not recovered, and recording it would
+// report an outage as over while it is still happening.
+func TestGateStillDegradedRecordsNoRecovery(t *testing.T) {
+	metrics.GateDegraded.Reset()
+
+	g := gateAdmitting("production", admits("podinfo"))
+	r, c, _ := newReconciler(t, g)
+	swing := &swingingChecker{status: v1alpha1.HealthDegraded}
+	reg := health.NewRegistry()
+	reg.MustRegister(swing)
+	r.Health = reg
+	g.Spec.Watch = []v1alpha1.HealthCheck{{Uses: "flux"}}
+	if err := c.Update(context.Background(), g); err != nil {
+		t.Fatal(err)
+	}
+
+	reconcileGate(t, r, "production")
+	reconcileGate(t, r, "production")
+
+	if count, _ := degradedObservations(t); count != 0 {
+		t.Errorf("a Gate that is still Degraded recorded %d recoveries", count)
+	}
+}
+
+func degradedObservations(t *testing.T) (uint64, float64) {
+	t.Helper()
+	ch := make(chan prometheus.Metric, 32)
+	metrics.GateDegraded.Collect(ch)
+	close(ch)
+	var count uint64
+	var sum float64
+	for m := range ch {
+		var got dto.Metric
+		if err := m.Write(&got); err != nil {
+			t.Fatal(err)
+		}
+		count += got.GetHistogram().GetSampleCount()
+		sum += got.GetHistogram().GetSampleSum()
+	}
+	return count, sum
 }

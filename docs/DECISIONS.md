@@ -1217,3 +1217,53 @@ destroying that. Persisting it in status is what prevents it, and
 `traceparent` in the commit would be a permanent, immutable reference to
 something that never existed. Git remembers forever; that is the wrong place to
 write a promise we did not keep.
+
+## D43 — Two of the DORA four are queries; the other two are approximations, and we say so
+
+**Decision:** Hecate exports deployment frequency and change failure rate as
+plain queries over `hecate_passages_total`, and adds two histograms for the
+other two — `hecate_bundle_lead_time_seconds` and `hecate_gate_degraded_seconds`
+— named for **what they measure** rather than for the DORA metric they stand in
+for.
+
+The plan said these should fall out of the tracing rather than be a separate
+subsystem, and two of them do. The other two do not, for a reason no amount of
+tracing fixes: they need timestamps that lie outside Hecate.
+
+**Lead time is a slice, not the whole.** DORA measures commit to production.
+Hecate's first sight of an artifact is a Beacon discovering it, which is already
+past the build and the registry push; the missing prefix is the CI pipeline plus
+up to one Beacon interval. Calling the series `hecate_lead_time_seconds` would
+have been a claim we cannot support, so it is
+`hecate_bundle_lead_time_seconds` — the Bundle is where the clock starts, and
+the name says so. It is recorded only for crossings that succeeded: a crossing
+that failed delivered nothing, and counting it would flatter the number in
+exactly the case that should look worse.
+
+**Time to restore is an approximation.** Hecate knows when a Gate's health broke
+and when it came back. It knows nothing about incidents, pages or customers, and
+a service can be broken in ways Flux reports as perfectly healthy. So the series
+is `hecate_gate_degraded_seconds`, which is true, rather than `hecate_mttr`,
+which would not be.
+
+**The rejected alternative was inventing the missing halves.** We could have
+read the image config's `created` timestamp to approximate build time, or
+treated a failed crossing as an incident to get a fuller MTTR. Both would have
+produced a number that looks like DORA and quietly is not — and a delivery
+metric people distrust is worse than one they know the shape of. The gap is
+documented in [OBSERVABILITY.md](OBSERVABILITY.md) with what to add to close it.
+
+**`HealthReport.Since` exists so this survives a restart.** Time-to-restore is
+measured from status rather than process memory, because the controller restart
+or leader-election handover is precisely what a real outage straddles. `Since`
+records when the status *changed*, not when it was last checked, and is carried
+forward across every reconcile that finds the same status — restamping it would
+make every Gate permanently "Degraded for 0 seconds". It doubles as the answer
+to "how long has this been broken", which the CLI and UI both want.
+
+**The dashboard is checked by the build.** A dashboard is a text file, so a
+renamed metric turns a panel into "No data" — indistinguishable from a quiet
+system, which is the exact state a delivery dashboard exists to rule out. One
+`Collectors()` list feeds both registration and the check, in both directions:
+every series the dashboard queries must be registered, and every metric
+registered must appear on the dashboard.

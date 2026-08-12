@@ -1,0 +1,16 @@
+{{- if .Values.metrics.dashboard.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "hecate.fullname" . }}-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "hecate.labels" . | nindent 4 }}
+    # The Grafana sidecar's convention. Configurable because the label is the
+    # sidecar's to choose, and an operator running a non-default one would
+    # otherwise have to fork the chart to install a dashboard.
+    {{ .Values.metrics.dashboard.label }}: {{ .Values.metrics.dashboard.labelValue | quote }}
+data:
+  hecate.json: |
+{{ .Files.Get "dashboards/hecate.json" | indent 4 }}
+{{- end }}

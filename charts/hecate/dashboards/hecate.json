@@ -1,0 +1,210 @@
+{
+  "title": "Hecate — delivery",
+  "uid": "hecate-delivery",
+  "tags": ["hecate", "flux", "dora"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "editable": true,
+  "time": { "from": "now-7d", "to": "now" },
+  "refresh": "1m",
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {}
+      },
+      {
+        "name": "namespace",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "query": "label_values(hecate_gate_health, namespace)",
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      },
+      {
+        "name": "gate",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "query": "label_values(hecate_gate_health{namespace=~\"$namespace\"}, gate)",
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "The DORA four",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "type": "stat",
+      "title": "Deployment frequency",
+      "description": "Successful crossings per day. Filter to your production Gate for the DORA reading — every Gate counts here, and a dev Gate crosses far more often than production does.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 1 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "decimals": 1 },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(hecate_passages_total{namespace=~\"$namespace\", gate=~\"$gate\", outcome=\"Succeeded\"}[7d])) * 86400",
+          "legendFormat": "per day"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Change failure rate",
+      "description": "Crossings that failed or were aborted, as a share of all crossings that finished.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.15 },
+              { "color": "red", "value": 0.3 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(hecate_passages_total{namespace=~\"$namespace\", gate=~\"$gate\", outcome!=\"Succeeded\"}[7d])) / clamp_min(sum(rate(hecate_passages_total{namespace=~\"$namespace\", gate=~\"$gate\"}[7d])), 0.000001)",
+          "legendFormat": "failure rate"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Lead time (p50 / p95)",
+      "description": "Artifact discovery to crossing. This is a slice of DORA lead time, not the whole of it: it starts when a Beacon first saw the artifact, which is already past the build. See D43.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(hecate_bundle_lead_time_seconds_bucket{namespace=~\"$namespace\", gate=~\"$gate\"}[7d])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(hecate_bundle_lead_time_seconds_bucket{namespace=~\"$namespace\", gate=~\"$gate\"}[7d])))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Time to restore (p95)",
+      "description": "How long a Gate stayed Degraded before recovering. Hecate knows when a Gate's health broke and when it came back; it knows nothing about incidents, pages or customers, so this approximates MTTR rather than measuring it.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(hecate_gate_degraded_seconds_bucket{namespace=~\"$namespace\", gate=~\"$gate\"}[7d])))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Crossings",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 7 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Promotion latency by Gate (p95)",
+      "description": "How long a whole crossing takes. A Gate that waits on approval or a pull request review dominates this, which is the point.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, gate) (rate(hecate_passage_duration_seconds_bucket{namespace=~\"$namespace\", gate=~\"$gate\"}[1h])))",
+          "legendFormat": "{{gate}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Flux convergence time (p95)",
+      "description": "step=\"flux-wait\" is how long Flux took to apply the promoted revision — usually the surprising part of a crossing's latency. There is no separate convergence metric; the step duration is it.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, gate) (rate(hecate_step_duration_seconds_bucket{namespace=~\"$namespace\", gate=~\"$gate\", step=\"flux-wait\"}[1h])))",
+          "legendFormat": "{{gate}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Crossings by outcome",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(hecate_passages_total{namespace=~\"$namespace\", gate=~\"$gate\"}[1h])) * 3600",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Slowest steps (p95)",
+      "description": "Every step is measured, so this says where a crossing's time actually goes rather than guessing.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(5, histogram_quantile(0.95, sum by (le, step) (rate(hecate_step_duration_seconds_bucket{namespace=~\"$namespace\", gate=~\"$gate\"}[1h]))))",
+          "legendFormat": "{{step}}"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Gate health",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Gates by health",
+      "description": "Every state is always published, so a series does not spring into existence mid-incident and break an alert that references it.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 25 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (hecate_gate_health{namespace=~\"$namespace\", gate=~\"$gate\"})",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    }
+  ]
+}

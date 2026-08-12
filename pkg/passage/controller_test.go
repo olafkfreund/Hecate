@@ -17,7 +17,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
+
 	"github.com/olafkfreund/hecate/api/v1alpha1"
+	"github.com/olafkfreund/hecate/pkg/metrics"
 	"github.com/olafkfreund/hecate/pkg/telemetry"
 )
 
@@ -358,4 +362,73 @@ func TestPassageAllocatesNoTraceIDWhenTracingIsOff(t *testing.T) {
 	if seen != "" {
 		t.Errorf("the step saw traceparent %q, want none", seen)
 	}
+}
+
+// Lead time is measured from the Bundle, not from the Passage: the Passage's
+// own start says how long the crossing took, which is a different and much
+// smaller number. An artifact that sat for a day and then crossed in ten
+// seconds has a lead time of a day.
+func TestLeadTimeIsMeasuredFromTheBundle(t *testing.T) {
+	metrics.LeadTime.Reset()
+
+	bundle := bundleObj()
+	bundle.CreationTimestamp = metav1.Time{Time: clock.Add(-24 * time.Hour)}
+	step := &scripted{name: "a", results: []StepResult{ok("done")}}
+	r, c, _ := newController(t, []Runner{step}, passageObj(v1alpha1.Step{Uses: "a"}), bundle)
+
+	advance(t, r)
+
+	if got := getPassage(t, c); got.Status.Phase != v1alpha1.PassageSucceeded {
+		t.Fatalf("phase = %s (%s)", got.Status.Phase, got.Status.Message)
+	}
+	count, sum := leadTimeObservations(t)
+	if count != 1 {
+		t.Fatalf("lead-time observations = %d, want 1", count)
+	}
+	if sum < 24*3600 {
+		t.Errorf("lead time = %.0fs, want at least a day — it must run from the "+
+			"Bundle's creation, not the Passage's start", sum)
+	}
+}
+
+// A crossing that failed delivered nothing. Counting it would flatter the
+// number in exactly the situation where it should look worse.
+func TestFailedCrossingsHaveNoLeadTime(t *testing.T) {
+	metrics.LeadTime.Reset()
+
+	bundle := bundleObj()
+	bundle.CreationTimestamp = metav1.Time{Time: clock.Add(-24 * time.Hour)}
+	step := &scripted{
+		name:    "a",
+		results: []StepResult{{Phase: v1alpha1.StepFailed, Message: "no"}},
+		errs:    []error{FailTerminal("Boom", "it broke")},
+	}
+	r, c, _ := newController(t, []Runner{step}, passageObj(v1alpha1.Step{Uses: "a"}), bundle)
+
+	advance(t, r)
+
+	if got := getPassage(t, c); got.Status.Phase != v1alpha1.PassageFailed {
+		t.Fatalf("phase = %s, want Failed", got.Status.Phase)
+	}
+	if count, _ := leadTimeObservations(t); count != 0 {
+		t.Errorf("a failed crossing recorded %d lead-time observations", count)
+	}
+}
+
+func leadTimeObservations(t *testing.T) (uint64, float64) {
+	t.Helper()
+	ch := make(chan prometheus.Metric, 32)
+	metrics.LeadTime.Collect(ch)
+	close(ch)
+	var count uint64
+	var sum float64
+	for m := range ch {
+		var got dto.Metric
+		if err := m.Write(&got); err != nil {
+			t.Fatal(err)
+		}
+		count += got.GetHistogram().GetSampleCount()
+		sum += got.GetHistogram().GetSampleSum()
+	}
+	return count, sum
 }

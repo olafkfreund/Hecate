@@ -63,6 +63,17 @@ type HealthReport struct {
 	//
 	// +optional
 	ObservedAt *metav1.Time `json:"observedAt,omitempty"`
+	// Since is when the status last changed, as opposed to when it was last
+	// checked. "Degraded for 40 minutes" is a different fact from "Degraded,
+	// checked 20 seconds ago", and only the first one tells you whether to
+	// worry.
+	//
+	// It is also the only record of how long a Gate has been unhealthy that
+	// survives a controller restart, which is what lets time-to-restore be
+	// measured rather than estimated (D43).
+	//
+	// +optional
+	Since *metav1.Time `json:"since,omitempty"`
 }
 
 // Step is one instruction in a Passage.

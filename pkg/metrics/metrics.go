@@ -57,10 +57,6 @@ var (
 	}, []string{"namespace", "gate", "status"})
 )
 
-func init() {
-	ctrlmetrics.Registry.MustRegister(PassageDuration, PassagesTotal, StepDuration, GateHealth)
-}
-
 // healthStates is the full set, so every series is published rather than
 // appearing only once a Gate first enters that state. A gauge that springs into
 // existence mid-incident breaks alerting rules that reference it.
@@ -109,4 +105,69 @@ func RecordStep(namespace, gate, step string, phase v1alpha1.StepPhase, seconds 
 		return
 	}
 	StepDuration.WithLabelValues(namespace, gate, step, string(phase)).Observe(seconds)
+}
+
+// LeadTime measures artifact discovery to crossing.
+//
+// **This is a slice of DORA lead time, not the whole of it.** DORA measures
+// commit to production; Hecate first sees an artifact when a Beacon discovers
+// it, which is already past the build. What is measured here is the part Hecate
+// can observe honestly — and, on most teams, the larger and more actionable
+// part. Naming it `lead_time` outright would be a claim we cannot support
+// (D43).
+var LeadTime = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+	Name:    "hecate_bundle_lead_time_seconds",
+	Help:    "Time from a Bundle being emitted to a crossing with it succeeding.",
+	Buckets: leadTimeBuckets,
+}, []string{"namespace", "gate"})
+
+// GateDegraded measures how long a Gate stayed Degraded, observed when it
+// stops being Degraded.
+//
+// The closest honest analogue of time-to-restore: Hecate knows when a Gate's
+// health broke and when it came back, and knows nothing about incidents,
+// pages or customers. Named for what it measures rather than for the DORA
+// metric it approximates.
+var GateDegraded = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+	Name:    "hecate_gate_degraded_seconds",
+	Help:    "How long a Gate remained Degraded, observed when it recovered.",
+	Buckets: leadTimeBuckets,
+}, []string{"namespace", "gate"})
+
+// leadTimeBuckets span a minute to about three weeks. Lead time is measured in
+// hours and days on most teams, and an artifact that sat unpromoted for a
+// fortnight is the observation a delivery dashboard most needs to show.
+var leadTimeBuckets = prometheus.ExponentialBuckets(60, 3, 11)
+
+// Collectors is every metric this package exports.
+//
+// One list, read by both registration and the dashboard check, so a metric
+// cannot be added to the exporter and silently forgotten by the dashboard —
+// which is how a delivery dashboard rots into a wall of "No data".
+func Collectors() []prometheus.Collector {
+	return []prometheus.Collector{
+		PassageDuration, PassagesTotal, StepDuration, GateHealth, LeadTime, GateDegraded,
+	}
+}
+
+func init() {
+	ctrlmetrics.Registry.MustRegister(Collectors()...)
+}
+
+// RecordLeadTime publishes a successful crossing's lead time. Called only on
+// success: a crossing that failed delivered nothing, and counting it would
+// flatter the number.
+func RecordLeadTime(namespace, gate string, seconds float64) {
+	if seconds < 0 {
+		return
+	}
+	LeadTime.WithLabelValues(namespace, gate).Observe(seconds)
+}
+
+// RecordGateRecovered publishes how long a Gate was Degraded.
+func RecordGateRecovered(namespace, gate string, seconds float64) {
+	if seconds < 0 {
+		return
+	}
+	GateDegraded.WithLabelValues(namespace, gate).Observe(seconds)
 }

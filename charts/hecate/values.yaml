@@ -86,6 +86,12 @@ metrics:
   service:
     enabled: true
     annotations: {}
+  # The exemplar Grafana dashboard, as a ConfigMap the Grafana sidecar picks up.
+  # Off by default: without a sidecar watching for it, it is an unused object.
+  dashboard:
+    enabled: false
+    label: grafana_dashboard
+    labelValue: "1"
 
 # OpenTelemetry. Standard OTEL_* variables, so this drops into an existing
 # collector with no Hecate-specific configuration.

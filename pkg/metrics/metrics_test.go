@@ -134,3 +134,66 @@ func TestStepDurationCoversFluxConvergence(t *testing.T) {
 		t.Error("flux-wait is not distinguishable in the exported metric")
 	}
 }
+
+// observations returns the count and sum of a single-series histogram vec.
+func observations(t *testing.T, c prometheus.Collector) (uint64, float64) {
+	t.Helper()
+	ch := make(chan prometheus.Metric, 32)
+	c.Collect(ch)
+	close(ch)
+	var count uint64
+	var sum float64
+	for m := range ch {
+		var got dto.Metric
+		if err := m.Write(&got); err != nil {
+			t.Fatal(err)
+		}
+		count += got.GetHistogram().GetSampleCount()
+		sum += got.GetHistogram().GetSampleSum()
+	}
+	return count, sum
+}
+
+// A histogram whose buckets are all too small records every real observation in
+// +Inf, which looks like data and answers nothing. Lead time is measured in
+// hours and days, so the buckets have to reach that far.
+func TestLeadTimeBucketsReachDays(t *testing.T) {
+	last := leadTimeBuckets[len(leadTimeBuckets)-1]
+	if last < 7*24*3600 {
+		t.Errorf("the largest lead-time bucket is %.0fs, which cannot represent "+
+			"an artifact that waited a week to be promoted", last)
+	}
+	if leadTimeBuckets[0] > 300 {
+		t.Errorf("the smallest lead-time bucket is %.0fs — a fast team's "+
+			"promotions would all land in one bucket", leadTimeBuckets[0])
+	}
+}
+
+func TestRecordLeadTimeIgnoresUnmeasurableCrossings(t *testing.T) {
+	LeadTime.Reset()
+
+	// -1 is what span() returns when a timestamp was missing. Recording it
+	// would drag the histogram's sum below zero for ever.
+	RecordLeadTime("acme", "production", -1)
+	if count, _ := observations(t, LeadTime); count != 0 {
+		t.Fatalf("an unmeasurable crossing was recorded (%d observations)", count)
+	}
+
+	RecordLeadTime("acme", "production", 3600)
+	count, sum := observations(t, LeadTime)
+	if count != 1 || sum != 3600 {
+		t.Errorf("count=%d sum=%.0f, want 1 and 3600", count, sum)
+	}
+}
+
+func TestRecordGateRecovered(t *testing.T) {
+	GateDegraded.Reset()
+
+	RecordGateRecovered("acme", "production", -1)
+	RecordGateRecovered("acme", "production", 900)
+
+	count, sum := observations(t, GateDegraded)
+	if count != 1 || sum != 900 {
+		t.Errorf("count=%d sum=%.0f, want 1 and 900", count, sum)
+	}
+}

@@ -133,7 +133,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	if passage.Status.Phase.Terminal() {
 		r.announce(&passage, before)
-		recordMetrics(&passage)
+		recordMetrics(&passage, bundle)
 		r.cleanup(ctx, &passage)
 		logger.Info("passage finished",
 			"phase", passage.Status.Phase, "gate", passage.Spec.Gate, "bundle", passage.Spec.Bundle)
@@ -198,8 +198,15 @@ func (r *Reconciler) announce(p *v1alpha1.Passage, before v1alpha1.PassagePhase)
 //
 // Called only on the transition to terminal, from the same branch as the event,
 // so a Passage reconciled again after finishing is not counted twice.
-func recordMetrics(p *v1alpha1.Passage) {
+func recordMetrics(p *v1alpha1.Passage, bundle *v1alpha1.Bundle) {
 	metrics.RecordPassage(p.Namespace, p.Spec.Gate, p.Status.Phase, span(p.Status.StartedAt, p.Status.FinishedAt))
+	// Only on success, and only from the Bundle: a crossing that failed
+	// delivered nothing, and the Passage's own start says how long the crossing
+	// took, not how long the artifact waited to be promoted.
+	if p.Status.Phase == v1alpha1.PassageSucceeded && bundle != nil {
+		metrics.RecordLeadTime(p.Namespace, p.Spec.Gate,
+			span(&bundle.CreationTimestamp, p.Status.FinishedAt))
+	}
 	for _, st := range p.Status.Steps {
 		if st.Phase.Terminal() {
 			metrics.RecordStep(p.Namespace, p.Spec.Gate, st.Uses, st.Phase, span(st.StartedAt, st.FinishedAt))
