@@ -3,6 +3,9 @@ package flux
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -68,29 +71,61 @@ func loadFixture(t *testing.T, version, name string) *unstructured.Unstructured 
 // would hang until its deadline — a failure mode that looks like Flux being
 // slow.
 func TestSourceKindsAgainstRealFluxOutput(t *testing.T) {
-	cases := []struct {
-		fixture      string
-		wantHealth   v1alpha1.Health
-		wantRevision string
-	}{
-		{"gitrepository-ready", v1alpha1.HealthHealthy,
-			"main@sha1:fa90646efc64f7c6e9cba163eddae6ca467f71fa"},
-		{"helmrepository-ready", v1alpha1.HealthHealthy,
-			"sha256:616e9b4128d1df741234ee73d2411fd56d17c47046c506a7f47b82416c946a9b"},
-	}
-
 	for _, version := range fluxVersions(t) {
-		for _, tc := range cases {
-			t.Run(version+"/"+tc.fixture, func(t *testing.T) {
-				got := Evaluate(loadFixture(t, version, tc.fixture), Options{})
-				if got.Health != tc.wantHealth {
-					t.Errorf("health = %s, want %s (%v)", got.Health, tc.wantHealth, got.Issues)
+		for _, fixture := range []string{"gitrepository-ready", "helmrepository-ready"} {
+			t.Run(version+"/"+fixture, func(t *testing.T) {
+				obj := loadFixture(t, version, fixture)
+				got := Evaluate(obj, Options{})
+
+				if got.Health != v1alpha1.HealthHealthy {
+					t.Errorf("health = %s, want Healthy (%v)", got.Health, got.Issues)
 				}
-				if got.Revision != tc.wantRevision {
+
+				// Compared against the fixture's own artifact revision rather
+				// than a literal, so a version whose commit differs needs no
+				// test change — and so this asserts the thing that matters,
+				// which is *which field* a source's revision comes from.
+				want, found, err := unstructured.NestedString(obj.Object, "status", "artifact", "revision")
+				if err != nil || !found || want == "" {
+					t.Fatalf("the fixture has no status.artifact.revision; recapture it")
+				}
+				if got.Revision != want {
 					t.Errorf("revision = %q, want %q — source kinds report it under "+
-						"status.artifact.revision", got.Revision, tc.wantRevision)
+						"status.artifact.revision, not lastAppliedRevision", got.Revision, want)
 				}
 			})
+		}
+	}
+}
+
+// Every version must offer the same fixtures, or a kind quietly stops being
+// covered on one Flux and the suite still passes.
+func TestEveryFluxVersionHasTheSameFixtures(t *testing.T) {
+	versions := fluxVersions(t)
+	if len(versions) < 2 {
+		t.Skip("only one version captured; nothing to compare")
+	}
+
+	names := func(v string) []string {
+		entries, err := os.ReadDir(filepath.Join(fixtureRoot, v))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), ".json") {
+				out = append(out, e.Name())
+			}
+		}
+		sort.Strings(out)
+		return out
+	}
+
+	want := names(versions[0])
+	for _, v := range versions[1:] {
+		if got := names(v); !slices.Equal(got, want) {
+			t.Errorf("%s has %v but %s has %v — every version must cover the same kinds",
+				v, got, versions[0], want)
 		}
 	}
 }

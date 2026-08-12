@@ -17,7 +17,7 @@
   "status": {
     "conditions": [
       {
-        "lastTransitionTime": "2026-08-12T15:18:09Z",
+        "lastTransitionTime": "2026-08-12T15:16:54Z",
         "message": "building artifact",
         "observedGeneration": 1,
         "reason": "ProgressingWithRetry",
@@ -25,7 +25,7 @@
         "type": "Reconciling"
       },
       {
-        "lastTransitionTime": "2026-08-12T15:18:09Z",
+        "lastTransitionTime": "2026-08-12T15:16:54Z",
         "message": "failed to checkout and determine revision: unable to clone 'https://github.com/hecate-does-not-exist/nope.git': authentication required: Repository not found.",
         "observedGeneration": 1,
         "reason": "GitOperationFailed",
@@ -33,7 +33,7 @@
         "type": "Ready"
       },
       {
-        "lastTransitionTime": "2026-08-12T15:17:22Z",
+        "lastTransitionTime": "2026-08-12T15:16:06Z",
         "message": "failed to checkout and determine revision: unable to clone 'https://github.com/hecate-does-not-exist/nope.git': authentication required: Repository not found.",
         "observedGeneration": 1,
         "reason": "GitOperationFailed",

@@ -17,7 +17,7 @@
   "status": {
     "artifact": {
       "digest": "sha256:a8d435a046d9ab8e4653e97230b1ced33bf11aadc5304e3e5135b2f926efe0be",
-      "lastUpdateTime": "2026-08-12T15:17:23Z",
+      "lastUpdateTime": "2026-08-12T15:16:07Z",
       "path": "gitrepository/fixtures/git-ok/eec06d1ea459af4cb4e10e806f8be7c7bd58b361.tar.gz",
       "revision": "master@sha1:eec06d1ea459af4cb4e10e806f8be7c7bd58b361",
       "size": 317308,
@@ -25,7 +25,7 @@
     },
     "conditions": [
       {
-        "lastTransitionTime": "2026-08-12T15:17:23Z",
+        "lastTransitionTime": "2026-08-12T15:16:07Z",
         "message": "stored artifact for revision 'master@sha1:eec06d1ea459af4cb4e10e806f8be7c7bd58b361'",
         "observedGeneration": 1,
         "reason": "Succeeded",
@@ -33,7 +33,7 @@
         "type": "Ready"
       },
       {
-        "lastTransitionTime": "2026-08-12T15:17:23Z",
+        "lastTransitionTime": "2026-08-12T15:16:07Z",
         "message": "stored artifact for revision 'master@sha1:eec06d1ea459af4cb4e10e806f8be7c7bd58b361'",
         "observedGeneration": 1,
         "reason": "Succeeded",

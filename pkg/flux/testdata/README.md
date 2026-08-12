@@ -13,6 +13,17 @@ URL reported *Progressing* for ever — never Degraded however long it failed, w
 hand-written fixture would have found that, because we would have written the
 sentinel we expected.
 
+## What is here
+
+`v2.7`, `v2.8` and `v2.9` — the three minors Flux itself supports, matching the
+e2e matrix. Each has GitRepository, OCIRepository and HelmRepository, healthy
+and failing, captured from the **same** sources so the three are comparable: a
+diff between versions shows a contract change and nothing else.
+
+All three agree on every field Hecate reads, including the `observedGeneration:
+-1` sentinel — so the D45 fix is right across the whole supported range, not
+only on the version that exposed it.
+
 ## Adding a version
 
 Bring up a cluster running the Flux minor you want, then create sources that
@@ -42,7 +53,12 @@ on every recapture. `spec` and `status` are kept verbatim; **do not tidy the
 status**, since the awkward parts are the whole reason the file exists.
 
 The tests discover version directories themselves, so a new one needs no code
-change. Every version must provide the same file names as `v2.9`.
+change — and `TestEveryFluxVersionHasTheSameFixtures` fails if a version is
+missing one, because a kind quietly losing coverage on one Flux while the suite
+still passes is the failure this directory exists to prevent.
+
+Nothing asserts a literal revision: the expected value is read back out of each
+fixture, so a version captured from a different commit needs no test change.
 
 ## The failing fixtures matter more than the healthy ones
 
@@ -51,6 +67,9 @@ the contract shows: which condition carries the reason, whether
 `observedGeneration` is a sentinel, whether an artifact from a previous success
 is still reported. Those are the fields a Flux release can change under us, and
 the ones a naive check gets wrong.
+
+Use the same URLs each time. Capturing v2.7 from one repository and v2.9 from
+another makes the two impossible to diff, which throws away most of the value.
 
 ## Bucket
 

@@ -14,7 +14,7 @@
   "status": {
     "artifact": {
       "digest": "sha256:c210838a2628a3aa988c6d9b041f5566e632025278857ff21f8f839bbbb93465",
-      "lastUpdateTime": "2026-08-12T15:17:22Z",
+      "lastUpdateTime": "2026-08-12T15:14:23Z",
       "path": "helmrepository/fixtures/helm-ok/index-616e9b4128d1df741234ee73d2411fd56d17c47046c506a7f47b82416c946a9b.yaml",
       "revision": "sha256:616e9b4128d1df741234ee73d2411fd56d17c47046c506a7f47b82416c946a9b",
       "size": 81032,
@@ -22,7 +22,7 @@
     },
     "conditions": [
       {
-        "lastTransitionTime": "2026-08-12T15:17:22Z",
+        "lastTransitionTime": "2026-08-12T15:14:23Z",
         "message": "stored artifact: revision 'sha256:616e9b4128d1df741234ee73d2411fd56d17c47046c506a7f47b82416c946a9b'",
         "observedGeneration": 1,
         "reason": "Succeeded",
@@ -30,7 +30,7 @@
         "type": "Ready"
       },
       {
-        "lastTransitionTime": "2026-08-12T15:17:22Z",
+        "lastTransitionTime": "2026-08-12T15:14:23Z",
         "message": "stored artifact: revision 'sha256:616e9b4128d1df741234ee73d2411fd56d17c47046c506a7f47b82416c946a9b'",
         "observedGeneration": 1,
         "reason": "Succeeded",

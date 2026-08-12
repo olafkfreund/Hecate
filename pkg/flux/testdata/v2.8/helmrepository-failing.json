@@ -14,7 +14,7 @@
   "status": {
     "conditions": [
       {
-        "lastTransitionTime": "2026-08-12T15:18:09Z",
+        "lastTransitionTime": "2026-08-12T15:16:53Z",
         "message": "building artifact",
         "observedGeneration": 1,
         "reason": "ProgressingWithRetry",
@@ -22,7 +22,7 @@
         "type": "Reconciling"
       },
       {
-        "lastTransitionTime": "2026-08-12T15:18:09Z",
+        "lastTransitionTime": "2026-08-12T15:16:53Z",
         "message": "failed to fetch Helm repository index: failed to cache index to temporary file: Get \"https://example.invalid/does-not-exist/index.yaml\": dial tcp: lookup example.invalid on 10.43.0.10:53: no such host",
         "observedGeneration": 1,
         "reason": "Failed",
@@ -30,7 +30,7 @@
         "type": "Ready"
       },
       {
-        "lastTransitionTime": "2026-08-12T15:17:22Z",
+        "lastTransitionTime": "2026-08-12T15:16:06Z",
         "message": "failed to fetch Helm repository index: failed to cache index to temporary file: Get \"https://example.invalid/does-not-exist/index.yaml\": dial tcp: lookup example.invalid on 10.43.0.10:53: no such host",
         "observedGeneration": 1,
         "reason": "Failed",

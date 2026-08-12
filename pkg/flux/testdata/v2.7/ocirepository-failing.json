@@ -19,7 +19,7 @@
   "status": {
     "conditions": [
       {
-        "lastTransitionTime": "2026-08-12T15:18:09Z",
+        "lastTransitionTime": "2026-08-12T15:15:10Z",
         "message": "building artifact",
         "observedGeneration": 1,
         "reason": "ProgressingWithRetry",
@@ -27,7 +27,7 @@
         "type": "Reconciling"
       },
       {
-        "lastTransitionTime": "2026-08-12T15:18:09Z",
+        "lastTransitionTime": "2026-08-12T15:15:10Z",
         "message": "failed to determine artifact digest: Get \"https://127.0.0.1:5999/v2/\": dial tcp 127.0.0.1:5999: connect: connection refused; Get \"http://127.0.0.1:5999/v2/\": dial tcp 127.0.0.1:5999: connect: connection refused",
         "observedGeneration": 1,
         "reason": "OCIArtifactPullFailed",
@@ -35,7 +35,7 @@
         "type": "Ready"
       },
       {
-        "lastTransitionTime": "2026-08-12T15:17:22Z",
+        "lastTransitionTime": "2026-08-12T15:14:23Z",
         "message": "failed to determine artifact digest: Get \"https://127.0.0.1:5999/v2/\": dial tcp 127.0.0.1:5999: connect: connection refused; Get \"http://127.0.0.1:5999/v2/\": dial tcp 127.0.0.1:5999: connect: connection refused",
         "observedGeneration": 1,
         "reason": "OCIArtifactPullFailed",
