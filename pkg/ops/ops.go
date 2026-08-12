@@ -164,7 +164,12 @@ func (o *Ops) Passages(ctx context.Context, namespace, gate, bundle string) ([]v
 	if err := o.Client.List(ctx, &list, client.InNamespace(namespace)); err != nil {
 		return nil, fmt.Errorf("listing Passages: %w", err)
 	}
-	var out []v1alpha1.Passage
+	// Initialised, not declared: a nil slice marshals to `null`, and every
+	// other list here returns `[]` because it hands back list.Items. One
+	// endpoint answering null made the UI throw "Cannot read properties of
+	// null (reading 'length')" the moment a namespace had no Passages, which is
+	// the state every namespace starts in.
+	out := []v1alpha1.Passage{}
 	for _, p := range list.Items {
 		if gate != "" && p.Spec.Gate != gate {
 			continue

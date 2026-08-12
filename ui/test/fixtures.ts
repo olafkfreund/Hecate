@@ -32,6 +32,44 @@ export const bundles: Bundle[] = [
   },
 ];
 
+/** A Bundle with a history: emitted, cleared one Gate, refused at another. */
+export const travelled: Bundle = {
+  metadata: {
+    name: "podinfo-6b2",
+    namespace: "uidemo",
+    creationTimestamp: "2026-08-10T09:00:00Z",
+  },
+  spec: {
+    beacon: "podinfo",
+    alias: "wandering-owl",
+    artifacts: [
+      {
+        image: {
+          repo: "ghcr.io/stefanprodan/podinfo",
+          tag: "6.14.1",
+          digest: "sha256:4a6f31e7c48b0fb7f3848479c9278284362ca590ee8ee06a377971f2af22464b",
+        },
+      },
+    ],
+  },
+  status: {
+    approvedFor: ["production"],
+    // Deliberately out of order relative to `blocked`, so the timeline has to
+    // sort rather than concatenate.
+    cleared: [
+      { gate: "staging", at: "2026-08-10T09:05:00Z", actor: "controller", passage: "staging-vck6g" },
+    ],
+    blocked: [
+      {
+        gate: "production",
+        at: "2026-08-10T09:02:00Z",
+        actor: "olaf@hecate.test",
+        reason: "has not cleared staging",
+      },
+    ],
+  },
+};
+
 export const passages: Passage[] = [
   {
     metadata: { name: "staging-vck6g", namespace: "uidemo" },

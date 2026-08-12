@@ -36,10 +36,38 @@ export interface Gate {
   };
 }
 
+export interface ImageArtifact {
+  repo: string;
+  tag?: string;
+  /** A tag can be moved; a digest cannot. This is what makes it auditable. */
+  digest?: string;
+}
+
+export interface Artifact {
+  image?: ImageArtifact;
+  chart?: { repo?: string; name?: string; version?: string };
+  commit?: { repo?: string; sha?: string; ref?: string };
+}
+
+/** One Bundle/Gate outcome, as recorded on the Bundle itself. */
+export interface GateCrossing {
+  gate: string;
+  passage?: string;
+  at: string;
+  /** Who caused it — a person, or the controller for an automatic crossing. */
+  actor?: string;
+  /** Why it was blocked. */
+  reason?: string;
+}
+
 export interface Bundle {
   metadata: { name: string; namespace: string; creationTimestamp?: string };
-  spec: { beacon?: string; alias?: string; digest?: string };
-  status?: { approvedFor?: string[] };
+  spec: { beacon?: string; alias?: string; digest?: string; artifacts?: Artifact[] };
+  status?: {
+    cleared?: GateCrossing[];
+    blocked?: GateCrossing[];
+    approvedFor?: string[];
+  };
 }
 
 export interface Passage {
@@ -126,6 +154,8 @@ export const api = {
   explain: (ns: string, name: string) =>
     get<Explanation>(`${base(ns)}/gates/${encodeURIComponent(name)}/explain`),
   bundles: (ns: string) => get<Bundle[]>(`${base(ns)}/bundles`),
+  bundle: (ns: string, name: string) =>
+    get<Bundle>(`${base(ns)}/bundles/${encodeURIComponent(name)}`),
   passages: (ns: string) => get<Passage[]>(`${base(ns)}/passages`),
   health: () => get<{ status: string; version: string }>("/healthz"),
 

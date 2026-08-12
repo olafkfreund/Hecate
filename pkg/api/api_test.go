@@ -473,3 +473,48 @@ func TestAllFourResourcesAreReachable(t *testing.T) {
 		})
 	}
 }
+
+// Every list endpoint must answer `[]` rather than `null` when there is
+// nothing to list.
+//
+// A nil Go slice marshals to `null`, which is not an empty list to any client:
+// the UI did `passages.length` and threw, in a namespace with no Passages —
+// which is the state every namespace starts in. One endpoint had it wrong and
+// four had it right, so the check is over all of them rather than the one that
+// broke.
+func TestListEndpointsNeverAnswerNull(t *testing.T) {
+	// Reuses the same construction as every other test here, so the fake
+	// client decodes the same way a real one does.
+	s, _ := newServer(t, map[string]string{"t": "someone"}, grants{})
+
+	for _, path := range []string{"beacons", "gates", "bundles", "passages"} {
+		t.Run(path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			r := httptest.NewRequest("GET", "/api/v1alpha1/namespaces/empty/"+path, nil)
+			r.SetPathValue("namespace", "empty")
+
+			var (
+				out any
+				err error
+			)
+			switch path {
+			case "beacons":
+				out, err = s.listBeacons(r.Context(), Subject{}, r)
+			case "gates":
+				out, err = s.listGates(r.Context(), Subject{}, r)
+			case "bundles":
+				out, err = s.listBundles(r.Context(), Subject{}, r)
+			case "passages":
+				out, err = s.listPassages(r.Context(), Subject{}, r)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			writeJSON(rec, http.StatusOK, out)
+			if got := strings.TrimSpace(rec.Body.String()); got != "[]" {
+				t.Errorf("%s answered %s, want []", path, got)
+			}
+		})
+	}
+}
