@@ -88,7 +88,10 @@ metrics:
     annotations: {}
 
 # OpenTelemetry. Standard OTEL_* variables, so this drops into an existing
-# collector with no Hecate-specific configuration. Tracing lands in M5.
+# collector with no Hecate-specific configuration.
+#
+# Off unless `endpoint` is set: the SDK would otherwise export to localhost:4318
+# and log connection failures forever about a collector nobody deployed.
 otel:
   enabled: false
   endpoint: ""            # e.g. http://otel-collector.observability:4317

@@ -302,3 +302,29 @@ func drainFor(t *testing.T, rec *record.FakeRecorder, reason string) {
 		t.Errorf("no event recorded, want one mentioning %s", reason)
 	}
 }
+
+// The trace ID has to be written in the same status update that records the
+// terminal phase. A Passage is never reconciled again once terminal, so an
+// update that happened before recordTrace ran would lose the ID permanently and
+// nothing downstream would notice.
+func TestPassagePersistsItsTraceID(t *testing.T) {
+	sr := recorder(t)
+	step := &scripted{name: "a", results: []StepResult{ok("done")}}
+	r, c, _ := newController(t, []Runner{step}, passageObj(v1alpha1.Step{Uses: "a"}), bundleObj())
+
+	advance(t, r)
+
+	got := getPassage(t, c)
+	if got.Status.TraceID == "" {
+		t.Fatal("a finished Passage must record the trace it emitted")
+	}
+	spans := sr.Ended()
+	if len(spans) == 0 {
+		t.Fatal("no spans were emitted")
+	}
+	root := spans[len(spans)-1]
+	if root.SpanContext().TraceID().String() != got.Status.TraceID {
+		t.Errorf("status.traceID %q does not name the trace that was exported (%q)",
+			got.Status.TraceID, root.SpanContext().TraceID())
+	}
+}

@@ -153,6 +153,26 @@ $ make run        # or run it out-of-cluster against KUBECONFIG, for a debugger
 `make run` is the faster loop while iterating on controller logic; `make install`
 is how you check the packaging, the RBAC and the hardened pod actually work.
 
+### Looking at traces
+
+Tracing is off unless the environment asks for it — the OpenTelemetry SDK's own
+default is to export to `localhost:4318`, which would mean a controller logging
+connection failures forever about a collector nobody deployed. Every knob is a
+standard `OTEL_*` variable and none of them are overridden, so your own
+collector configuration works here unchanged.
+
+```console
+$ make collector    # a span-printing collector in the dev cluster
+$ helm upgrade hecate charts/hecate -n hecate-system --reuse-values \
+    --set otel.enabled=true --set otel.endpoint=http://otelcol.hecate-system:4317
+$ kubectl logs deploy/otelcol -n hecate-system -f
+```
+
+Drive a crossing and you get one trace per Passage — the Passage a root span,
+each step a child. The trace is emitted when the Passage finishes rather than
+while it runs, because a Passage outlives the process that started it; the
+reasoning is [D41](DECISIONS.md).
+
 ## 6. Secrets
 
 Encrypted with [agenix](https://github.com/ryantm/agenix) and committed. Nothing

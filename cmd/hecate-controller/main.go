@@ -30,6 +30,7 @@ import (
 	"github.com/olafkfreund/hecate/pkg/health"
 	"github.com/olafkfreund/hecate/pkg/passage"
 	"github.com/olafkfreund/hecate/pkg/passage/steps"
+	"github.com/olafkfreund/hecate/pkg/telemetry"
 )
 
 // version is set at build time with -ldflags.
@@ -105,6 +106,21 @@ func run() error {
 		return err
 	}
 
+	// Tracing is configured entirely by the standard OTEL_* environment and is
+	// off unless one of them is set, so this is a no-op for anyone not running a
+	// collector.
+	shutdownTracing, tracing, err := telemetry.Start(ctx, "hecate-controller", version)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		// A fresh context: the signal context is already cancelled by the time
+		// this runs, and flushing the last spans is the whole point.
+		if err := shutdownTracing(context.WithoutCancel(ctx)); err != nil {
+			logger.Error(err, "could not flush traces on shutdown")
+		}
+	}()
+
 	mgr, err := ctrl.NewManager(restCfg, ctrl.Options{
 		Scheme:                 newScheme(),
 		Metrics:                metricsserver.Options{BindAddress: opts.metricsAddr},
@@ -178,6 +194,7 @@ func run() error {
 		"checkers", checkers.Names(),
 		"steps", stepRunners.Names(),
 		"workRoot", opts.workRoot,
+		"tracing", map[bool]string{true: "enabled", false: "off"}[tracing],
 		"crossNamespaceRefs", map[bool]string{true: "refused", false: "allowed"}[opts.noCrossNS])
 
 	if err := mgr.Start(ctx); err != nil {

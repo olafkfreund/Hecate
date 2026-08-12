@@ -1123,3 +1123,49 @@ when a release has gone wrong — precisely the moment they must still exist.
 
 **Collection failing does not fail the reconcile.** A Gate that cannot tidy up
 should still be promoting; the error is logged and the Gate carries on.
+
+## D41 — A Passage's trace is reconstructed from status, not held open across it
+
+**Decision:** the OpenTelemetry trace for a Passage is emitted in one go when
+the Passage reaches a terminal phase, rebuilt from the timestamps already in
+`status` — the Passage a root span, each step a child, each replaying its
+recorded start and end with `trace.WithTimestamp`. Spans are never kept open in
+memory while a crossing runs.
+
+The obvious design is the other one: start a span when the Passage starts, keep
+it, end it when the Passage ends. It cannot work here. A Passage advances over
+many reconciles and can outlive the process — a crossing that waits an hour for
+Flux to converge is exactly the one worth tracing, and exactly the one a
+controller restart or a leader-election handover would lose. Anything held in
+process memory is lost by design; `status` is the only thing that survives, and
+`Engine.Advance` was already built around that (D5). Tracing follows the same
+rule rather than inventing a second, weaker kind of state.
+
+**What it costs, stated plainly:** the trace appears when the Passage finishes,
+rather than growing while it runs. You cannot watch a crossing in Jaeger live.
+The durations are exact either way, because they come from the timestamps the
+engine recorded, so the finished trace says the same thing a live one would have
+— it just says it later.
+
+**`status.traceID` is written in the same update as the terminal phase.** A
+Passage is never reconciled again once terminal, so a second update afterwards
+would be a second chance to lose the ID with nothing left to notice.
+
+**An empty `traceID` is the honest answer when tracing is off.** With no
+exporter configured the no-op provider returns an invalid span context, and a
+field naming a trace nobody exported would be worse than a blank one.
+
+**What #33 changes.** Writing a `traceparent` git commit trailer needs the trace
+ID *during* the crossing, not after it, so the ID will have to be allocated when
+the Passage starts and seeded here as a parent span context. That is a contained
+change, and deferring it is deliberate: forging trace IDs up front is machinery
+with no consumer until the trailer exists.
+
+**Tracing is off unless the environment asks for it.** The SDK's own default is
+to export to `localhost:4318`, which for almost every installation means a
+controller logging connection failures forever about a collector nobody
+deployed. `pkg/telemetry` requires `OTEL_EXPORTER_OTLP_ENDPOINT` (or its
+traces-specific form, or an explicit `OTEL_TRACES_EXPORTER=otlp`) before it
+configures anything. Every other knob — endpoint, protocol, headers, sampler,
+resource attributes — is read from the standard `OTEL_*` variables and never
+overridden, so an operator's collector configuration works here unchanged.

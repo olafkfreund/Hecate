@@ -74,7 +74,7 @@ func (e *Engine) Advance(
 	// Abort is checked before any step runs, so a cancellation requested while
 	// waiting takes effect at the next tick rather than after the current wait.
 	if p.Spec.Abort {
-		return Outcome{Status: e.abort(status, now)}
+		return Outcome{Status: e.abort(status)}
 	}
 
 	// Grow the status to match the spec exactly once, so indices line up for
@@ -112,12 +112,12 @@ func (e *Engine) Advance(
 			// An unknown step is a configuration error, not a transient fault.
 			st.Reason = ReasonUnregisteredStep
 			e.finishStep(st, v1alpha1.StepFailed, fmt.Sprintf(
-				"no step named %q is registered (available: %v)", step.Uses, e.Registry.Names()), now)
-			return Outcome{Status: e.fail(status, st.Message, now), Watch: watch}
+				"no step named %q is registered (available: %v)", step.Uses, e.Registry.Names()))
+			return Outcome{Status: e.fail(status, st.Message), Watch: watch}
 		}
 
 		if st.StartedAt == nil {
-			st.StartedAt = &metav1.Time{Time: now}
+			st.StartedAt = &metav1.Time{Time: e.now()}
 		}
 		st.Phase = v1alpha1.StepRunning
 		st.Attempts++
@@ -136,11 +136,11 @@ func (e *Engine) Advance(
 			run, err := expr.Bool(step.If, env)
 			if err != nil {
 				st.Reason = ReasonBadExpression
-				e.finishStep(st, v1alpha1.StepFailed, fmt.Sprintf("condition: %s", err), now)
-				return Outcome{Status: e.fail(status, st.Message, now), Watch: watch}
+				e.finishStep(st, v1alpha1.StepFailed, fmt.Sprintf("condition: %s", err))
+				return Outcome{Status: e.fail(status, st.Message), Watch: watch}
 			}
 			if !run {
-				e.finishStep(st, v1alpha1.StepSkipped, fmt.Sprintf("condition %q was false", step.If), now)
+				e.finishStep(st, v1alpha1.StepSkipped, fmt.Sprintf("condition %q was false", step.If))
 				continue
 			}
 		}
@@ -152,8 +152,8 @@ func (e *Engine) Advance(
 			interpolated, err := expr.InterpolateJSON(step.With.Raw, env)
 			if err != nil {
 				st.Reason = ReasonBadExpression
-				e.finishStep(st, v1alpha1.StepFailed, err.Error(), now)
-				return Outcome{Status: e.fail(status, st.Message, now), Watch: watch}
+				e.finishStep(st, v1alpha1.StepFailed, err.Error())
+				return Outcome{Status: e.fail(status, st.Message), Watch: watch}
 			}
 			cfg = interpolated
 		}
@@ -191,14 +191,14 @@ func (e *Engine) Advance(
 
 		switch {
 		case err != nil && (IsTerminal(err) || !step.ContinueOnError):
-			e.failStep(st, err, now)
+			e.failStep(st, err)
 			if step.ContinueOnError && !IsTerminal(err) {
 				continue
 			}
-			return Outcome{Status: e.fail(status, err.Error(), now), Watch: watch}
+			return Outcome{Status: e.fail(status, err.Error()), Watch: watch}
 
 		case err != nil: // non-terminal, and the step is allowed to fail
-			e.failStep(st, err, now)
+			e.failStep(st, err)
 			continue
 
 		case res.Phase == v1alpha1.StepRunning:
@@ -217,42 +217,50 @@ func (e *Engine) Advance(
 			if phase == "" {
 				phase = v1alpha1.StepSucceeded
 			}
-			e.finishStep(st, phase, res.Message, now)
+			e.finishStep(st, phase, res.Message)
 			if phase == v1alpha1.StepFailed && !step.ContinueOnError {
-				return Outcome{Status: e.fail(status, res.Message, now), Watch: watch}
+				return Outcome{Status: e.fail(status, res.Message), Watch: watch}
 			}
 		}
 	}
 
 	status.Phase = v1alpha1.PassageSucceeded
 	status.Message = fmt.Sprintf("crossed %s", p.Spec.Gate)
-	status.FinishedAt = &metav1.Time{Time: now}
+	status.FinishedAt = &metav1.Time{Time: e.now()}
 	return Outcome{Status: status, Watch: watch}
 }
 
-func (e *Engine) finishStep(st *v1alpha1.StepStatus, phase v1alpha1.StepPhase, msg string, now time.Time) {
+// finishStep stamps a step's outcome with the clock as it is *now*, not as it
+// was when Advance started.
+//
+// One reading for a whole Advance would give every step that ran inside a
+// single reconcile the same start and end — a zero duration for work that
+// plainly took time. Both the step spans and hecate_step_duration_seconds are
+// then measuring nothing.
+func (e *Engine) finishStep(st *v1alpha1.StepStatus, phase v1alpha1.StepPhase, msg string) {
 	st.Phase = phase
 	st.Message = msg
-	st.FinishedAt = &metav1.Time{Time: now}
+	st.FinishedAt = &metav1.Time{Time: e.now()}
 }
 
 // failStep finishes a step that failed, preserving the reason code so the
 // failure is classifiable and not merely readable.
-func (e *Engine) failStep(st *v1alpha1.StepStatus, err error, now time.Time) {
+func (e *Engine) failStep(st *v1alpha1.StepStatus, err error) {
 	st.Reason = ReasonOf(err)
-	e.finishStep(st, v1alpha1.StepFailed, err.Error(), now)
+	e.finishStep(st, v1alpha1.StepFailed, err.Error())
 }
 
-func (e *Engine) fail(status v1alpha1.PassageStatus, msg string, now time.Time) v1alpha1.PassageStatus {
+func (e *Engine) fail(status v1alpha1.PassageStatus, msg string) v1alpha1.PassageStatus {
 	status.Phase = v1alpha1.PassageFailed
 	status.Message = msg
-	status.FinishedAt = &metav1.Time{Time: now}
+	status.FinishedAt = &metav1.Time{Time: e.now()}
 	return status
 }
 
 // abort marks the Passage and every unfinished step as aborted. Steps already
 // finished keep their outcome: they did happen, and the record should say so.
-func (e *Engine) abort(status v1alpha1.PassageStatus, now time.Time) v1alpha1.PassageStatus {
+func (e *Engine) abort(status v1alpha1.PassageStatus) v1alpha1.PassageStatus {
+	now := e.now()
 	for i := range status.Steps {
 		if !status.Steps[i].Phase.Terminal() {
 			status.Steps[i].Phase = v1alpha1.StepAborted

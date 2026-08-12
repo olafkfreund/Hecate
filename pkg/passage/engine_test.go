@@ -540,3 +540,53 @@ func TestBadInterpolationIsTerminal(t *testing.T) {
 		t.Error("the step ran with unresolved configuration")
 	}
 }
+
+// One clock reading for a whole Advance gives every step that ran inside a
+// single reconcile the same start and end — a zero duration for work that
+// plainly took time, which makes both the step spans and
+// hecate_step_duration_seconds measure nothing.
+//
+// A clock that ticks on every reading catches it: with two steps, a Passage
+// whose steps all report zero has been stamped once, not per boundary.
+func TestStepDurationsAreMeasuredNotStamped(t *testing.T) {
+	tick := clock
+	e := newEngine(
+		&scripted{name: "a", results: []StepResult{ok("done")}},
+		&scripted{name: "b", results: []StepResult{ok("done")}},
+	)
+	e.Now = func() time.Time {
+		tick = tick.Add(time.Second)
+		return tick
+	}
+
+	p := &v1alpha1.Passage{
+		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "acme"},
+		Spec: v1alpha1.PassageSpec{
+			Gate:  "production",
+			Steps: []v1alpha1.Step{{Uses: "a"}, {Uses: "b"}},
+		},
+	}
+	out := e.Advance(context.Background(), p, nil, t.TempDir())
+
+	if out.Status.Phase != v1alpha1.PassageSucceeded {
+		t.Fatalf("phase = %s (%s)", out.Status.Phase, out.Status.Message)
+	}
+	for _, st := range out.Status.Steps {
+		if st.StartedAt == nil || st.FinishedAt == nil {
+			t.Fatalf("step %s is missing a timestamp", st.Uses)
+		}
+		if !st.FinishedAt.After(st.StartedAt.Time) {
+			t.Errorf("step %s finished at its own start time (%s) — the clock is "+
+				"read once per Advance rather than per step boundary",
+				st.Uses, st.StartedAt)
+		}
+	}
+	// The second step must start after the first one finished, or the steps are
+	// sharing a reading rather than each taking their own.
+	if !out.Status.Steps[1].StartedAt.After(out.Status.Steps[0].FinishedAt.Time) {
+		t.Error("the second step started before the first finished")
+	}
+	if !out.Status.FinishedAt.After(out.Status.StartedAt.Time) {
+		t.Error("the Passage finished at the instant it started")
+	}
+}

@@ -21,7 +21,7 @@ DEV_TAG        := dev-$(shell date +%s)
 export KUBECONFIG ?= $(CURDIR)/.dev/kubeconfig
 
 .DEFAULT_GOAL := help
-.PHONY: help test vet fmt lint check flake-hash generate build run cluster cluster-rm cluster-load install uninstall e2e secrets-edit secrets-rekey clean
+.PHONY: help test vet fmt lint check flake-hash generate build run cluster cluster-rm cluster-load install uninstall collector e2e secrets-edit secrets-rekey clean
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -145,6 +145,11 @@ install: cluster-load ## Build, push and install the chart into the dev cluster
 
 uninstall: ## Remove the chart from the dev cluster (CRDs are left alone)
 	helm uninstall hecate --namespace hecate-system || true
+
+collector: ## Deploy a span-printing OTel collector into the dev cluster
+	kubectl apply -f dev/collector.yaml
+	kubectl rollout status deploy/otelcol -n hecate-system --timeout=120s
+	@echo "Spans: kubectl logs deploy/otelcol -n hecate-system -f"
 
 e2e: ## Run the end-to-end suite against the dev cluster
 	@./scripts/dev-cluster.sh status >/dev/null || { echo "no dev cluster — run 'make cluster'"; exit 1; }

@@ -1,0 +1,49 @@
+# A minimal OpenTelemetry collector for the dev cluster, printing every span it
+# receives. `make collector`, then install with:
+#
+#   helm upgrade hecate charts/hecate -n hecate-system --reuse-values \
+#     --set otel.enabled=true --set otel.endpoint=http://otelcol.hecate-system:4317
+#
+# Here because a recording SDK in a unit test proves spans are built, not that a
+# real collector accepts them — and the first version of the Passage tracing
+# emitted spans a collector happily accepted with zero duration.
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: otelcol, namespace: hecate-system}
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc: {endpoint: 0.0.0.0:4317}
+          http: {endpoint: 0.0.0.0:4318}
+    exporters:
+      debug: {verbosity: detailed}
+    service:
+      pipelines:
+        traces: {receivers: [otlp], exporters: [debug]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: otelcol, namespace: hecate-system}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: otelcol}}
+  template:
+    metadata: {labels: {app: otelcol}}
+    spec:
+      containers:
+        - name: otelcol
+          image: otel/opentelemetry-collector:0.115.1
+          args: ["--config=/etc/otelcol/config.yaml"]
+          volumeMounts: [{name: cfg, mountPath: /etc/otelcol}]
+      volumes: [{name: cfg, configMap: {name: otelcol}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: otelcol, namespace: hecate-system}
+spec:
+  selector: {app: otelcol}
+  ports:
+    - {name: grpc, port: 4317, targetPort: 4317}
+    - {name: http, port: 4318, targetPort: 4318}

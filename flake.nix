@@ -35,7 +35,7 @@
           # artefacts and untracked scratch never reach the derivation.
           src = self;
 
-          vendorHash = "sha256-RALvhuNvRr+nrRZW0ekei9dh/D/L96JmZqkTbPH+N54=";
+          vendorHash = "sha256-s/R+hnIIc2a/w5Ft2BtOrLFwSXfDbb70UOnHe2h4GcA=";
 
           subPackages = [
             "cmd/hecate-controller"

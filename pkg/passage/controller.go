@@ -111,6 +111,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		passage.Status.Watch = outcome.Watch
 	}
 
+	// Emitted before the status write, because the trace ID has to be persisted
+	// in the same update that records the terminal phase. A Passage is never
+	// reconciled again once terminal, so a second update afterwards is a second
+	// chance to lose it permanently.
+	if passage.Status.Phase.Terminal() {
+		passage.Status.TraceID = recordTrace(&passage)
+	}
+
 	if err := r.Status().Update(ctx, &passage); err != nil {
 		return ctrl.Result{}, err
 	}

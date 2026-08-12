@@ -1,6 +1,9 @@
 {{- if and (gt (int .Values.replicaCount) 1) (not .Values.leaderElection) }}
 {{- fail "replicaCount > 1 requires leaderElection=true, or replicas will race over the same Passages" }}
 {{- end }}
+{{- if and .Values.otel.enabled (not .Values.otel.endpoint) }}
+{{- fail "otel.enabled=true requires otel.endpoint, or the controller starts with tracing silently off" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

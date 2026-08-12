@@ -200,9 +200,11 @@ authoritative and Hecate removable.
   [Fides](https://github.com/olafkfreund/fides) already models one: Bundle → trail,
   image digest → artifact, verification → attestation, approval → segregation of
   duties. "Can this ship to prod?" gets answered by evidence rather than merge rights.
-- **OpenTelemetry-native.** Passage = trace, step = span, trace context propagated
-  through git commit trailers. `traceID` is a first-class API field. DORA metrics fall
-  out of the trace data.
+- **OpenTelemetry-native.** Passage = trace, step = span, and `traceID` is a
+  first-class API field rather than an annotation bolted on later. Point
+  `OTEL_EXPORTER_OTLP_ENDPOINT` at your collector and crossings show up there; every
+  other knob is the standard `OTEL_*` variable, and with none of them set nothing is
+  exported. Trace context in git commit trailers and DORA metrics are still to come.
 - **A UI and CLI worth using.** Next.js 16 + React 19 + Tailwind v4, matching the
   Fides portal. The CLI is the product — every UI action has a CLI equivalent and
   gates return documented exit codes.
@@ -231,6 +233,7 @@ pkg/health/           Checker interface, registry, and the Flux checker.
 pkg/passage/          Step interface, registry, execution engine, Passage controller.
 pkg/passage/steps/    Built-in steps.
 pkg/metrics/          Delivery metrics: crossings, step durations, Gate health.
+pkg/telemetry/        OpenTelemetry wiring, configured entirely by OTEL_*.
 charts/hecate/        Helm chart. CRDs and RBAC are generated, never hand-edited.
 charts/hecate/crds/   Generated CRDs.
 ```
@@ -270,9 +273,10 @@ ok  github.com/olafkfreund/hecate/pkg/gate
 ok  github.com/olafkfreund/hecate/pkg/health
 ok  github.com/olafkfreund/hecate/pkg/passage
 ok  github.com/olafkfreund/hecate/pkg/passage/steps
+ok  github.com/olafkfreund/hecate/pkg/telemetry
 ```
 
-310 tests, no cluster required, ~1s. That is the bar: anything testable without a
+353 tests, no cluster required, ~1s. That is the bar: anything testable without a
 cluster must be. Image resolution is tested against a real in-memory registry rather
 than a mock.
 
@@ -284,7 +288,7 @@ controller-gen — at the versions CI uses.
 ```bash
 nix develop          # or: direnv allow
 
-make test            # 310 tests, ~1s, no cluster
+make test            # 353 tests, ~1s, no cluster
 make cluster         # k3d in Docker, with Flux installed
 make install         # build, push and install the chart into the dev cluster
 make e2e             # drive a Bundle through two Gates on a real API server
