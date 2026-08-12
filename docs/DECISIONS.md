@@ -1267,3 +1267,47 @@ system, which is the exact state a delivery dashboard exists to rule out. One
 `Collectors()` list feeds both registration and the check, in both directions:
 every series the dashboard queries must be registered, and every metric
 registered must appear on the dashboard.
+
+## D44 — Reconcile on request is Flux's annotation, not a webhook server of our own
+
+**Decision:** a Beacon or Gate reconciles immediately when annotated with
+`reconcile.fluxcd.io/requestedAt`, and echoes the value in
+`status.lastHandledReconcileAt`. Hecate ships no HTTP receiver.
+
+The obvious build for #102 was a webhook endpoint with OIDC verification,
+following Flux v2.9's Receivers. Before building it we checked whether Flux's
+own Receiver could simply name a Beacon — and it cannot: `spec.resources[].kind`
+is a **closed enum** of Flux kinds, confirmed against the installed CRD rather
+than assumed. So reuse was genuinely unavailable.
+
+What was available is the observation that **the Kubernetes API server is
+already an authenticated, audited, RBAC-controlled webhook endpoint.** A CI job
+that has just pushed an image can annotate the Beacon in the same step it
+authenticated for anyway. That gets discovery latency from minutes to seconds —
+the whole point of #102 — with no new listener, no JWKS handling, no shared
+secret, no ingress, and no second authorisation model to get wrong.
+
+**We use Flux's annotation key rather than minting `reconcile.hecate.dev/`.**
+It is the identical operation on an adjacent object, and a second key would mean
+users learning a parallel convention for it. Following Flux where Flux has
+already settled something is the stated strategy, not just here.
+
+**Nothing triggers the reconcile — the API server does.** A Beacon polls on
+every reconcile with no interval gate of its own, and the controller's watch has
+no predicate, so an annotation change already wakes it. What this decision adds
+is the *acknowledgement*: without `lastHandledReconcileAt` a caller knows only
+that some reconcile happened, so a CI job has nothing to wait on and no way to
+tell its own request from another's.
+
+**The behaviour is one plausible refactor from being lost.** Adding
+`GenerationChangedPredicate` to the watch is a routine controller optimisation
+and would silently discard every annotation-only change. That is why the guard
+is an e2e test against a real API server rather than a unit test: a unit test
+calling Reconcile directly proves the acknowledgement and nothing about the
+trigger. The test uses a one-hour Beacon interval, so it can only pass if the
+annotation woke it — and it does fail when the predicate is added.
+
+**What this does not cover:** a registry or forge posting a webhook directly,
+with no CI job and no cluster credentials. That needs a real receiver, and it is
+a much smaller audience than "CI that just built the image". Left open on #102
+rather than built speculatively.

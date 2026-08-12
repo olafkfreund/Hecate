@@ -144,6 +144,33 @@ There is a fourth, at the framework level: a health check naming an **unregister
 checker** is reported as Unknown rather than skipped. Silently ignoring a check the
 user asked for makes a Gate look healthier than it is.
 
+## Reconciling on demand
+
+A Beacon polls on its interval, and a Gate re-evaluates on its own. Either can
+be asked to act now:
+
+```console
+$ kubectl annotate beacon/app reconcile.fluxcd.io/requestedAt="$(date +%s)" --overwrite
+```
+
+This is Flux's annotation, deliberately: the same operation on an adjacent
+object should not need a second convention. The value is opaque and comes back
+in `status.lastHandledReconcileAt`, so a caller can wait for its own request:
+
+```console
+$ kubectl wait beacon/app --for=jsonpath='{.status.lastHandledReconcileAt}'=1755000000
+```
+
+The intended caller is CI. A job that has just pushed an image can poke the
+Beacon in the same step it already authenticated for, which takes discovery
+latency from minutes to seconds — most of the perceived speed difference against
+a promotion script.
+
+**There is no webhook server**, and that is the point: the API server is already
+an authenticated, audited, RBAC-controlled endpoint, so a second one would be a
+second authorisation model to get wrong. A registry posting a webhook with no
+cluster credentials is not covered; see [D44](DECISIONS.md).
+
 ## Flux compatibility surface
 
 Everything Hecate depends on from Flux, in one place, so the blast radius of any Flux

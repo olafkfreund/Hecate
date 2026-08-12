@@ -304,3 +304,42 @@ func contains(s, sub string) bool {
 	}
 	return false
 }
+
+// A Beacon polls on every reconcile with no interval gate, so an annotation
+// change is already enough to trigger an immediate poll. What makes that a
+// contract rather than an accident is the acknowledgement: without it a caller
+// knows only that *a* reconcile happened, and a CI job asking for an immediate
+// poll has nothing to wait for.
+func TestBeaconAcknowledgesAReconcileRequest(t *testing.T) {
+	repo := newTestRepo(t, "acme/podinfo", "6.1.0")
+	b := beaconWith(imageWatch(repo.Repo))
+	b.Annotations = map[string]string{v1alpha1.AnnotationReconcile: "1755000000"}
+	r, c, _ := newReconciler(t, b)
+
+	reconcile(t, r, b)
+
+	got := getBeacon(t, c)
+	if got.Status.LastHandledReconcileAt != "1755000000" {
+		t.Errorf("lastHandledReconcileAt = %q, want the caller's own token echoed back",
+			got.Status.LastHandledReconcileAt)
+	}
+	// The poll itself must have happened, or the acknowledgement is a lie.
+	if got.Status.LastPolled == nil {
+		t.Error("acknowledged a reconcile request without polling")
+	}
+}
+
+// A suspended Beacon has nothing to poll, but leaving the request unhandled
+// for ever would make a caller wait on something that is never coming.
+func TestSuspendedBeaconStillAcknowledges(t *testing.T) {
+	b := beaconWith(imageWatch("example.invalid/acme/podinfo"))
+	b.Spec.Suspend = true
+	b.Annotations = map[string]string{v1alpha1.AnnotationReconcile: "abc"}
+	r, c, _ := newReconciler(t, b)
+
+	reconcile(t, r, b)
+
+	if got := getBeacon(t, c).Status.LastHandledReconcileAt; got != "abc" {
+		t.Errorf("lastHandledReconcileAt = %q, want %q even while suspended", got, "abc")
+	}
+}

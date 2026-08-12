@@ -228,6 +228,17 @@ type BeaconStatus struct {
 	//
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	// LastHandledReconcileAt echoes the value of the
+	// reconcile.fluxcd.io/requestedAt annotation from the last reconcile that
+	// acted on it.
+	//
+	// Without this a caller cannot tell whether its request landed, only that
+	// *a* reconcile happened — so a CI job asking for an immediate poll has
+	// nothing to wait for. Echoing the caller's own opaque token also
+	// distinguishes it from someone else's request (D44).
+	//
+	// +optional
+	LastHandledReconcileAt string `json:"lastHandledReconcileAt,omitempty"`
 	// LastPolled is when the sources were last checked.
 	//
 	// +optional

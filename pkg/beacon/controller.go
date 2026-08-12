@@ -62,6 +62,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	// Acknowledged before any early return, so a suspended Beacon does not leave
+	// a request looking unhandled for ever. A Beacon polls on every reconcile
+	// with no interval gate of its own, so the annotation change is all the
+	// trigger needed — this records that it landed (D44).
+	beacon.Status.LastHandledReconcileAt = v1alpha1.ReconcileRequestedAt(beacon.Annotations)
+
 	if beacon.Spec.Suspend {
 		// Nothing to poll, and no requeue: a spec change wakes us up. Reported
 		// explicitly so "why has nothing appeared?" has an answer.

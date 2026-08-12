@@ -182,3 +182,24 @@ const (
 	// ConditionStalled means the controller has stopped retrying.
 	ConditionStalled = "Stalled"
 )
+
+// AnnotationReconcile asks a Beacon or Gate to reconcile immediately, rather
+// than at the end of its interval:
+//
+//	kubectl annotate beacon/app reconcile.fluxcd.io/requestedAt="$(date +%s)" --overwrite
+//
+// **This is Flux's annotation, on purpose.** It is the same operation people
+// already perform on Flux objects, and asking them to learn a second key for it
+// would be a parallel convention with nothing to recommend it — the strategy is
+// to follow Flux rather than invent alongside (D44). Tooling that already pokes
+// Flux resources this way works on a Beacon unchanged.
+//
+// The value is opaque and echoed back in `status.lastHandledReconcileAt`, so a
+// caller can tell its own request apart from someone else's.
+const AnnotationReconcile = "reconcile.fluxcd.io/requestedAt"
+
+// ReconcileRequestedAt reads the reconcile-request token from an object, or ""
+// when none was set.
+func ReconcileRequestedAt(annotations map[string]string) string {
+	return annotations[AnnotationReconcile]
+}

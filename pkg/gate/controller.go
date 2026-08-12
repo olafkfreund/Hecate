@@ -85,6 +85,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	gate.Status.ObservedGeneration = gate.Generation
+	gate.Status.LastHandledReconcileAt = v1alpha1.ReconcileRequestedAt(gate.Annotations)
 
 	if gate.Spec.Suspend {
 		gate.Status.Eligible = nil

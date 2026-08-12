@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -285,4 +286,90 @@ func TestDeployedControllerCrossesAGate(t *testing.T) {
 		}
 		return gate.Status.Health != nil && gate.Status.Health.Status == v1alpha1.HealthHealthy
 	})
+}
+
+// Discovery latency is most of the perceived speed difference against a
+// CI-based promotion script (#102). A Beacon's interval is minutes; a CI job
+// that has just pushed an image can ask for a poll now.
+//
+// This has to be an e2e test rather than a unit test, because the whole
+// mechanism is the API server's watch: annotating the object is what wakes the
+// controller. A unit test calling Reconcile directly proves the acknowledgement
+// and nothing about the trigger — and the trigger is one plausible refactor
+// away from being lost, since adding GenerationChangedPredicate to the Beacon's
+// watch would silently discard every annotation-only change.
+func TestAnnotationTriggersAnImmediatePoll(t *testing.T) {
+	ctx := context.Background()
+	c := newClient(t)
+	requireHecateInstalled(t, c)
+	freshNamespace(t, c)
+
+	const app = "e2e/poke"
+	publishImages(t, app, "6.0.0")
+
+	// An interval long enough that a scheduled poll cannot be mistaken for a
+	// triggered one: if this passes inside a minute, the annotation did it.
+	beacon := &v1alpha1.Beacon{
+		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: namespace},
+		Spec: v1alpha1.BeaconSpec{
+			Interval: metav1.Duration{Duration: time.Hour},
+			Watch: []v1alpha1.WatchSource{{Image: &v1alpha1.ImageWatch{
+				Repo: registryFromCluster + "/" + app, Constraint: "^6.0.0", Insecure: true,
+			}}},
+		},
+	}
+	mustCreate(t, c, beacon)
+
+	// Let the creation-triggered poll settle first, so what follows can only be
+	// the annotation's doing.
+	waitFor(t, 60*time.Second, "the Beacon to poll once", func() bool {
+		var b v1alpha1.Beacon
+		if err := c.Get(ctx, key(beacon), &b); err != nil {
+			return false
+		}
+		return b.Status.LastPolled != nil
+	})
+
+	var before v1alpha1.Beacon
+	if err := c.Get(ctx, key(beacon), &before); err != nil {
+		t.Fatal(err)
+	}
+
+	token := fmt.Sprintf("e2e-%d", time.Now().UnixNano())
+	patched := before.DeepCopy()
+	if patched.Annotations == nil {
+		patched.Annotations = map[string]string{}
+	}
+	patched.Annotations[v1alpha1.AnnotationReconcile] = token
+	if err := c.Patch(ctx, patched, client.MergeFrom(&before)); err != nil {
+		t.Fatal(err)
+	}
+
+	waitFor(t, 60*time.Second, "the Beacon to acknowledge the request", func() bool {
+		var b v1alpha1.Beacon
+		if err := c.Get(ctx, key(beacon), &b); err != nil {
+			return false
+		}
+		return b.Status.LastHandledReconcileAt == token
+	}, func() string {
+		var b v1alpha1.Beacon
+		_ = c.Get(ctx, key(beacon), &b)
+		return fmt.Sprintf("  wanted token %q, status says %q; lastPolled %v",
+			token, b.Status.LastHandledReconcileAt, b.Status.LastPolled)
+	})
+
+	// Acknowledged *and* actually polled: an echo without a poll would be a
+	// controller reporting work it did not do.
+	var after v1alpha1.Beacon
+	if err := c.Get(ctx, key(beacon), &after); err != nil {
+		t.Fatal(err)
+	}
+	if !after.Status.LastPolled.Time.After(before.Status.LastPolled.Time) {
+		t.Errorf("lastPolled did not move (%s -> %s): the request was acknowledged "+
+			"without re-polling", before.Status.LastPolled, after.Status.LastPolled)
+	}
+}
+
+func key(o client.Object) types.NamespacedName {
+	return types.NamespacedName{Name: o.GetName(), Namespace: o.GetNamespace()}
 }
