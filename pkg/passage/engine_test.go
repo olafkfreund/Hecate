@@ -3,6 +3,7 @@ package passage
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -594,5 +595,234 @@ func TestStepDurationsAreMeasuredNotStamped(t *testing.T) {
 	}
 	if !out.Status.FinishedAt.After(out.Status.StartedAt.Time) {
 		t.Error("the Passage finished at the instant it started")
+	}
+}
+
+// A crossing that cannot report its own failure can only ever report success,
+// which makes any outcome-reporting step worse than none. `if: ${{ failed }}`
+// is how a step says it wants to run precisely when something went wrong.
+func TestStepsCanRunAfterAFailure(t *testing.T) {
+	var reported string
+	e := newEngine(
+		&scripted{name: "deploy", errs: []error{FailTerminal("Boom", "the cluster said no")},
+			results: []StepResult{{Phase: v1alpha1.StepFailed}}},
+		&scripted{name: "unreachable", results: []StepResult{ok("should not run")}},
+		&runnerFunc{name: "report", fn: func(_ context.Context, sc *StepContext) (StepResult, error) {
+			reported = "ran"
+			return ok("told the world"), nil
+		}},
+	)
+
+	p := &v1alpha1.Passage{
+		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "acme"},
+		Spec: v1alpha1.PassageSpec{Gate: "production", Steps: []v1alpha1.Step{
+			{Uses: "deploy"},
+			{Uses: "unreachable"},
+			{Uses: "report", If: "failed"},
+		}},
+	}
+	out := e.Advance(context.Background(), p, nil, t.TempDir())
+
+	if out.Status.Phase != v1alpha1.PassageFailed {
+		t.Fatalf("phase = %s, want Failed", out.Status.Phase)
+	}
+	// The cause, not whatever the reporting step said afterwards.
+	if !strings.Contains(out.Status.Message, "the cluster said no") {
+		t.Errorf("message = %q, want the first failure", out.Status.Message)
+	}
+	if reported != "ran" {
+		t.Error("the step asking to run after a failure did not run")
+	}
+
+	steps := out.Status.Steps
+	if steps[0].Phase != v1alpha1.StepFailed {
+		t.Errorf("deploy = %s, want Failed", steps[0].Phase)
+	}
+	// Skipped, not left Pending: Pending reads as "about to run".
+	if steps[1].Phase != v1alpha1.StepSkipped {
+		t.Errorf("unreachable = %s, want Skipped", steps[1].Phase)
+	}
+	if !strings.Contains(steps[1].Message, "already failed") {
+		t.Errorf("unreachable message = %q, want it to say why", steps[1].Message)
+	}
+	if steps[2].Phase != v1alpha1.StepSucceeded {
+		t.Errorf("report = %s, want Succeeded (%s)", steps[2].Phase, steps[2].Message)
+	}
+	// currentStep answers "where did this get to", so it must name the step
+	// that broke rather than the last one the loop touched.
+	if out.Status.CurrentStep != 0 {
+		t.Errorf("currentStep = %d, want 0 — the step that failed", out.Status.CurrentStep)
+	}
+}
+
+// `always` is true on both paths, which is the only way to say "report the
+// outcome, whatever it was".
+func TestAlwaysRunsOnBothPaths(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		first     *scripted
+		wantPhase v1alpha1.PassagePhase
+	}{
+		{"after success", &scripted{name: "deploy", results: []StepResult{ok("done")}},
+			v1alpha1.PassageSucceeded},
+		{"after failure", &scripted{name: "deploy",
+			errs:    []error{FailTerminal("Boom", "no")},
+			results: []StepResult{{Phase: v1alpha1.StepFailed}}},
+			v1alpha1.PassageFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ran := false
+			e := newEngine(tc.first, &runnerFunc{name: "report", fn: func(context.Context, *StepContext) (StepResult, error) {
+				ran = true
+				return ok("reported"), nil
+			}})
+			p := &v1alpha1.Passage{
+				ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "acme"},
+				Spec: v1alpha1.PassageSpec{Gate: "production", Steps: []v1alpha1.Step{
+					{Uses: "deploy"},
+					{Uses: "report", If: "always"},
+				}},
+			}
+			out := e.Advance(context.Background(), p, nil, t.TempDir())
+
+			if out.Status.Phase != tc.wantPhase {
+				t.Errorf("phase = %s, want %s", out.Status.Phase, tc.wantPhase)
+			}
+			if !ran {
+				t.Error("an always step did not run")
+			}
+		})
+	}
+}
+
+// On the happy path `if: ${{ failed }}` must be false, or every crossing would
+// report itself broken.
+func TestFailedIsFalseWhenNothingFailed(t *testing.T) {
+	ran := false
+	e := newEngine(
+		&scripted{name: "deploy", results: []StepResult{ok("done")}},
+		&runnerFunc{name: "report", fn: func(context.Context, *StepContext) (StepResult, error) {
+			ran = true
+			return ok(""), nil
+		}},
+	)
+	p := &v1alpha1.Passage{
+		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "acme"},
+		Spec: v1alpha1.PassageSpec{Gate: "production", Steps: []v1alpha1.Step{
+			{Uses: "deploy"},
+			{Uses: "report", If: "failed"},
+		}},
+	}
+	out := e.Advance(context.Background(), p, nil, t.TempDir())
+
+	if out.Status.Phase != v1alpha1.PassageSucceeded {
+		t.Fatalf("phase = %s, want Succeeded", out.Status.Phase)
+	}
+	if ran {
+		t.Error("a failure-only step ran on a crossing that succeeded")
+	}
+	if out.Status.Steps[1].Phase != v1alpha1.StepSkipped {
+		t.Errorf("report = %s, want Skipped", out.Status.Steps[1].Phase)
+	}
+}
+
+// The Passage is terminal at the end of this call, so there is no later
+// reconcile for a waiting step to be resumed in. Letting one return Running
+// would hang it for ever with nothing coming back.
+func TestAStepAfterAFailureCannotWait(t *testing.T) {
+	e := newEngine(
+		&scripted{name: "deploy", errs: []error{FailTerminal("Boom", "no")},
+			results: []StepResult{{Phase: v1alpha1.StepFailed}}},
+		&scripted{name: "waiter", results: []StepResult{
+			{Phase: v1alpha1.StepRunning, Message: "hold on", RetryAfter: time.Minute},
+		}},
+	)
+	p := &v1alpha1.Passage{
+		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "acme"},
+		Spec: v1alpha1.PassageSpec{Gate: "production", Steps: []v1alpha1.Step{
+			{Uses: "deploy"},
+			{Uses: "waiter", If: "always"},
+		}},
+	}
+	out := e.Advance(context.Background(), p, nil, t.TempDir())
+
+	if out.RequeueAfter != 0 {
+		t.Errorf("requeue = %s, want none: a failed Passage is never advanced again",
+			out.RequeueAfter)
+	}
+	if out.Status.Phase != v1alpha1.PassageFailed {
+		t.Errorf("phase = %s, want Failed", out.Status.Phase)
+	}
+	if got := out.Status.Steps[1]; got.Phase != v1alpha1.StepFailed ||
+		!strings.Contains(got.Message, "cannot wait") {
+		t.Errorf("waiter = %s %q, want Failed saying it cannot wait", got.Phase, got.Message)
+	}
+}
+
+// A step whose own condition is broken fails the Passage — but the ones after
+// it that asked to run anyway still get their chance, or a typo in one `if:`
+// would silently disable the reporting for the whole crossing.
+func TestABrokenConditionStillLetsAlwaysStepsRun(t *testing.T) {
+	ran := false
+	e := newEngine(
+		&scripted{name: "deploy", results: []StepResult{ok("done")}},
+		&runnerFunc{name: "report", fn: func(context.Context, *StepContext) (StepResult, error) {
+			ran = true
+			return ok(""), nil
+		}},
+	)
+	p := &v1alpha1.Passage{
+		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "acme"},
+		Spec: v1alpha1.PassageSpec{Gate: "production", Steps: []v1alpha1.Step{
+			{Uses: "deploy", If: "this is not an expression"},
+			{Uses: "report", If: "always"},
+		}},
+	}
+	out := e.Advance(context.Background(), p, nil, t.TempDir())
+
+	if out.Status.Phase != v1alpha1.PassageFailed {
+		t.Fatalf("phase = %s, want Failed", out.Status.Phase)
+	}
+	if out.Status.Steps[0].Reason != ReasonBadExpression {
+		t.Errorf("reason = %q, want %s", out.Status.Steps[0].Reason, ReasonBadExpression)
+	}
+	if !ran {
+		t.Error("an always step did not run after a broken condition")
+	}
+}
+
+// When the step reporting a failure fails too — an expired token, say — the
+// Passage must still say what actually went wrong. Reporting the reporter's
+// problem would leave the operator debugging the symptom.
+func TestTheFirstFailureIsTheOneReported(t *testing.T) {
+	e := newEngine(
+		&scripted{name: "deploy", errs: []error{FailTerminal("Boom", "the cluster said no")},
+			results: []StepResult{{Phase: v1alpha1.StepFailed}}},
+		&scripted{name: "report", errs: []error{FailTerminal("Unauthorized", "401 from the git host")},
+			results: []StepResult{{Phase: v1alpha1.StepFailed}}},
+	)
+	p := &v1alpha1.Passage{
+		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "acme"},
+		Spec: v1alpha1.PassageSpec{Gate: "production", Steps: []v1alpha1.Step{
+			{Uses: "deploy"},
+			{Uses: "report", If: "always"},
+		}},
+	}
+	out := e.Advance(context.Background(), p, nil, t.TempDir())
+
+	if out.Status.Phase != v1alpha1.PassageFailed {
+		t.Fatalf("phase = %s, want Failed", out.Status.Phase)
+	}
+	if !strings.Contains(out.Status.Message, "the cluster said no") {
+		t.Errorf("message = %q, want the crossing's own failure rather than the "+
+			"reporting step's", out.Status.Message)
+	}
+	// Both are still recorded — the reporter's failure is real and worth seeing,
+	// it is just not the headline.
+	if out.Status.Steps[1].Phase != v1alpha1.StepFailed {
+		t.Errorf("report = %s, want Failed", out.Status.Steps[1].Phase)
+	}
+	if !strings.Contains(out.Status.Steps[1].Message, "401") {
+		t.Errorf("report message = %q, want its own error", out.Status.Steps[1].Message)
 	}
 }

@@ -62,6 +62,53 @@ An SSH key wins when both are present. `known_hosts` is verified when supplied.
 
 **Reasons:** `GitAuthFailed`, `GitUnreachable`, `GitFailed`, `InvalidConfig`.
 
+## Running a step after a failure
+
+A step's `if:` is a bare expression, evaluated before the step runs. Two
+variables exist for the outcome of the crossing so far:
+
+| | |
+|---|---|
+| `failed` | an earlier step has already failed the Passage |
+| `always` | true — the word for "run this whatever happened" |
+
+```yaml
+    steps:
+      - uses: git-clone
+        with: { repo: https://github.com/acme/fleet.git }
+      - uses: set-image
+        with: { path: repo/apps/production, image: ghcr.io/acme/podinfo }
+      - uses: git-commit
+        with: { message: "promote podinfo" }
+      - uses: git-push
+      - uses: flux-wait
+        with:
+          resources: [{ kind: Kustomization, name: podinfo, namespace: flux-system }]
+
+      - uses: http                    # runs whether or not the crossing worked
+        if: always
+        with:
+          url: https://example.com/hooks/deploys
+          method: POST
+```
+
+Once a step has failed the Passage, the remaining steps **without** an `if:` are
+recorded as `Skipped` — the happy path is over. Steps with an `if:` are still
+evaluated, so `if: failed` and `if: always` both get their turn. That is what
+makes it possible for a crossing to report its own outcome; without it, anything
+reporting a result could only ever report success.
+
+Two rules worth knowing:
+
+- **A step that runs after a failure cannot wait.** The Passage is terminal at
+  the end of that reconcile, so there is no later one to resume in. A step that
+  returns `Running` there is recorded as `Failed` saying so.
+- **The first failure is the one the Passage reports.** If the reporting step
+  fails too — an expired token, say — its error is recorded against that step,
+  but `status.message` still names the failure that actually broke the crossing.
+
+See [D46](DECISIONS.md).
+
 ## git-commit
 
 Stages everything in the checkout and commits it.

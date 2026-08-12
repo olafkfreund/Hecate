@@ -29,6 +29,13 @@ type Env struct {
 	Steps map[string]map[string]any
 	// Vars are the Gate's declared variables.
 	Vars map[string]string
+	// Failed reports that an earlier step has already failed the Passage.
+	//
+	// It exists so a step can say `if: ${{ failed }}` and run precisely when
+	// something went wrong — reporting the outcome, recording evidence, tidying
+	// up. Without it the only steps that can ever run are the ones on the happy
+	// path, and anything that reports a result could only ever report success.
+	Failed bool
 	// Context about the crossing itself.
 	Gate      string
 	Passage   string
@@ -57,6 +64,11 @@ func (e Env) build() map[string]any {
 		"actor":     e.Actor,
 		"namespace": e.Namespace,
 		"bundle":    e.bundleEnv(),
+		"failed":    e.Failed,
+		// `always` is simply true. It reads as intent where `if: ${{ true }}`
+		// reads as a mistake, and it is the word people already know from CI
+		// for "run this whatever happened".
+		"always": true,
 	}
 }
 

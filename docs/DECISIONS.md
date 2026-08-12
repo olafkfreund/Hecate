@@ -1360,3 +1360,53 @@ artifact is still reported.
 **Organised by Flux minor**, with the test discovering the directories itself,
 so #91 adds v2.7 and v2.8 without touching code. A contract change in a new Flux
 then fails a unit test in milliseconds rather than arriving as a support ticket.
+
+## D46 — A failure ends the happy path, not the Passage
+
+**Decision:** when a step fails fatally, the engine no longer returns
+immediately. It marks the Passage as failing and carries on through the
+remaining steps, running the ones whose `if:` still evaluates true and recording
+the rest as `Skipped`. Two variables exist for the purpose: `failed`, and
+`always`, which is simply true.
+
+The old behaviour made a whole class of step impossible. Anything that reports
+the outcome of a crossing — a commit status, a webhook, an attestation of what
+happened — has to run after the step that determines the outcome, and could
+therefore only ever run when the outcome was good. **A status check that can
+only be green is worse than no status check**, because it looks like coverage.
+
+**No new API field.** `if:` already exists and already takes an expression; two
+variables in its environment is the whole mechanism. A `Step.Always bool`
+alongside `if:` would have been a second way to express the same thing, with a
+combination rule to define and explain.
+
+**`always` is a variable that is always true.** Slightly odd stated baldly, but
+`if: always` reads as intent where `if: "true"` reads as a mistake, and it is
+the word people already know from CI for this. `failed` alone cannot express
+"run either way".
+
+**A step that runs after a failure cannot wait.** The Passage is terminal at the
+end of that reconcile, so a `Running` result has no later reconcile to be
+resumed in — honouring it would hang the step for ever with nothing coming back.
+It is recorded as `Failed` saying exactly that. This also keeps the failure
+state a **local variable** rather than something persisted: a failed Passage is
+terminal, and the controller never advances a terminal Passage again, so the
+state cannot outlive the call and there is nothing to resume.
+
+**The first failure is the one reported.** A later always-step that fails has
+its own error recorded against it, but `status.message` keeps the failure that
+actually broke the crossing. Overwriting would leave the Passage explaining the
+symptom — "401 from the git host" — while the cause went unmentioned.
+
+**`currentStep` freezes at the failure.** The loop walks past it to run what
+asked to run, but the field answers "where did this get to", and marching it to
+the end would point at a step that was skipped rather than the one that broke.
+A failed Passage never resumes, so nothing needs it as a cursor.
+
+**Skipped rather than left Pending.** A step the engine has decided not to run
+is recorded as skipped with the reason, because `Pending` reads as "about to
+run" — and a Passage whose status does not distinguish the two is one an
+operator has to reason about from the phase alone.
+
+This is the prerequisite for commit status on #100, which is why it landed
+first and separately: the provider work is small and the semantics here are not.

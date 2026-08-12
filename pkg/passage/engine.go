@@ -94,6 +94,17 @@ func (e *Engine) Advance(
 	outputs := collectOutputs(status.Steps)
 	var watch []v1alpha1.HealthCheck
 
+	// Once a step has failed fatally the Passage is going to fail — but the
+	// remaining steps are not simply abandoned. A step that asked to run anyway
+	// still runs, which is what lets a crossing report its own outcome, record
+	// evidence of a failure, or tidy up after itself. Everything else is
+	// Skipped (D46).
+	//
+	// This is a local rather than persisted state because it cannot outlive the
+	// call: a Passage that has failed is terminal, and the controller never
+	// calls Advance on a terminal Passage again. There is nothing to resume.
+	failed, failure := false, ""
+
 	vars := make(map[string]string, len(p.Spec.Vars))
 	for _, v := range p.Spec.Vars {
 		vars[v.Name] = v.Value
@@ -102,9 +113,47 @@ func (e *Engine) Advance(
 	for i := int(status.CurrentStep); i < len(p.Spec.Steps); i++ {
 		step := p.Spec.Steps[i]
 		st := &status.Steps[i]
-		status.CurrentStep = int32(i)
+		if !failed {
+			// Frozen at the first failure. The loop carries on past it to run
+			// whatever asked to run anyway, but `currentStep` is what a reader
+			// consults for "where did this get to", and marching it to the end
+			// would point at a step that was skipped rather than at the one
+			// that broke. A failed Passage never resumes, so nothing needs it
+			// as a cursor.
+			status.CurrentStep = int32(i)
+		}
 
 		if st.Phase.Terminal() {
+			continue
+		}
+
+		// Rebuilt per step, because `steps.<alias>` grows as earlier steps
+		// finish — an env computed once at the top would hide every output.
+		env := expr.Env{
+			Bundle: bundle, Steps: outputs, Vars: vars, Failed: failed,
+			Gate: p.Spec.Gate, Passage: p.Name, Actor: p.Spec.Actor, Namespace: p.Namespace,
+		}
+
+		// A step gated off is recorded as Skipped, never silently omitted: a
+		// Passage whose status does not mention a step is indistinguishable
+		// from one where the step was deleted.
+		if step.If != "" {
+			run, err := expr.Bool(step.If, env)
+			switch {
+			case err != nil:
+				st.Reason = ReasonBadExpression
+				e.finishStep(st, v1alpha1.StepFailed, fmt.Sprintf("condition: %s", err))
+				failed, failure = true, firstOf(failure, st.Message)
+				continue
+			case !run:
+				e.finishStep(st, v1alpha1.StepSkipped, fmt.Sprintf("condition %q was false", step.If))
+				continue
+			}
+		} else if failed {
+			// No condition at all means the happy path, and the happy path is
+			// over. Saying so beats leaving the step Pending, which reads as
+			// "about to run".
+			e.finishStep(st, v1alpha1.StepSkipped, "the Passage had already failed")
 			continue
 		}
 
@@ -114,7 +163,8 @@ func (e *Engine) Advance(
 			st.Reason = ReasonUnregisteredStep
 			e.finishStep(st, v1alpha1.StepFailed, fmt.Sprintf(
 				"no step named %q is registered (available: %v)", step.Uses, e.Registry.Names()))
-			return Outcome{Status: e.fail(status, st.Message), Watch: watch}
+			failed, failure = true, firstOf(failure, st.Message)
+			continue
 		}
 
 		if st.StartedAt == nil {
@@ -122,29 +172,6 @@ func (e *Engine) Advance(
 		}
 		st.Phase = v1alpha1.StepRunning
 		st.Attempts++
-
-		// Rebuilt per step, because `steps.<alias>` grows as earlier steps
-		// finish — an env computed once at the top would hide every output.
-		env := expr.Env{
-			Bundle: bundle, Steps: outputs, Vars: vars,
-			Gate: p.Spec.Gate, Passage: p.Name, Actor: p.Spec.Actor, Namespace: p.Namespace,
-		}
-
-		// A step gated off is recorded as Skipped, never silently omitted: a
-		// Passage whose status does not mention a step is indistinguishable
-		// from one where the step was deleted.
-		if step.If != "" {
-			run, err := expr.Bool(step.If, env)
-			if err != nil {
-				st.Reason = ReasonBadExpression
-				e.finishStep(st, v1alpha1.StepFailed, fmt.Sprintf("condition: %s", err))
-				return Outcome{Status: e.fail(status, st.Message), Watch: watch}
-			}
-			if !run {
-				e.finishStep(st, v1alpha1.StepSkipped, fmt.Sprintf("condition %q was false", step.If))
-				continue
-			}
-		}
 
 		var cfg json.RawMessage
 		if step.With != nil {
@@ -154,7 +181,8 @@ func (e *Engine) Advance(
 			if err != nil {
 				st.Reason = ReasonBadExpression
 				e.finishStep(st, v1alpha1.StepFailed, err.Error())
-				return Outcome{Status: e.fail(status, st.Message), Watch: watch}
+				failed, failure = true, firstOf(failure, st.Message)
+				continue
 			}
 			cfg = interpolated
 		}
@@ -192,18 +220,24 @@ func (e *Engine) Advance(
 		}
 
 		switch {
-		case err != nil && (IsTerminal(err) || !step.ContinueOnError):
+		case err != nil:
 			e.failStep(st, err)
-			if step.ContinueOnError && !IsTerminal(err) {
-				continue
+			// A terminal error is fatal whatever the step asked for: it is the
+			// engine saying this will not come right by trying again.
+			if IsTerminal(err) || !step.ContinueOnError {
+				failed, failure = true, firstOf(failure, err.Error())
 			}
-			return Outcome{Status: e.fail(status, err.Error()), Watch: watch}
-
-		case err != nil: // non-terminal, and the step is allowed to fail
-			e.failStep(st, err)
-			continue
 
 		case res.Phase == v1alpha1.StepRunning:
+			if failed {
+				// Waiting is not available after a failure: the Passage is
+				// terminal at the end of this call, so there is no later
+				// reconcile to come back in. A step that runs after a failure
+				// must finish in one invocation (D46).
+				e.finishStep(st, v1alpha1.StepFailed,
+					"a step that runs after a failure cannot wait: "+res.Message)
+				break
+			}
 			// Still waiting. Persist progress and come back.
 			st.Message = res.Message
 			retry := res.RetryAfter
@@ -221,9 +255,13 @@ func (e *Engine) Advance(
 			}
 			e.finishStep(st, phase, res.Message)
 			if phase == v1alpha1.StepFailed && !step.ContinueOnError {
-				return Outcome{Status: e.fail(status, res.Message), Watch: watch}
+				failed, failure = true, firstOf(failure, res.Message)
 			}
 		}
+	}
+
+	if failed {
+		return Outcome{Status: e.fail(status, failure), Watch: watch}
 	}
 
 	status.Phase = v1alpha1.PassageSucceeded
@@ -239,6 +277,18 @@ func (e *Engine) Advance(
 // single reconcile the same start and end — a zero duration for work that
 // plainly took time. Both the step spans and hecate_step_duration_seconds are
 // then measuring nothing.
+// firstOf keeps the earliest failure message.
+//
+// The first fatal failure is the cause; anything a later always-step reports is
+// a consequence of it, and overwriting would leave the Passage explaining the
+// symptom rather than the problem.
+func firstOf(existing, next string) string {
+	if existing != "" {
+		return existing
+	}
+	return next
+}
+
 func (e *Engine) finishStep(st *v1alpha1.StepStatus, phase v1alpha1.StepPhase, msg string) {
 	st.Phase = phase
 	st.Message = msg
