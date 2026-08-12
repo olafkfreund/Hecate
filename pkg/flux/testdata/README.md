@@ -16,13 +16,28 @@ sentinel we expected.
 ## What is here
 
 `v2.7`, `v2.8` and `v2.9` — the three minors Flux itself supports, matching the
-e2e matrix. Each has GitRepository, OCIRepository and HelmRepository, healthy
-and failing, captured from the **same** sources so the three are comparable: a
-diff between versions shows a contract change and nothing else.
+e2e matrix. Each holds the same nine files, captured from the **same** sources
+so the three are comparable: a diff between versions shows a contract change and
+nothing else.
 
-All three agree on every field Hecate reads, including the `observedGeneration:
--1` sentinel — so the D45 fix is right across the whole supported range, not
-only on the version that exposed it.
+| | healthy | failing |
+|---|---|---|
+| GitRepository | ✓ | ✓ |
+| OCIRepository | | ✓ |
+| HelmRepository | ✓ | ✓ |
+| Kustomization | ✓ | ✓ |
+| HelmRelease | ✓ | ✓ |
+
+All three versions agree on every field Hecate reads, including the
+`observedGeneration: -1` sentinel — and the workload kinds carry it too, so D45
+is a rule about Flux rather than a quirk of GitRepository.
+
+**Each kind reports its revision somewhere different**, and *where* is the
+contract: a GitRepository under `status.artifact.revision`, a Kustomization
+under `status.lastAppliedRevision`, and a HelmRelease under
+`status.lastAttemptedRevision` — it has no `lastAppliedRevision` at all. A
+release moving one of those is the change that would otherwise surface as a
+`flux-wait` hanging to its deadline on a resource that converged ages ago.
 
 ## Adding a version
 

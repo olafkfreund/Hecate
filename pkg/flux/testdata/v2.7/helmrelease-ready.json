@@ -1,0 +1,66 @@
+{
+  "apiVersion": "helm.toolkit.fluxcd.io/v2",
+  "kind": "HelmRelease",
+  "metadata": {
+    "name": "hr-ok",
+    "namespace": "fixtures",
+    "generation": 1
+  },
+  "spec": {
+    "chart": {
+      "spec": {
+        "chart": "podinfo",
+        "reconcileStrategy": "ChartVersion",
+        "sourceRef": {
+          "kind": "HelmRepository",
+          "name": "podinfo"
+        },
+        "version": "6.*"
+      }
+    },
+    "interval": "10m"
+  },
+  "status": {
+    "conditions": [
+      {
+        "lastTransitionTime": "2026-08-12T15:37:38Z",
+        "message": "Helm install succeeded for release fixtures/hr-ok.v1 with chart podinfo@6.14.1",
+        "observedGeneration": 1,
+        "reason": "InstallSucceeded",
+        "status": "True",
+        "type": "Ready"
+      },
+      {
+        "lastTransitionTime": "2026-08-12T15:37:38Z",
+        "message": "Helm install succeeded for release fixtures/hr-ok.v1 with chart podinfo@6.14.1",
+        "observedGeneration": 1,
+        "reason": "InstallSucceeded",
+        "status": "True",
+        "type": "Released"
+      }
+    ],
+    "helmChart": "fixtures/fixtures-hr-ok",
+    "history": [
+      {
+        "appVersion": "6.14.1",
+        "chartName": "podinfo",
+        "chartVersion": "6.14.1",
+        "configDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "digest": "sha256:87f65d5bef2c0ae9d26e13189474db35be06b491974bf31c636dab5ddfae29e5",
+        "firstDeployed": "2026-08-12T15:37:36Z",
+        "lastDeployed": "2026-08-12T15:37:36Z",
+        "name": "hr-ok",
+        "namespace": "fixtures",
+        "status": "deployed",
+        "version": 1
+      }
+    ],
+    "lastAttemptedConfigDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lastAttemptedGeneration": 1,
+    "lastAttemptedReleaseAction": "install",
+    "lastAttemptedReleaseActionDuration": "2.20055855s",
+    "lastAttemptedRevision": "6.14.1",
+    "observedGeneration": 1,
+    "storageNamespace": "fixtures"
+  }
+}

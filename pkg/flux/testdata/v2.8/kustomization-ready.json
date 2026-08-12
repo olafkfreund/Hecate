@@ -1,0 +1,64 @@
+{
+  "apiVersion": "kustomize.toolkit.fluxcd.io/v1",
+  "kind": "Kustomization",
+  "metadata": {
+    "name": "ks-ok",
+    "namespace": "fixtures",
+    "generation": 1
+  },
+  "spec": {
+    "force": false,
+    "interval": "5m",
+    "path": "./kustomize",
+    "prune": true,
+    "sourceRef": {
+      "kind": "GitRepository",
+      "name": "podinfo"
+    },
+    "targetNamespace": "fixtures"
+  },
+  "status": {
+    "conditions": [
+      {
+        "lastTransitionTime": "2026-08-12T15:39:38Z",
+        "message": "Applied revision: master@sha1:eec06d1ea459af4cb4e10e806f8be7c7bd58b361",
+        "observedGeneration": 1,
+        "reason": "ReconciliationSucceeded",
+        "status": "True",
+        "type": "Ready"
+      }
+    ],
+    "history": [
+      {
+        "digest": "sha256:0ad6966a61b039377d15a14c2782985898e304ece4a088ee621803c34e215267",
+        "firstReconciled": "2026-08-12T15:39:38Z",
+        "lastReconciled": "2026-08-12T15:39:38Z",
+        "lastReconciledDuration": "134.315106ms",
+        "lastReconciledStatus": "ReconciliationSucceeded",
+        "metadata": {
+          "revision": "master@sha1:eec06d1ea459af4cb4e10e806f8be7c7bd58b361"
+        },
+        "totalReconciliations": 1
+      }
+    ],
+    "inventory": {
+      "entries": [
+        {
+          "id": "fixtures_podinfo__Service",
+          "v": "v1"
+        },
+        {
+          "id": "fixtures_podinfo_apps_Deployment",
+          "v": "v1"
+        },
+        {
+          "id": "fixtures_podinfo_autoscaling_HorizontalPodAutoscaler",
+          "v": "v2"
+        }
+      ]
+    },
+    "lastAppliedRevision": "master@sha1:eec06d1ea459af4cb4e10e806f8be7c7bd58b361",
+    "lastAttemptedRevision": "master@sha1:eec06d1ea459af4cb4e10e806f8be7c7bd58b361",
+    "observedGeneration": 1
+  }
+}

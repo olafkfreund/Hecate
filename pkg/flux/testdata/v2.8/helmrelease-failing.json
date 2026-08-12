@@ -1,0 +1,45 @@
+{
+  "apiVersion": "helm.toolkit.fluxcd.io/v2",
+  "kind": "HelmRelease",
+  "metadata": {
+    "name": "hr-broken",
+    "namespace": "fixtures",
+    "generation": 1
+  },
+  "spec": {
+    "chart": {
+      "spec": {
+        "chart": "no-such-chart",
+        "reconcileStrategy": "ChartVersion",
+        "sourceRef": {
+          "kind": "HelmRepository",
+          "name": "podinfo"
+        },
+        "version": "*"
+      }
+    },
+    "interval": "10m"
+  },
+  "status": {
+    "conditions": [
+      {
+        "lastTransitionTime": "2026-08-12T15:39:37Z",
+        "message": "Fulfilling prerequisites",
+        "observedGeneration": 1,
+        "reason": "Progressing",
+        "status": "True",
+        "type": "Reconciling"
+      },
+      {
+        "lastTransitionTime": "2026-08-12T15:40:07Z",
+        "message": "HelmChart 'fixtures/fixtures-hr-broken' is not ready: invalid chart reference: failed to get chart version for remote reference: no chart name found",
+        "observedGeneration": 1,
+        "reason": "SourceNotReady",
+        "status": "False",
+        "type": "Ready"
+      }
+    ],
+    "helmChart": "fixtures/fixtures-hr-broken",
+    "observedGeneration": -1
+  }
+}

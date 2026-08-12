@@ -1,0 +1,40 @@
+{
+  "apiVersion": "kustomize.toolkit.fluxcd.io/v1",
+  "kind": "Kustomization",
+  "metadata": {
+    "name": "ks-broken",
+    "namespace": "fixtures",
+    "generation": 1
+  },
+  "spec": {
+    "force": false,
+    "interval": "5m",
+    "path": "./this-path-does-not-exist",
+    "prune": true,
+    "sourceRef": {
+      "kind": "GitRepository",
+      "name": "podinfo"
+    }
+  },
+  "status": {
+    "conditions": [
+      {
+        "lastTransitionTime": "2026-08-12T15:38:05Z",
+        "message": "Fetching manifests for revision master@sha1:eec06d1ea459af4cb4e10e806f8be7c7bd58b361 with a timeout of 4m30s",
+        "observedGeneration": 1,
+        "reason": "ProgressingWithRetry",
+        "status": "True",
+        "type": "Reconciling"
+      },
+      {
+        "lastTransitionTime": "2026-08-12T15:38:05Z",
+        "message": "kustomization path not found: stat /tmp/kustomization-4223719791/this-path-does-not-exist: no such file or directory",
+        "observedGeneration": 1,
+        "reason": "ArtifactFailed",
+        "status": "False",
+        "type": "Ready"
+      }
+    ],
+    "observedGeneration": -1
+  }
+}

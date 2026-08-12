@@ -1,0 +1,80 @@
+{
+  "apiVersion": "helm.toolkit.fluxcd.io/v2",
+  "kind": "HelmRelease",
+  "metadata": {
+    "name": "hr-ok",
+    "namespace": "fixtures",
+    "generation": 1
+  },
+  "spec": {
+    "chart": {
+      "spec": {
+        "chart": "podinfo",
+        "reconcileStrategy": "ChartVersion",
+        "sourceRef": {
+          "kind": "HelmRepository",
+          "name": "podinfo"
+        },
+        "version": "6.*"
+      }
+    },
+    "interval": "10m"
+  },
+  "status": {
+    "conditions": [
+      {
+        "lastTransitionTime": "2026-08-12T15:39:43Z",
+        "message": "Helm install succeeded for release fixtures/hr-ok.v1 with chart podinfo@6.14.1",
+        "observedGeneration": 1,
+        "reason": "InstallSucceeded",
+        "status": "True",
+        "type": "Ready"
+      },
+      {
+        "lastTransitionTime": "2026-08-12T15:39:43Z",
+        "message": "Helm install succeeded for release fixtures/hr-ok.v1 with chart podinfo@6.14.1",
+        "observedGeneration": 1,
+        "reason": "InstallSucceeded",
+        "status": "True",
+        "type": "Released"
+      }
+    ],
+    "helmChart": "fixtures/fixtures-hr-ok",
+    "history": [
+      {
+        "action": "install",
+        "apiVersion": "v2",
+        "appVersion": "6.14.1",
+        "chartName": "podinfo",
+        "chartVersion": "6.14.1",
+        "configDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "digest": "sha256:2b04f9378698403e25b8cc696cad9a964b25bf1b2caa8e20fd75867eb81a82d9",
+        "firstDeployed": "2026-08-12T15:39:38Z",
+        "lastDeployed": "2026-08-12T15:39:38Z",
+        "name": "hr-ok",
+        "namespace": "fixtures",
+        "status": "deployed",
+        "version": 1
+      }
+    ],
+    "inventory": {
+      "entries": [
+        {
+          "id": "fixtures_hr-ok-podinfo__Service",
+          "v": "v1"
+        },
+        {
+          "id": "fixtures_hr-ok-podinfo_apps_Deployment",
+          "v": "v1"
+        }
+      ]
+    },
+    "lastAttemptedConfigDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lastAttemptedGeneration": 1,
+    "lastAttemptedReleaseAction": "install",
+    "lastAttemptedReleaseActionDuration": "5.227868597s",
+    "lastAttemptedRevision": "6.14.1",
+    "observedGeneration": 1,
+    "storageNamespace": "fixtures"
+  }
+}

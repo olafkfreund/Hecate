@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -70,9 +71,60 @@ func loadFixture(t *testing.T, version, name string) *unstructured.Unstructured 
 // expectedRevision against a GitRepository would never match and the crossing
 // would hang until its deadline — a failure mode that looks like Flux being
 // slow.
-func TestSourceKindsAgainstRealFluxOutput(t *testing.T) {
+// Each kind reports its revision somewhere different, and *where* is the
+// contract — a Flux release moving one is exactly the change that would
+// otherwise surface as a flux-wait hanging until its deadline on a resource
+// that converged ages ago.
+//
+// The expected value is read back out of each fixture rather than written as a
+// literal, so a version captured from a different commit needs no test change.
+var revisionField = map[string][]string{
+	"gitrepository-ready":  {"status", "artifact", "revision"},
+	"helmrepository-ready": {"status", "artifact", "revision"},
+	"kustomization-ready":  {"status", "lastAppliedRevision"},
+	// A HelmRelease has no lastAppliedRevision at all. It carries the chart
+	// version in *two* places — lastAttemptedRevision and
+	// history[0].chartVersion — which for a Ready release always agree.
+	//
+	// So unlike the others, this entry pins a **value, not a path**: removing
+	// either field from appliedRevision's chain leaves the other answering
+	// correctly, and no assertion on the result can tell them apart. The
+	// ordering is pinned by the hand-written TestAppliedRevisionFromHelmRelease*
+	// tests instead, and that the two agree is asserted just below.
+	//
+	// Worth writing down because the first version of this table claimed to
+	// test the history path and quietly did not. Mutation testing found that;
+	// reading the fixture did not.
+	"helmrelease-ready": {"status", "lastAttemptedRevision"},
+}
+
+// The history fallback in appliedRevision is not reached by any real Ready
+// HelmRelease, because lastAttemptedRevision comes first in the chain and is
+// always set by the time one is Ready. It is kept for a release that has not
+// got that far, and the hand-built TestAppliedRevisionFromHelmReleaseHistory
+// covers it — but this records that the two agree, which is what makes the
+// ordering safe rather than merely untested.
+func TestHelmReleaseHistoryAgreesWithTheAttemptedRevision(t *testing.T) {
 	for _, version := range fluxVersions(t) {
-		for _, fixture := range []string{"gitrepository-ready", "helmrepository-ready"} {
+		t.Run(version, func(t *testing.T) {
+			obj := loadFixture(t, version, "helmrelease-ready")
+			attempted := nested(t, obj, []string{"status", "lastAttemptedRevision"})
+			history := nested(t, obj, []string{"status", "history", "0", "chartVersion"})
+			if attempted == "" || history == "" {
+				t.Fatalf("attempted=%q history=%q — recapture the fixture", attempted, history)
+			}
+			if attempted != history {
+				t.Errorf("lastAttemptedRevision %q and history[0].chartVersion %q disagree: "+
+					"appliedRevision prefers the first, so which one is right now matters",
+					attempted, history)
+			}
+		})
+	}
+}
+
+func TestReadyResourcesReportTheRightRevision(t *testing.T) {
+	for _, version := range fluxVersions(t) {
+		for fixture, path := range revisionField {
 			t.Run(version+"/"+fixture, func(t *testing.T) {
 				obj := loadFixture(t, version, fixture)
 				got := Evaluate(obj, Options{})
@@ -81,21 +133,41 @@ func TestSourceKindsAgainstRealFluxOutput(t *testing.T) {
 					t.Errorf("health = %s, want Healthy (%v)", got.Health, got.Issues)
 				}
 
-				// Compared against the fixture's own artifact revision rather
-				// than a literal, so a version whose commit differs needs no
-				// test change — and so this asserts the thing that matters,
-				// which is *which field* a source's revision comes from.
-				want, found, err := unstructured.NestedString(obj.Object, "status", "artifact", "revision")
-				if err != nil || !found || want == "" {
-					t.Fatalf("the fixture has no status.artifact.revision; recapture it")
+				want := nested(t, obj, path)
+				if want == "" {
+					t.Fatalf("the fixture has nothing at %v; recapture it", path)
 				}
 				if got.Revision != want {
-					t.Errorf("revision = %q, want %q — source kinds report it under "+
-						"status.artifact.revision, not lastAppliedRevision", got.Revision, want)
+					t.Errorf("revision = %q, want %q from %v", got.Revision, want, path)
 				}
 			})
 		}
 	}
+}
+
+// nested reads a string out of an unstructured object, treating a numeric
+// element as a slice index so `status.history.0.chartVersion` can be written
+// as a path like any other.
+func nested(t *testing.T, obj *unstructured.Unstructured, path []string) string {
+	t.Helper()
+	var cur any = obj.Object
+	for _, step := range path {
+		if i, err := strconv.Atoi(step); err == nil {
+			list, ok := cur.([]any)
+			if !ok || i >= len(list) {
+				return ""
+			}
+			cur = list[i]
+			continue
+		}
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return ""
+		}
+		cur = m[step]
+	}
+	s, _ := cur.(string)
+	return s
 }
 
 // Every version must offer the same fixtures, or a kind quietly stops being
@@ -130,6 +202,23 @@ func TestEveryFluxVersionHasTheSameFixtures(t *testing.T) {
 	}
 }
 
+// failingFixtures are the captured resources that are genuinely broken — a
+// repository that does not exist, a registry refusing connections, a host that
+// does not resolve, a kustomize path that is not there, a chart that was never
+// published.
+//
+// Workload kinds are in here as well as sources, and that matters: they carry
+// the same `observedGeneration: -1` sentinel when they have never reconciled,
+// so D45 is a rule about Flux rather than a quirk of GitRepository. Nothing
+// proved that until these fixtures existed.
+var failingFixtures = []string{
+	"gitrepository-failing",
+	"ocirepository-failing",
+	"helmrepository-failing",
+	"kustomization-failing",
+	"helmrelease-failing",
+}
+
 // Flux retries a failing source for ever, so a bare Ready=False never becomes
 // terminal on its own. Reporting Degraded immediately would fail crossings over
 // a registry blip; reporting Progressing for ever would hang them. The deadline
@@ -138,11 +227,7 @@ func TestEveryFluxVersionHasTheSameFixtures(t *testing.T) {
 // resolve.
 func TestFailingSourcesAreProgressingUntilTheDeadline(t *testing.T) {
 	for _, version := range fluxVersions(t) {
-		for _, fixture := range []string{
-			"gitrepository-failing",
-			"ocirepository-failing",
-			"helmrepository-failing",
-		} {
+		for _, fixture := range failingFixtures {
 			t.Run(version+"/"+fixture, func(t *testing.T) {
 				obj := loadFixture(t, version, fixture)
 
@@ -171,11 +256,7 @@ func TestFailingSourcesAreProgressingUntilTheDeadline(t *testing.T) {
 // Returning one would let a flux-wait match against nothing.
 func TestFailingSourcesReportNoRevision(t *testing.T) {
 	for _, version := range fluxVersions(t) {
-		for _, fixture := range []string{
-			"gitrepository-failing",
-			"ocirepository-failing",
-			"helmrepository-failing",
-		} {
+		for _, fixture := range failingFixtures {
 			t.Run(version+"/"+fixture, func(t *testing.T) {
 				if got := Evaluate(loadFixture(t, version, fixture), Options{}); got.Revision != "" {
 					t.Errorf("revision = %q, want none from a source that has no artifact", got.Revision)
