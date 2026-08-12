@@ -36,6 +36,17 @@ type fidesServer struct {
 	artifacts  string
 	asked      map[string]int
 	status     int
+	// reported holds the bodies POSTed to /artifacts.
+	reported []map[string]any
+}
+
+func decodeBody(t *testing.T, r *http.Request) map[string]any {
+	t.Helper()
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		t.Fatalf("decoding a reported artifact: %v", err)
+	}
+	return body
 }
 
 func (f *fidesServer) start(t *testing.T) string {
@@ -62,6 +73,12 @@ func (f *fidesServer) start(t *testing.T) string {
 		case strings.HasSuffix(path, "/change-gate"):
 			f.asked[GateChange]++
 			body = or(f.change, `{"recommendation":"approve","approved":true,"risk_score":5,"risk_level":"low"}`)
+		case strings.HasSuffix(path, "/artifacts") && r.Method == http.MethodPost:
+			// Reporting, not looking up. Same path, different verb — the fake
+			// has to tell them apart or a report would be answered with a list.
+			f.reported = append(f.reported, decodeBody(t, r))
+			w.WriteHeader(http.StatusCreated)
+			return
 		case strings.HasSuffix(path, "/artifacts"):
 			f.asked["artifacts"]++
 			body = or(f.artifacts, `[{"sha256":"abcdef0123456789","trail_id":"`+testTrail+`"}]`)
@@ -407,5 +424,57 @@ func TestEvidenceGatePrefersTheGatesServer(t *testing.T) {
 	mustRun(t, step, evidenceCtx(t, EvidenceGateConfig{Gates: []string{GateAssert}}, testDigest))
 	if right.asked[GateAssert] != 1 {
 		t.Errorf("the Gate's own server was not used: %v", right.asked)
+	}
+}
+
+// Reporting links every image in the Bundle to the trail, so a change gate
+// judges the release rather than the one image whose trail happened to be
+// looked up.
+func TestEvidenceGateReportsTheBundlesArtifacts(t *testing.T) {
+	fake := &fidesServer{}
+	server := fake.start(t)
+
+	cfg := EvidenceGateConfig{Gates: []string{GateChange}, ReportArtifacts: true}
+	sc := evidenceCtx(t, cfg, testDigest)
+	// A second image from the same build, which is the case reporting exists
+	// for: without it the gate never sees this one.
+	sc.Bundle.Spec.Artifacts = append(sc.Bundle.Spec.Artifacts, v1alpha1.Artifact{
+		Image: &v1alpha1.ImageArtifact{Repo: "ghcr.io/acme/worker", Digest: "sha256:beef00"},
+	})
+
+	res, err := evidenceStep(t, server, nil).Run(context.Background(), sc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Output["artifactsReported"] != 2 {
+		t.Errorf("reported = %v, want 2", res.Output["artifactsReported"])
+	}
+	if len(fake.reported) != 2 {
+		t.Fatalf("the server received %d reports", len(fake.reported))
+	}
+	// Every report carries the trail. One without would detach CI's evidence.
+	for _, r := range fake.reported {
+		if r["trail_id"] != testTrail {
+			t.Errorf("reported %v with trail %v, want %s", r["sha256"], r["trail_id"], testTrail)
+		}
+		if r["type"] != "container-image" {
+			t.Errorf("type = %v", r["type"])
+		}
+	}
+}
+
+// Off by default: reporting claims the other images belong to this trail, and
+// only the operator knows whether one CI run built them all.
+func TestEvidenceGateDoesNotReportUnlessAsked(t *testing.T) {
+	fake := &fidesServer{}
+	server := fake.start(t)
+
+	sc := evidenceCtx(t, EvidenceGateConfig{Gates: []string{GateChange}}, testDigest)
+
+	if _, err := evidenceStep(t, server, nil).Run(context.Background(), sc); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.reported) != 0 {
+		t.Errorf("reported %d artifacts without being asked", len(fake.reported))
 	}
 }

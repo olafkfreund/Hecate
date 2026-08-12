@@ -168,3 +168,50 @@ func (c *Client) ChangeGate(ctx context.Context, trail string) (*ChangeVerdict, 
 	}
 	return &out, nil
 }
+
+// Artifact is a thing Fides can hold evidence about.
+type Artifact struct {
+	// SHA256 identifies it. The `sha256:` prefix is stripped before sending —
+	// Fides keys artifacts on lowercase hex.
+	SHA256 string
+	// Trail links the artifact to the evidence recorded against it.
+	Trail string
+	// Name is human-readable, e.g. the image repository.
+	Name string
+	// Type is what kind of thing it is, e.g. container-image.
+	Type string
+	// Tags are arbitrary labels.
+	Tags map[string]string
+}
+
+// ReportArtifact records an artifact against a trail.
+//
+// **It refuses to report without a trail, and that is a safety rule rather than
+// validation.** Fides upserts on the digest with
+// `ON CONFLICT (sha256) DO UPDATE SET trail_id = EXCLUDED.trail_id`, so
+// reporting a digest with an empty trail would overwrite the link CI made when
+// it attached the SBOM and the scans — silently detaching exactly the evidence
+// a change gate exists to read. An artifact Hecate cannot link is one it should
+// leave alone.
+func (c *Client) ReportArtifact(ctx context.Context, a Artifact) error {
+	digest := strings.TrimPrefix(strings.TrimSpace(a.SHA256), "sha256:")
+	if digest == "" {
+		return fmt.Errorf("reporting an artifact: no digest")
+	}
+	if strings.TrimSpace(a.Trail) == "" {
+		return fmt.Errorf(
+			"reporting artifact %s: no trail — Fides would overwrite the existing "+
+				"link with an empty one, detaching the evidence CI recorded", digest)
+	}
+
+	body := map[string]any{
+		"sha256":   digest,
+		"trail_id": a.Trail,
+		"name":     a.Name,
+		"type":     a.Type,
+	}
+	if len(a.Tags) > 0 {
+		body["tags"] = a.Tags
+	}
+	return c.do(ctx, http.MethodPost, "/api/v1/artifacts", body, nil)
+}

@@ -66,6 +66,15 @@ type EvidenceGateConfig struct {
 	// MaxRisk fails the crossing when the change gate's risk score exceeds it,
 	// letting a team be stricter than Fides' own verdict. 0-100.
 	MaxRisk *int32 `json:"maxRisk,omitempty"`
+	// ReportArtifacts records every image digest in the Bundle against the
+	// trail, so a change gate sees the whole release rather than the one
+	// artifact whose trail was looked up.
+	//
+	// Off by default, and deliberately: Fides upserts on the digest and
+	// overwrites the trail link, so this claims the other images belong to
+	// *this* trail. That is true when one CI run built them all and wrong when
+	// they came from different builds — which only the operator knows.
+	ReportArtifacts bool `json:"reportArtifacts,omitempty"`
 	// HoldTimeout bounds how long a held change may wait before the crossing
 	// fails. Default 24h.
 	HoldTimeout *metav1.Duration `json:"holdTimeout,omitempty"`
@@ -180,6 +189,16 @@ func (e *EvidenceGate) Run(ctx context.Context, sc *passage.StepContext) (passag
 			StepEvidenceGate, digests[0])
 	}
 	output["trail"] = trail
+
+	// After the trail is known, never before: reporting a digest with no trail
+	// would overwrite the link CI made and detach the evidence being judged.
+	if cfg.ReportArtifacts {
+		reported, err := e.report(ctx, fidesClient, sc.Bundle, trail)
+		if err != nil {
+			return passage.StepResult{Output: output}, unavailable("reporting the Bundle's artifacts", err)
+		}
+		output["artifactsReported"] = reported
+	}
 
 	if selected[GatePolicy] {
 		verdict, err := fidesClient.PolicyCheck(ctx, evidence.FidesEnvironment, trail)
@@ -371,6 +390,34 @@ func unavailable(what string, err error) error {
 }
 
 // imageDigests lists the Bundle's pinned image digests.
+// report records the Bundle's images against the trail, so the change gate
+// judges the release rather than one image of it.
+//
+// The first digest is skipped only in the sense that reporting it is harmless:
+// it is the one the trail was looked up from, so the link already exists and
+// the upsert is a no-op.
+func (e *EvidenceGate) report(
+	ctx context.Context, c *fides.Client, bundle *v1alpha1.Bundle, trail string,
+) (int, error) {
+	n := 0
+	for _, a := range bundle.Spec.Artifacts {
+		if a.Image == nil || a.Image.Digest == "" {
+			continue
+		}
+		err := c.ReportArtifact(ctx, fides.Artifact{
+			SHA256: a.Image.Digest,
+			Trail:  trail,
+			Name:   a.Image.Repo,
+			Type:   "container-image",
+		})
+		if err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
 func imageDigests(bundle *v1alpha1.Bundle) []string {
 	if bundle == nil {
 		return nil

@@ -215,3 +215,70 @@ func TestChangeGate(t *testing.T) {
 		})
 	}
 }
+
+// Reporting an artifact links a Bundle's images to the trail CI recorded
+// against them — the thing that gives a change gate something to read.
+func TestReportArtifact(t *testing.T) {
+	var got map[string]any
+	var path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{BaseURL: srv.URL, Token: "k"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = c.ReportArtifact(context.Background(), Artifact{
+		SHA256: "sha256:4a6f31e7c48b0fb7f3848479c9278284362ca590ee8ee06a377971f2af22464b",
+		Trail:  "aaaa1111-0000-0000-0000-000000000000",
+		Name:   "ghcr.io/acme/podinfo",
+		Type:   "container-image",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if path != "/api/v1/artifacts" {
+		t.Errorf("path = %q", path)
+	}
+	// Lowercase hex, no prefix: Fides keys artifacts that way, and a digest
+	// sent with the prefix simply matches nothing.
+	if got["sha256"] != "4a6f31e7c48b0fb7f3848479c9278284362ca590ee8ee06a377971f2af22464b" {
+		t.Errorf("sha256 = %v, want the prefix stripped", got["sha256"])
+	}
+	if got["trail_id"] != "aaaa1111-0000-0000-0000-000000000000" {
+		t.Errorf("trail_id = %v", got["trail_id"])
+	}
+}
+
+// The safety rule. Fides upserts on the digest and overwrites trail_id with
+// whatever it is sent, so reporting without a trail would detach the SBOM and
+// the scans CI attached — the exact evidence the change gate exists to read.
+func TestReportArtifactRefusesToDetachEvidence(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{BaseURL: srv.URL, Token: "k"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = c.ReportArtifact(context.Background(), Artifact{SHA256: "abc", Name: "x"})
+
+	if err == nil {
+		t.Fatal("want a refusal when there is no trail to link to")
+	}
+	if !strings.Contains(err.Error(), "detaching the evidence") {
+		t.Errorf("err = %v, want it to say what the danger is", err)
+	}
+	if called {
+		t.Error("the request was sent anyway — Fides would have nulled the link")
+	}
+}

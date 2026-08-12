@@ -500,6 +500,7 @@ crossing proceeds. The Gate must carry `evidence.fidesEnvironment` and
 | `gates` | \[assert \| allowlist \| policy \| change] | required |
 | `policy` | string | every policy that applies |
 | `maxRisk` | 0–100 | none |
+| `reportArtifacts` | bool | `false` |
 | `holdTimeout` | duration | `24h` |
 | `pollInterval` | duration | `1m` |
 
@@ -509,6 +510,18 @@ crossing proceeds. The Gate must carry `evidence.fidesEnvironment` and
 | `allowlist` | is this artifact approved for this environment? | digest + environment |
 | `policy` | does the environment's policy accept this build? | environment + the build's trail |
 | `change` | evidence-backed approval verdict and 0–100 risk score | the build's trail |
+
+`reportArtifacts: true` records every image digest in the Bundle against the
+trail, so a change gate judges the whole release rather than only the image
+whose trail was looked up.
+
+**Off by default, and worth understanding before turning on.** Fides upserts on
+the digest and overwrites the trail link, so reporting asserts that the other
+images belong to *this* trail — true when one CI run built them all, wrong when
+it did not, and only you know which. For the same reason nothing is ever
+reported before the trail is resolved: a report with no trail would null the
+link CI made and detach the very evidence being judged.
+
 
 The trail is the one **CI** recorded when it built the image, found from the
 digest — not one Hecate opened. A fresh trail would carry none of the SBOM and
