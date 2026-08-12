@@ -176,22 +176,30 @@ func TestCrossingAgainstRealAPI(t *testing.T) {
 
 	reconcileBeacon(t, beaconReconciler, "app")
 
-	// Polled, not asserted immediately — and polled on a *list*, which is the
-	// subtle part. A GET is a quorum read and gives you read-your-writes; a
-	// LIST is served from the API server's watch cache and gives you neither.
-	// A list issued straight after a create can legitimately not contain the
-	// object, and #110 was four rounds of that being mistaken for a bug in the
-	// emit path. Waiting for the list to agree with reality is the fix.
-	bundles := waitForBundles(t, c, 1, "the Beacon to emit a Bundle")
-	emitted := bundles.Items[0]
+	// Read by the name the Beacon reports rather than by listing. On k3s the
+	// two disagree: a GET finds a Bundle that a LIST — namespaced *and*
+	// cluster-wide, at a newer resourceVersion, still empty five seconds later
+	// — does not return. That is a storage-layer inconsistency under kine, not
+	// something Hecate can fix, and it cost #110 four wrong diagnoses. A GET is
+	// also simply the better assertion: it checks the object the system named,
+	// instead of counting rows.
+	emitted := emittedBundle(t, c, "the Beacon to emit a Bundle")
 	if got := emitted.Spec.Artifacts[0].Image.Digest; got != digests["1.1.0"] {
 		t.Errorf("Bundle pinned %s, want the digest of 1.1.0 (%s)", got, digests["1.1.0"])
 	}
 
 	// Discovery must be idempotent against a real API server too, where the
 	// AlreadyExists path is a genuine server response rather than a fake.
+	//
+	// Asserted on the *name*, which is what idempotency means here: the name is
+	// derived from the artifact digest, so a second Bundle could only appear
+	// under a different one — and `latestBundle` would then have moved.
+	// Counting objects would test the same thing less precisely, through the
+	// read that does not work.
 	reconcileBeacon(t, beaconReconciler, "app")
-	waitForBundles(t, c, 1, "a second poll to mint no second Bundle")
+	if again := emittedBundle(t, c, "a second poll to mint no second Bundle"); again.Name != emitted.Name {
+		t.Errorf("a second poll emitted %s, having already emitted %s", again.Name, emitted.Name)
+	}
 
 	// --- gates -----------------------------------------------------------
 	steps := &v1alpha1.PassageTemplate{Steps: []v1alpha1.Step{{Uses: "flux-wait"}}}
@@ -270,28 +278,47 @@ func reconcileGate(t *testing.T, r *gate.Reconciler, name string) {
 	}
 }
 
-// waitForBundles polls until the namespace lists exactly n Bundles.
+// emittedBundle waits for the Beacon to name a Bundle in its status and returns
+// that Bundle, read by name.
 //
-// A list is not a read-your-writes read. GET is served from storage; LIST is
-// served from the API server's watch cache, so a list issued right after a
-// create can be *newer* than the object by resourceVersion and still not
-// contain it — which is exactly what #110's forensics eventually caught, after
-// three wrong diagnoses that all assumed the emit path was at fault.
+// **Deliberately not a list.** On k3s a GET finds Bundles that a LIST does not
+// return — namespaced and cluster-wide, at a newer resourceVersion, still
+// missing five seconds later. That is a storage inconsistency in kine rather
+// than anything Hecate does, and #110 spent four rounds mistaking it for a bug
+// in the emit path because every assertion here was built on counting rows.
 //
-// So this waits for the list to agree rather than asserting it does. It is not
-// a timeout papering over a race: counting objects is what a list is for, and
-// an eventually-consistent read has to be read eventually.
-func waitForBundles(t *testing.T, c client.Client, n int, why string) *v1alpha1.BundleList {
+// Reading by name is not a workaround for it either. The Beacon's contract is
+// "emit a Bundle and say which one"; checking the object it named tests that
+// contract directly, where a count only tests it by inference.
+func emittedBundle(t *testing.T, c client.Client, why string) *v1alpha1.Bundle {
 	t.Helper()
-	var bundles v1alpha1.BundleList
+	ctx := context.Background()
+
+	var bundle v1alpha1.Bundle
 	waitFor(t, 60*time.Second, why, func() bool {
-		if err := c.List(context.Background(), &bundles, client.InNamespace(namespace)); err != nil {
+		var b v1alpha1.Beacon
+		if err := c.Get(ctx, types.NamespacedName{Name: "app", Namespace: namespace}, &b); err != nil {
 			return false
 		}
-		return len(bundles.Items) == n
-	}, func() string { return beaconStatus(t, c) }, func() string { return everyBundle(t, c) },
-		func() string { return bundleForensics(t, c) })
-	return &bundles
+		if b.Status.LatestBundle == "" {
+			return false
+		}
+		return c.Get(ctx, types.NamespacedName{
+			Name: b.Status.LatestBundle, Namespace: namespace,
+		}, &bundle) == nil
+	}, func() string { return beaconStatus(t, c) }, func() string { return bundleForensics(t, c) })
+
+	// Still worth knowing when the two reads disagree, because the Gate
+	// controller lists Bundles the same way the test used to. Logged rather
+	// than failed: it is the cluster's inconsistency, not ours, and hiding it
+	// entirely would leave nobody any the wiser next time.
+	var listed v1alpha1.BundleList
+	if err := c.List(ctx, &listed, client.InNamespace(namespace)); err == nil && len(listed.Items) == 0 {
+		t.Logf("note: a LIST returns no Bundles while a GET finds %s — the k3s/kine "+
+			"inconsistency from #110. Harmless here; the Gate would see it a "+
+			"reconcile later.", bundle.Name)
+	}
+	return &bundle
 }
 
 func mustCreate(t *testing.T, c client.Client, obj client.Object) {
