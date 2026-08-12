@@ -85,6 +85,11 @@ const (
 type Waiting struct {
 	Bundle string `json:"bundle"`
 	Reason string `json:"reason"`
+	// Kind is the same reason as a stable code, matching BlockerKind's values
+	// where they overlap. Without it the approval queue would have to decide
+	// what is waiting on a human by matching the prose, and rewording a message
+	// would break a caller.
+	Kind gate.Code `json:"kind,omitempty"`
 }
 
 // Explain answers "why is this Gate not crossing anything?".
@@ -166,7 +171,9 @@ func (o *Ops) Explain(ctx context.Context, namespace, name string) (*Explanation
 		if c.Reason == "already in this Gate" {
 			continue
 		}
-		ex.Waiting = append(ex.Waiting, Waiting{Bundle: c.Bundle.Name, Reason: c.Reason})
+		ex.Waiting = append(ex.Waiting, Waiting{
+			Bundle: c.Bundle.Name, Reason: c.Reason, Kind: c.Code,
+		})
 	}
 
 	ex.Blockers = append(ex.Blockers, o.lastFailure(ctx, g)...)

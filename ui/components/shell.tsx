@@ -4,13 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
-import { Activity, DoorOpen, Package, Route, Moon, Sun, Monitor } from "lucide-react";
+import { Activity, DoorOpen, Package, Route, ShieldCheck, Moon, Sun, Monitor } from "lucide-react";
 import { useHydrated, useQueryParam } from "@/lib/browser";
 
 const nav = [
   { href: "/", label: "Gates", icon: DoorOpen },
   { href: "/bundles/", label: "Bundles", icon: Package },
   { href: "/passages/", label: "Passages", icon: Route },
+  { href: "/approvals/", label: "Approvals", icon: ShieldCheck },
 ];
 
 export function Shell({ children }: { children: React.ReactNode }) {

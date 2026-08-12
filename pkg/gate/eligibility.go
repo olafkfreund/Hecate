@@ -17,7 +17,24 @@ type Candidate struct {
 	// Reason explains an ineligible verdict, in words a human can act on.
 	// Empty when Eligible.
 	Reason string
+	// Code is the same verdict as a stable identifier, so a caller can branch
+	// without reading English. The approval queue needs to know which Bundles
+	// are waiting on a human specifically, and matching on the prose would make
+	// rewording a message a breaking change.
+	Code Code
 }
+
+// Code is a machine-readable reason a Bundle may not cross.
+type Code string
+
+const (
+	// CodeAlreadyCurrent means it is already in this Gate. Not a rejection.
+	CodeAlreadyCurrent Code = "AlreadyCurrent"
+	// CodeUpstreamNotCleared means an upstream Gate has not passed it.
+	CodeUpstreamNotCleared Code = "UpstreamNotCleared"
+	// CodeAwaitingApproval means a human has not approved it for this Gate.
+	CodeAwaitingApproval Code = "AwaitingApproval"
+)
 
 // Evaluate judges every Bundle against a Gate's admission rules.
 //
@@ -39,8 +56,10 @@ func Evaluate(gate *v1alpha1.Gate, bundles []v1alpha1.Bundle) []Candidate {
 			continue // not from a Beacon this Gate admits
 		}
 
-		eligible, reason := judge(gate, admission, bundle)
-		out = append(out, Candidate{Bundle: bundle, Eligible: eligible, Reason: reason})
+		eligible, reason, code := judge(gate, admission, bundle)
+		out = append(out, Candidate{
+			Bundle: bundle, Eligible: eligible, Reason: reason, Code: code,
+		})
 	}
 	return out
 }
@@ -55,10 +74,12 @@ func admissionFor(gate *v1alpha1.Gate, bundle *v1alpha1.Bundle) *v1alpha1.Admiss
 	return nil
 }
 
-func judge(gate *v1alpha1.Gate, admission *v1alpha1.Admission, bundle *v1alpha1.Bundle) (bool, string) {
+func judge(
+	gate *v1alpha1.Gate, admission *v1alpha1.Admission, bundle *v1alpha1.Bundle,
+) (bool, string, Code) {
 	// Already here. Not a rejection — there is simply nothing to do.
 	if gate.Status.Current != nil && gate.Status.Current.Bundle == bundle.Name {
-		return false, "already in this Gate"
+		return false, "already in this Gate", CodeAlreadyCurrent
 	}
 
 	// Upstream clearance. A Gate records a Bundle in status.cleared only once it
@@ -73,14 +94,16 @@ func judge(gate *v1alpha1.Gate, admission *v1alpha1.Admission, bundle *v1alpha1.
 		}
 	}
 	if len(missing) > 0 {
-		return false, fmt.Sprintf("has not cleared %s", strings.Join(missing, ", "))
+		return false,
+			fmt.Sprintf("has not cleared %s", strings.Join(missing, ", ")),
+			CodeUpstreamNotCleared
 	}
 
 	if admission.RequireApproval && !bundle.IsApprovedFor(gate.Name) {
-		return false, "awaiting approval"
+		return false, "awaiting approval", CodeAwaitingApproval
 	}
 
-	return true, ""
+	return true, "", ""
 }
 
 // Eligible returns just the Bundles that may cross, newest first.

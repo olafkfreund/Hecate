@@ -269,3 +269,44 @@ func TestTheCurrentBundleIsNotWaiting(t *testing.T) {
 		t.Errorf("state = %s, want Idle", ex.State)
 	}
 }
+
+// The approval queue asks "which Bundles are waiting on a human?", and it must
+// be able to tell that from a Bundle waiting on an upstream Gate. Matching the
+// prose would work until someone reworded a message.
+func TestWaitingCarriesAStableCode(t *testing.T) {
+	ex := explain(t,
+		testGate("staging", func(g *v1alpha1.Gate) {
+			g.Spec.Admits[0].RequireApproval = true
+		}),
+		testBundle("b1", 0),
+	)
+
+	if len(ex.Waiting) != 1 {
+		t.Fatalf("waiting = %+v, want one entry", ex.Waiting)
+	}
+	if got := ex.Waiting[0].Kind; got != gate.CodeAwaitingApproval {
+		t.Errorf("kind = %q, want %q", got, gate.CodeAwaitingApproval)
+	}
+	// The prose stays, because a person still has to read something.
+	if ex.Waiting[0].Reason == "" {
+		t.Error("the human-readable reason must survive alongside the code")
+	}
+}
+
+// Waiting on an upstream Gate is a different code, or the queue would offer to
+// approve things that approval cannot unblock.
+func TestUpstreamWaitIsNotAnApprovalWait(t *testing.T) {
+	ex := explain(t,
+		testGate("staging", func(g *v1alpha1.Gate) {
+			g.Spec.Admits[0].After = []string{"dev"}
+		}),
+		testBundle("b1", 0),
+	)
+
+	if len(ex.Waiting) != 1 {
+		t.Fatalf("waiting = %+v, want one entry", ex.Waiting)
+	}
+	if got := ex.Waiting[0].Kind; got != gate.CodeUpstreamNotCleared {
+		t.Errorf("kind = %q, want %q", got, gate.CodeUpstreamNotCleared)
+	}
+}

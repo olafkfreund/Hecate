@@ -168,6 +168,17 @@ export const api = {
    */
   promote: (ns: string, gate: string, bundle: string) =>
     post<Passage>(`${base(ns)}/gates/${encodeURIComponent(gate)}/promote`, { bundle }),
+
+  /**
+   * approve records that a human has approved a Bundle for a Gate.
+   *
+   * A separate permission from promoting, and deliberately so: an approval the
+   * promoter can grant themselves is not an approval. The API enforces that
+   * with different Kubernetes verbs, so a 403 here is the cluster saying you
+   * may cross but not approve — which is the control working, not a fault.
+   */
+  approve: (ns: string, bundle: string, gate: string) =>
+    post<unknown>(`${base(ns)}/bundles/${encodeURIComponent(bundle)}/approve`, { gate }),
 };
 
 /**
@@ -187,9 +198,14 @@ export interface Blocker {
   fix?: string;
 }
 
+/** Stable codes for why a Bundle may not cross. Mirrors pkg/gate's Code. */
+export type WaitingKind = "AlreadyCurrent" | "UpstreamNotCleared" | "AwaitingApproval";
+
 export interface Waiting {
   bundle: string;
   reason: string;
+  /** The same verdict as an identifier, so this can be filtered on. */
+  kind?: WaitingKind;
 }
 
 export interface Explanation {
