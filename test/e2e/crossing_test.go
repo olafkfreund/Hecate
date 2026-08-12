@@ -176,21 +176,13 @@ func TestCrossingAgainstRealAPI(t *testing.T) {
 
 	reconcileBeacon(t, beaconReconciler, "app")
 
-	// Poll rather than asserting immediately. Reconcile returning nil does not
-	// guarantee the Bundle is readable yet, and a Beacon that hit a problem
-	// reports it in status instead of erroring — so a bare "want 1, got 0"
-	// tells you nothing about which happened.
-	var bundles v1alpha1.BundleList
-	waitFor(t, 30*time.Second, "the Beacon to emit a Bundle", func() bool {
-		if err := c.List(ctx, &bundles, client.InNamespace(namespace)); err != nil {
-			return false
-		}
-		return len(bundles.Items) > 0
-	}, func() string { return beaconStatus(t, c) }, func() string { return everyBundle(t, c) },
-		func() string { return bundleForensics(t, c) })
-	if len(bundles.Items) != 1 {
-		t.Fatalf("got %d Bundles, want 1: %s", len(bundles.Items), beaconStatus(t, c))
-	}
+	// Polled, not asserted immediately — and polled on a *list*, which is the
+	// subtle part. A GET is a quorum read and gives you read-your-writes; a
+	// LIST is served from the API server's watch cache and gives you neither.
+	// A list issued straight after a create can legitimately not contain the
+	// object, and #110 was four rounds of that being mistaken for a bug in the
+	// emit path. Waiting for the list to agree with reality is the fix.
+	bundles := waitForBundles(t, c, 1, "the Beacon to emit a Bundle")
 	emitted := bundles.Items[0]
 	if got := emitted.Spec.Artifacts[0].Image.Digest; got != digests["1.1.0"] {
 		t.Errorf("Bundle pinned %s, want the digest of 1.1.0 (%s)", got, digests["1.1.0"])
@@ -199,12 +191,7 @@ func TestCrossingAgainstRealAPI(t *testing.T) {
 	// Discovery must be idempotent against a real API server too, where the
 	// AlreadyExists path is a genuine server response rather than a fake.
 	reconcileBeacon(t, beaconReconciler, "app")
-	if err := c.List(ctx, &bundles, client.InNamespace(namespace)); err != nil {
-		t.Fatal(err)
-	}
-	if len(bundles.Items) != 1 {
-		t.Fatalf("a second poll minted %d Bundles, want 1", len(bundles.Items))
-	}
+	waitForBundles(t, c, 1, "a second poll to mint no second Bundle")
 
 	// --- gates -----------------------------------------------------------
 	steps := &v1alpha1.PassageTemplate{Steps: []v1alpha1.Step{{Uses: "flux-wait"}}}
@@ -281,6 +268,30 @@ func reconcileGate(t *testing.T, r *gate.Reconciler, name string) {
 	}); err != nil {
 		t.Fatalf("reconciling Gate %s: %v", name, err)
 	}
+}
+
+// waitForBundles polls until the namespace lists exactly n Bundles.
+//
+// A list is not a read-your-writes read. GET is served from storage; LIST is
+// served from the API server's watch cache, so a list issued right after a
+// create can be *newer* than the object by resourceVersion and still not
+// contain it — which is exactly what #110's forensics eventually caught, after
+// three wrong diagnoses that all assumed the emit path was at fault.
+//
+// So this waits for the list to agree rather than asserting it does. It is not
+// a timeout papering over a race: counting objects is what a list is for, and
+// an eventually-consistent read has to be read eventually.
+func waitForBundles(t *testing.T, c client.Client, n int, why string) *v1alpha1.BundleList {
+	t.Helper()
+	var bundles v1alpha1.BundleList
+	waitFor(t, 60*time.Second, why, func() bool {
+		if err := c.List(context.Background(), &bundles, client.InNamespace(namespace)); err != nil {
+			return false
+		}
+		return len(bundles.Items) == n
+	}, func() string { return beaconStatus(t, c) }, func() string { return everyBundle(t, c) },
+		func() string { return bundleForensics(t, c) })
+	return &bundles
 }
 
 func mustCreate(t *testing.T, c client.Client, obj client.Object) {
@@ -438,6 +449,21 @@ func bundleForensics(t *testing.T, c client.Client) string {
 		} else {
 			out += fmt.Sprintf("  re-LIST now: %d item(s), list rv %s\n",
 				len(again.Items), again.ResourceVersion)
+		}
+
+		// The remaining question, once the resourceVersions have shown the list
+		// is not merely behind: does the object ever turn up, or has the watch
+		// cache lost it for good? The first is a lag the Gate's own informer
+		// would also recover from; the second would mean a Bundle could stay
+		// invisible to the Gate indefinitely, which is a product problem rather
+		// than a test one.
+		time.Sleep(5 * time.Second)
+		var later v1alpha1.BundleList
+		if err := c.List(ctx, &later, client.InNamespace(namespace)); err != nil {
+			out += fmt.Sprintf("  re-LIST after 5s: %s\n", err)
+		} else {
+			out += fmt.Sprintf("  re-LIST after 5s: %d item(s), list rv %s\n",
+				len(later.Items), later.ResourceVersion)
 		}
 	default:
 		out += fmt.Sprintf("  GET by name: %s\n", err)
