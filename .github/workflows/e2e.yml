@@ -27,6 +27,9 @@ jobs:
       # appear in one of these; a step below enforces that.
       BEFORE_INSTALL: 'TestCrossingAgainstRealAPI|TestFidesEnvironmentIsValidatedAtAdmission'
       AFTER_INSTALL: 'TestDeployedControllerCrossesAGate|TestDeployedControllerPromotesThroughGit|TestAnnotationTriggersAnImmediatePoll'
+      # The version flake.nix gives the dev shell, so a cluster in CI is the
+      # cluster a developer gets.
+      K3D_VERSION: v5.9.0
     strategy:
       fail-fast: false
       matrix:
@@ -60,20 +63,30 @@ jobs:
           cache: true
       - uses: azure/setup-helm@v4
 
+      # Cached, because fetching it is the step that has failed most: first
+      # `curl: (56) Connection died` against the install script, then six
+      # straight 503s from the release CDN even with retries. A cache hit needs
+      # no network at all, which is the only fix that does not depend on
+      # GitHub having a good day.
+      - name: Cache k3d
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/hecate/k3d
+          key: k3d-${{ env.K3D_VERSION }}-linux-amd64
+
       - name: Install k3d
-        env:
-          # Pinned to the version flake.nix gives the dev shell, so a cluster in
-          # CI is the cluster a developer gets. It was `curl | bash` of the
-          # install script, which takes "latest" and asks GitHub for it at run
-          # time — an unpinned dependency and an extra network round trip, in
-          # the one repository that otherwise pins everything. It has also
-          # failed outright: `curl: (56) Connection died, tried 5 times`.
-          K3D_VERSION: v5.9.0
         run: |
           set -euo pipefail
-          curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o k3d \
-            "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64"
-          sudo install -m 0755 k3d /usr/local/bin/k3d && rm k3d
+          bin=~/.cache/hecate/k3d
+          if [ ! -x "$bin" ]; then
+            mkdir -p "$(dirname "$bin")"
+            # More patient than the default: a 503 from the release CDN clears
+            # in a minute, and the alternative is a red matrix leg.
+            curl -fsSL --retry 8 --retry-all-errors --retry-delay 5 -o "$bin" \
+              "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64"
+            chmod +x "$bin"
+          fi
+          sudo install -m 0755 "$bin" /usr/local/bin/k3d
           k3d version
 
       - name: Install Flux ${{ matrix.flux }}
