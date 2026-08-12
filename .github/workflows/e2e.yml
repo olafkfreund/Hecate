@@ -61,7 +61,20 @@ jobs:
       - uses: azure/setup-helm@v4
 
       - name: Install k3d
-        run: curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+        env:
+          # Pinned to the version flake.nix gives the dev shell, so a cluster in
+          # CI is the cluster a developer gets. It was `curl | bash` of the
+          # install script, which takes "latest" and asks GitHub for it at run
+          # time — an unpinned dependency and an extra network round trip, in
+          # the one repository that otherwise pins everything. It has also
+          # failed outright: `curl: (56) Connection died, tried 5 times`.
+          K3D_VERSION: v5.9.0
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o k3d \
+            "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64"
+          sudo install -m 0755 k3d /usr/local/bin/k3d && rm k3d
+          k3d version
 
       - name: Install Flux ${{ matrix.flux }}
         env:
