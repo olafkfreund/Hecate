@@ -1,0 +1,78 @@
+# Notices a new Flux minor and says so, in the one place that cannot be
+# forgotten: the issue tracker.
+#
+# This is deliberately *not* Renovate, though #93 proposed it. Renovate bumps a
+# version to a newer version; the e2e matrix is a **set** of the three minors
+# Flux itself supports, so a Flux release means "drop the oldest, add the
+# newest" — a rotation, not a bump, and not something Renovate can express. A
+# config that looked like it watched Flux and quietly did nothing would be worse
+# than none, because it is the kind of thing you only discover you were relying
+# on after it fails to fire.
+#
+# Renovate still handles Go modules and Actions; see renovate.json.
+name: Flux upstream
+
+on:
+  schedule:
+    # Weekly. Flux ships a minor roughly every four months, so this is about
+    # sixteen checks per event — the cost of never missing one.
+    - cron: "17 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    name: Is the e2e matrix still the three minors Flux supports?
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Compare the matrix against Flux's latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # The matrix is the source of truth; reading it here rather than
+          # restating it means the two cannot drift apart.
+          tested=$(grep -oP "flux: \[\K[^\]]+" .github/workflows/e2e.yml | tr -d "' " )
+          latest=$(gh api repos/fluxcd/flux2/releases/latest --jq .tag_name)
+          latest_minor=$(echo "${latest#v}" | cut -d. -f1,2)
+
+          echo "e2e matrix: $tested"
+          echo "latest Flux: $latest (minor $latest_minor)"
+
+          if echo "$tested" | tr ',' '\n' | grep -qx "$latest_minor"; then
+            echo "The matrix already covers $latest_minor. Nothing to do."
+            exit 0
+          fi
+
+          title="Flux $latest_minor is out: rotate the e2e matrix"
+          if gh issue list --state open --search "$title in:title" --json title \
+               --jq '.[].title' | grep -qxF "$title"; then
+            echo "Already tracked."
+            exit 0
+          fi
+
+          # Written to a file rather than an inline heredoc: an indented EOF
+          # inside a YAML block never terminates, and the failure mode is a
+          # workflow that looks right and dies at 07:17 on a Monday.
+          {
+            echo "Flux released **$latest**, and the e2e matrix still tests \`$tested\`."
+            echo
+            echo "Hecate supports the three minors Flux itself supports, so this needs a"
+            echo "rotation rather than a bump: add \`$latest_minor\`, drop the oldest."
+            echo
+            echo "- [ ] \`.github/workflows/e2e.yml\` — rotate \`flux: [...]\`"
+            echo "- [ ] \`README.md\` and \`docs/DEVELOPMENT-PLAN.md\` — the stated support matrix"
+            echo "- [ ] \`pkg/flux/testdata/\` — capture fixtures for $latest_minor, drop the dropped minor's"
+            echo "- [ ] Read the release notes for removed API versions; \`pkg/health\` defaults one per kind"
+            echo
+            echo "The e2e run on that branch going red is the actual notification — this"
+            echo "issue only makes sure someone starts it."
+          } > /tmp/body.md
+
+          gh issue create --title "$title" --label upstream --body-file /tmp/body.md

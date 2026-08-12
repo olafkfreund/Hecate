@@ -266,8 +266,9 @@ Cross-namespace references are **refused by default**, matching Flux's own
 `--no-cross-namespace-refs=true` posture. See [D11](docs/DECISIONS.md).
 
 We track Flux with CI rather than good intentions: the e2e matrix runs against every
-supported Flux minor, Renovate opens the bump PR on each Flux release, and `pkg/flux`
-tests read real captured status output per version. Details in the
+supported Flux minor, a weekly job opens an issue when a new Flux minor appears, the
+controller warns at startup if the cluster serves an API version it does not expect, and
+`pkg/flux` tests read status captured from a real Flux, per version. Details in the
 [development plan](docs/DEVELOPMENT-PLAN.md#6-following-flux-upstream).
 
 ## Status

@@ -15,6 +15,7 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/discovery"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -32,6 +33,32 @@ import (
 	"github.com/olafkfreund/hecate/pkg/passage/steps"
 	"github.com/olafkfreund/hecate/pkg/telemetry"
 )
+
+// warnFluxAPIs reports Flux API versions the cluster does not serve.
+//
+// The mitigation D4 lacked: reading Flux as unstructured means a removed API
+// version cannot break our build, so without this it surfaces at reconcile time
+// as "no matches for kind" against a Gate that worked yesterday. CI covers the
+// Flux versions we test; this covers the one the operator is actually running.
+//
+// Nothing here is fatal, including its own failure. A controller that will not
+// start because discovery was slow is a worse outcome than an unchecked
+// assumption.
+func warnFluxAPIs(cfg *rest.Config, logger logr.Logger) {
+	d, err := discovery.NewDiscoveryClientForConfig(cfg)
+	if err != nil {
+		logger.Info("could not check the cluster's Flux API versions", "error", err)
+		return
+	}
+	warnings, err := health.CheckFluxAPIs(d)
+	if err != nil {
+		logger.Info("could not check the cluster's Flux API versions", "error", err)
+		return
+	}
+	for _, w := range warnings {
+		logger.Info("Flux API mismatch: " + w)
+	}
+}
 
 // version is set at build time with -ldflags.
 var version = "dev"
@@ -105,6 +132,11 @@ func run() error {
 	if err := checkCRDs(ctx, restCfg, opts.skipCRDCheck, logger); err != nil {
 		return err
 	}
+
+	// After our own CRDs and before the manager: a Flux we do not recognise is
+	// a warning rather than a failure, because refusing to start would turn one
+	// degraded watch into a total outage (#92).
+	warnFluxAPIs(restCfg, logger)
 
 	// Tracing is configured entirely by the standard OTEL_* environment and is
 	// off unless one of them is set, so this is a no-op for anyone not running a

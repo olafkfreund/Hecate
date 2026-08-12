@@ -1,0 +1,83 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommitsDisabled",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "timezone": "Europe/London",
+  "schedule": [
+    "before 6am on monday"
+  ],
+  "prConcurrentLimit": 5,
+  "labels": [
+    "dependencies"
+  ],
+  "vulnerabilityAlerts": {
+    "description": "A known vulnerability does not wait for Monday.",
+    "schedule": [
+      "at any time"
+    ],
+    "labels": [
+      "dependencies",
+      "security"
+    ],
+    "prPriority": 10
+  },
+  "packageRules": [
+    {
+      "description": "Kubernetes libraries move together and a partial bump does not build. One PR or none.",
+      "matchSourceUrls": [
+        "https://github.com/kubernetes/**",
+        "https://github.com/kubernetes-sigs/**"
+      ],
+      "groupName": "kubernetes"
+    },
+    {
+      "description": "Likewise OpenTelemetry: the SDK, the API and the exporters share a release train.",
+      "matchSourceUrls": [
+        "https://github.com/open-telemetry/**"
+      ],
+      "groupName": "opentelemetry"
+    },
+    {
+      "description": "Everything else, batched weekly. A separate PR per Go module is noise nobody reads.",
+      "matchManagers": [
+        "gomod"
+      ],
+      "excludePackageNames": [],
+      "groupName": "go dependencies",
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ]
+    },
+    {
+      "description": "A Go major is an API break; it needs a human, not a merge queue.",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "groupName": null,
+      "labels": [
+        "dependencies",
+        "breaking"
+      ]
+    },
+    {
+      "description": "The toolchain is pinned in flake.nix as well, so a go.mod bump alone would leave the two disagreeing and CI building a different Go from the dev shell.",
+      "matchDepTypes": [
+        "golang"
+      ],
+      "labels": [
+        "dependencies",
+        "toolchain"
+      ],
+      "prBodyNotes": [
+        "`flake.nix` pins the Go used by CI and the dev shell. Bumping `go.mod` without it leaves them disagreeing."
+      ]
+    }
+  ]
+}

@@ -199,14 +199,25 @@ moves — v2.9 removed two beta API versions outright. The mechanism below is or
 1. **CI is the tracker.** The e2e job runs against all three Flux minors Flux supports,
    not just the newest. A Flux release that breaks us fails a build. This is the only
    mechanism that cannot be forgotten.
-2. **Renovate watches `fluxcd/flux2`.** A new Flux release opens a PR bumping the e2e
-   matrix. The PR going red *is* the notification.
+2. **A weekly job compares the e2e matrix against Flux's latest release** and opens an
+   issue when a new minor appears (`.github/workflows/flux-upstream.yml`). It reads the
+   matrix out of the e2e workflow rather than restating it, so the two cannot drift.
+
+   This was planned as a Renovate rule and is not one. Renovate bumps a version to a
+   newer version; the matrix is a **set** of the three minors Flux supports, so a
+   release means "add the newest, drop the oldest" — a rotation Renovate cannot
+   express. A config that appeared to watch Flux and quietly did nothing would be
+   worse than none, because you find out only when it fails to fire. Renovate still
+   handles Go modules and Actions, which is work it is actually good at.
 3. **Status fixtures per Flux minor.** `pkg/flux` tests read real captured status output
    for each supported version, so a contract change surfaces as a unit-test failure in
-   milliseconds rather than as a user's support ticket.
+   milliseconds rather than as a user's support ticket. Captured off a running cluster,
+   never hand-written — the first capture found a live bug (D45).
 4. **Startup API discovery check.** Covers the gap CI cannot: a cluster running a Flux
-   version we did not test. Warns rather than fails — refusing to start because Flux is
-   newer than us would be worse than the problem.
+   version we did not test. On startup the controller compares each Flux group version
+   it defaults to against what the cluster serves and warns on a mismatch, naming the
+   kinds affected and the fix. Warns rather than fails — refusing to start because Flux
+   is newer than us turns one degraded watch into an outage.
 5. **Quarterly upstream review**, aligned to Flux's cadence. Fixed checklist: new and
    removed API versions, deprecations, new extension points, roadmap deltas, support
    matrix refresh.
