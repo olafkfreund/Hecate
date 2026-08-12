@@ -30,6 +30,11 @@ const (
 	// upstream, a closed window. Distinct from exitError because it is an
 	// answer, not a malfunction, and a pipeline branches on the difference.
 	exitRefused = 5
+	// exitCrossingFailed is a crossing that ran and did not land. Distinct from
+	// exitError, which means Hecate could not tell you whether it did — a
+	// pipeline treats "the promotion failed" and "I lost the cluster" very
+	// differently, and only reports the first as a deployment failure.
+	exitCrossingFailed = 6
 )
 
 func main() {
@@ -81,6 +86,8 @@ Usage:
 Common flags:
   -namespace      namespace to work in  (default: the kubeconfig's)
   -json           emit JSON             (status, explain)
+  -watch          follow the crossing to its end  (promote)
+  -timeout        give up watching after this     (promote -watch)
   -ai             add a model's summary (explain)
   -actor          who to record         (default: the current user)
 

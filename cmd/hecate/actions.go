@@ -39,6 +39,8 @@ func promote(ctx context.Context, args []string) int {
 	namespace := namespaceFlag(fs)
 	bundle := fs.String("bundle", "", "the Bundle to promote")
 	actor := actorFlag(fs)
+	watch := fs.Bool("watch", false, "follow the crossing and exit on its outcome")
+	timeout := fs.Duration("timeout", 0, "give up watching after this; zero waits indefinitely")
 	fs.Usage = usage
 	rest, err := parseArgs(fs, args)
 	if err != nil {
@@ -61,7 +63,10 @@ func promote(ctx context.Context, args []string) int {
 		return actionFailed("promote", err)
 	}
 	fmt.Printf("crossing %s through %s as %s\n", p.Spec.Bundle, p.Spec.Gate, p.Name)
-	return exitOK
+	if !*watch {
+		return exitOK
+	}
+	return watchPassage(ctx, o, p.Namespace, p.Name, *timeout)
 }
 
 // approve records a human approval of a Bundle for a Gate.

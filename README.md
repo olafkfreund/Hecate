@@ -99,6 +99,37 @@ production is Blocked
   waiting:  podinfo-6b2 — awaiting approval
 ```
 
+### Promoting, and waiting for it
+
+```console
+$ hecate promote production --bundle podinfo-6b2 --watch
+crossing podinfo-6b2 through production as production-vck6g
+  git-clone        Succeeded  checked out fleet at fa90646e
+  set-image        Succeeded  pinned ghcr.io/acme/podinfo to 6.14.1
+  git-commit       Succeeded  committed 9f8c1a2b
+  git-push         Succeeded  pushed 9f8c1a2b to main
+  flux-wait        Succeeded  Flux applied the promoted revision to 1 resource(s)
+
+podinfo-6b2 crossed production
+```
+
+`--watch` exists for its **exit code**. Without it a CI job learns only that a
+Passage was opened, which is not the question it asked.
+
+| exit | meaning |
+|---|---|
+| 0 | it worked |
+| 1 | you used the command wrong |
+| 2 | Hecate could not tell you — the cluster, a timeout, a stopped watch |
+| 3 | an evidence chain is broken (`verify`) |
+| 4 | nothing has been recorded (`verify`) |
+| 5 | the rules said no — not cleared upstream, a closed window, no approval |
+| 6 | the crossing ran and did not land |
+
+**2 and 6 are deliberately different.** "The promotion failed" and "I lost sight
+of the cluster" call for different responses, and only the first is a deployment
+failure. **5 is different again**: it is an answer, not a malfunction.
+
 "Why is nothing crossing?" is otherwise answered by reading four resources and
 knowing which fields matter. The answer is computed in one place —
 [`pkg/ops`](docs/DECISIONS.md) — so the CLI, the API and the UI cannot come to
