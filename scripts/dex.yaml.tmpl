@@ -1,0 +1,120 @@
+# Dex, so the dev cluster can actually sign someone in.
+#
+# ISSUER, CA_CRT and TLS_* are substituted by dev-cluster.sh, which knows the
+# host's address. The issuer is a nip.io name resolving to this machine, which
+# is the trick that makes one URL work from three places at once: the browser
+# on the host, hecate-api on the host, and kube-apiserver inside the k3d server
+# container. The usual alternative is an /etc/hosts entry on the developer's
+# machine, which a setup script has no business writing.
+#
+# Everything here is a throwaway: a self-signed CA, a static password, a client
+# secret in a ConfigMap. The cluster is disposable and offline; treating it as
+# though it were not would only make the setup harder to reproduce.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hecate-auth
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dex-tls
+  namespace: hecate-auth
+type: kubernetes.io/tls
+data:
+  tls.crt: TLS_CRT
+  tls.key: TLS_KEY
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dex
+  namespace: hecate-auth
+data:
+  config.yaml: |
+    issuer: ISSUER
+    storage:
+      type: memory
+    web:
+      https: 0.0.0.0:5556
+      tlsCert: /etc/dex/tls/tls.crt
+      tlsKey: /etc/dex/tls/tls.key
+    # No consent screen: a one-user development cluster, and the extra click
+    # teaches nothing.
+    #
+    # The password grant is enabled only so the setup can be *tested* without a
+    # browser: it is what lets a script obtain an ID token and check that
+    # Kubernetes accepts it, which is the half of this that silently fails.
+    # Dex requires the client to opt in.
+    oauth2:
+      skipApprovalScreen: true
+      passwordConnector: local
+    staticClients:
+      - id: hecate
+        name: Hecate
+        secret: hecate-dev-secret
+        redirectURIs:
+          - http://127.0.0.1:18099/auth/callback
+          - http://localhost:18099/auth/callback
+    enablePasswordDB: true
+    staticPasswords:
+      # olaf@hecate.test / hecate-dev
+      - email: "olaf@hecate.test"
+        hash: "BCRYPT_HASH"
+        username: "olaf"
+        userID: "00000000-0000-0000-0000-000000000001"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dex
+  namespace: hecate-auth
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: dex }
+  template:
+    metadata:
+      labels: { app: dex }
+      annotations:
+        # Restart when the config changes, so editing it takes effect.
+        checksum/config: "CONFIG_SUM"
+    spec:
+      containers:
+        - name: dex
+          image: ghcr.io/dexidp/dex:v2.44.0
+          command: ["/usr/local/bin/dex", "serve", "/etc/dex/cfg/config.yaml"]
+          ports:
+            # hostPort, because k3d's loadbalancer forwards a published port to
+            # the same port *on the nodes* rather than to a Service. Without
+            # this the mapping lands on a node where nothing is listening, and
+            # discovery fails with an empty reply — which is what it did.
+            - containerPort: 5556
+              hostPort: 5556
+          volumeMounts:
+            - name: config
+              mountPath: /etc/dex/cfg
+            - name: tls
+              mountPath: /etc/dex/tls
+          readinessProbe:
+            httpGet:
+              path: /dex/healthz
+              port: 5556
+              scheme: HTTPS
+            initialDelaySeconds: 2
+      volumes:
+        - name: config
+          configMap: { name: dex }
+        - name: tls
+          secret: { secretName: dex-tls }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dex
+  namespace: hecate-auth
+spec:
+  selector: { app: dex }
+  ports:
+    - port: 5556
+      targetPort: 5556

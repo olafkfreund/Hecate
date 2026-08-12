@@ -44,9 +44,23 @@ up() {
     # K3S_IMAGE pins the Kubernetes version. Unset means k3d's default, which
     # is right for local work; CI sets it so the three e2e legs between them
     # span the Kubernetes range we claim to support (#88).
+    #
+    # HECATE_OIDC=1 additionally configures kube-apiserver to trust the Dex
+    # this repo can install, which is the only way browser sign-in can be
+    # exercised locally. It has to happen here: kube-apiserver reads those
+    # flags at startup, so it cannot be added to a cluster that already exists.
+    local oidc_args=()
+    if [ -n "${HECATE_OIDC:-}" ]; then
+      log "configuring the API server to trust the development Dex"
+      # mapfile, not $(...) word-splitting: the flags contain `*` and would be
+      # globbed against the working directory.
+      mapfile -t oidc_args < <("$(dirname "$0")/oidc.sh" args)
+    fi
+
     k3d cluster create "$CLUSTER" \
       --agents 1 \
       ${K3S_IMAGE:+--image "$K3S_IMAGE"} \
+      "${oidc_args[@]}" \
       --registry-create "${REGISTRY}:0.0.0.0:${REGISTRY_PORT}" \
       --wait
   fi
@@ -69,6 +83,10 @@ up() {
   fi
 
   git_server
+
+  if [ -n "${HECATE_OIDC:-}" ]; then
+    "$(dirname "$0")/oidc.sh" install
+  fi
 
   log "installing Hecate CRDs"
   # Server-side apply: a later `helm install` also applies these, and

@@ -153,6 +153,51 @@ $ make run        # or run it out-of-cluster against KUBECONFIG, for a debugger
 `make run` is the faster loop while iterating on controller logic; `make install`
 is how you check the packaging, the RBAC and the hardened pod actually work.
 
+### Signing in to the web portal
+
+The portal is served by `hecate-api` itself, so there is one URL and no CORS. It
+authenticates the way everything else does: you present a Kubernetes credential
+and Hecate asks the cluster who you are and what you may do. A browser has no
+kubeconfig, so it needs an OIDC provider **that the cluster also trusts** — and
+that second half is what makes a local setup awkward.
+
+`HECATE_OIDC=1` handles it:
+
+```console
+$ make cluster-rm
+$ HECATE_OIDC=1 make cluster     # installs Dex and configures kube-apiserver
+```
+
+It must be at creation time: `kube-apiserver` reads its OIDC flags at startup,
+so they cannot be added to a cluster that already exists.
+
+The issuer is `https://dex.<your-ip>.nip.io:5556/dex`. That name is the trick —
+it resolves to this machine from the browser, from `hecate-api`, and from inside
+the k3d server container, so one URL works for all three. The usual alternative
+is an `/etc/hosts` entry, which a setup script has no business writing.
+
+Then run the API with the printed environment and open it:
+
+```console
+$ export HECATE_OIDC_ISSUER=https://dex.<your-ip>.nip.io:5556/dex
+$ export HECATE_OIDC_CLIENT_ID=hecate
+$ export HECATE_OIDC_CLIENT_SECRET=hecate-dev-secret
+$ export HECATE_OIDC_REDIRECT_URL=http://127.0.0.1:18099/auth/callback
+$ export SSL_CERT_FILE=$PWD/.dev/oidc/ca.crt
+$ go run ./cmd/hecate-api -addr 127.0.0.1:18099 -oidc-insecure-cookie
+```
+
+Sign in as **olaf@hecate.test / hecate-dev**. The certificate is self-signed, so
+the browser objects once.
+
+Everything here is disposable — a throwaway CA, one static password, a client
+secret in a ConfigMap. The cluster is offline and holds nothing.
+
+**If sign-in succeeds and every request afterwards is refused**, the cluster is
+not trusting the issuer. Check `docker logs k3d-hecate-dev-server-0 | grep oidc`:
+`initializing plugin: ... EOF` means the API server cannot reach Dex, which is
+the failure this whole arrangement exists to avoid.
+
 ### Looking at traces
 
 Tracing is off unless the environment asks for it — the OpenTelemetry SDK's own
