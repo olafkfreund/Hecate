@@ -322,7 +322,7 @@ func TestApprovalBlocksAutoCrossing(t *testing.T) {
 	if err := c.Get(context.Background(), types.NamespacedName{Name: "b1", Namespace: "acme"}, &updated); err != nil {
 		t.Fatal(err)
 	}
-	updated.Status.ApprovedFor = []string{"production"}
+	updated.Status.ApprovedFor = []v1alpha1.BundleApproval{{Gate: "production", Actor: "olaf@acme.example"}}
 	if err := c.Status().Update(context.Background(), &updated); err != nil {
 		t.Fatal(err)
 	}

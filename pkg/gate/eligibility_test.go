@@ -103,9 +103,9 @@ func TestApprovalIsRequiredWhenAsked(t *testing.T) {
 
 	unapproved := bundle("unapproved", "podinfo", 0, "staging")
 	approved := bundle("approved", "podinfo", 1, "staging")
-	approved.Status.ApprovedFor = []string{"production"}
+	approved.Status.ApprovedFor = []v1alpha1.BundleApproval{{Gate: "production", Actor: "olaf@acme.example"}}
 	elsewhere := bundle("elsewhere", "podinfo", 2, "staging")
-	elsewhere.Status.ApprovedFor = []string{"some-other-gate"}
+	elsewhere.Status.ApprovedFor = []v1alpha1.BundleApproval{{Gate: "some-other-gate", Actor: "olaf@acme.example"}}
 
 	cs := Evaluate(g, []v1alpha1.Bundle{unapproved, approved, elsewhere})
 

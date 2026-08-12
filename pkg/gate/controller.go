@@ -239,7 +239,11 @@ func (r *Reconciler) startPassage(
 
 // ActorController is what a crossing the controller started records as having
 // asked for it.
-const ActorController = "controller"
+//
+// Defined in pkg/passage because the steps have to recognise it as well — an
+// automatic crossing has no human to record as the deployer — and pkg/passage
+// is the package both sides can see.
+const ActorController = passage.ActorController
 
 // NewPassage builds the Passage that crosses a Bundle through a Gate.
 //

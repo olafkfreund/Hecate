@@ -57,6 +57,22 @@ describe("the Bundle detail page", () => {
     expect(screen.getByText(/by olaf@hecate.test/)).toBeDefined();
   });
 
+  // approvedFor used to be a list of Gate names. Rendering it with .join
+  // produced "[object Object]" the moment it grew an approver — the exact
+  // failure a hand-written type sharing its author's assumptions cannot catch,
+  // which is why the fixture is checked against what the server marshals.
+  it("names the approver, not just the Gate", async () => {
+    window.history.replaceState({}, "", "/bundles/?name=podinfo-6b2&namespace=uidemo");
+    vi.spyOn(api, "bundle").mockResolvedValue(fixtures.travelled);
+
+    const { container } = render(<Bundles />);
+
+    await waitFor(() => expect(screen.getByText("wandering-owl")).toBeDefined());
+    expect(container.textContent).toContain("Approved for");
+    expect(container.textContent).toContain("olaf@acme.example");
+    expect(container.textContent).not.toContain("object Object");
+  });
+
   it("is the list when no Bundle is named", async () => {
     window.history.replaceState({}, "", "/bundles/?namespace=uidemo");
     const list = vi.spyOn(api, "bundles").mockResolvedValue(fixtures.bundles);

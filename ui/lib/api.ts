@@ -60,13 +60,21 @@ export interface GateCrossing {
   reason?: string;
 }
 
+/** One human's sign-off for one Gate. Carries the approver, because an
+ * approval that does not say who gave it cannot satisfy four-eyes. */
+export interface BundleApproval {
+  gate: string;
+  actor: string;
+  at: string;
+}
+
 export interface Bundle {
   metadata: { name: string; namespace: string; creationTimestamp?: string };
   spec: { beacon?: string; alias?: string; digest?: string; artifacts?: Artifact[] };
   status?: {
     cleared?: GateCrossing[];
     blocked?: GateCrossing[];
-    approvedFor?: string[];
+    approvedFor?: BundleApproval[];
   };
 }
 

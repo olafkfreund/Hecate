@@ -40,7 +40,7 @@ type StepContext struct {
 	Passage string
 	// Bundle being moved. Steps read artifact versions from here.
 	Bundle *v1alpha1.Bundle
-	// Actor initiated the Passage.
+	// Actor initiated the Passage. ActorController when nobody did.
 	Actor string
 	// WorkDir is a scratch directory shared by every step in this Passage —
 	// where one step clones a repo and a later one commits it.
@@ -318,3 +318,11 @@ func (r *Registry) Names() []string {
 	sort.Strings(names)
 	return names
 }
+
+// ActorController is what a crossing the controller started records as having
+// asked for it.
+//
+// Worth distinguishing from a person: an automatic crossing has no human
+// deployer, and reporting a robot as one to a system evaluating segregation of
+// duties would make four-eyes pass with three roles and two humans.
+const ActorController = "controller"

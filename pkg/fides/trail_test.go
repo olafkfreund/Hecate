@@ -282,3 +282,68 @@ func TestReportArtifactRefusesToDetachEvidence(t *testing.T) {
 		t.Error("the request was sent anyway — Fides would have nulled the link")
 	}
 }
+
+// Fides attributes an approval to the calling token unless told otherwise, so
+// an approval with no human is one every promotion shares. The client refuses
+// rather than sending it: a caller that lost track of the actor gets an error,
+// not a compliance record naming a service account as the approver.
+func TestRecordApprovalNeedsAHumanARoleAndATrail(t *testing.T) {
+	var posted int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		posted++
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+	c, err := New(Config{BaseURL: srv.URL, Token: "k"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		trail string
+		a     Approval
+	}{
+		{"no human", "aaaa1111-0000-0000-0000-000000000000", Approval{Role: RoleApprover}},
+		{"blank human", "aaaa1111-0000-0000-0000-000000000000", Approval{By: "  ", Role: RoleApprover}},
+		{"no trail", "", Approval{By: "olaf@acme.example", Role: RoleApprover}},
+		{"no role", "aaaa1111-0000-0000-0000-000000000000", Approval{By: "olaf@acme.example"}},
+		{"invented role", "aaaa1111-0000-0000-0000-000000000000", Approval{By: "olaf@acme.example", Role: "owner"}},
+	} {
+		if err := c.RecordApproval(context.Background(), tc.trail, tc.a); err == nil {
+			t.Errorf("%s: recorded without complaint", tc.name)
+		}
+	}
+	if posted != 0 {
+		t.Errorf("sent %d of those to Fides — each one is a compliance record that names "+
+			"the wrong identity or none", posted)
+	}
+}
+
+func TestRecordApprovalSendsTheApproval(t *testing.T) {
+	var got map[string]any
+	var path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.EscapedPath()
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+	c, err := New(Config{BaseURL: srv.URL, Token: "k"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = c.RecordApproval(context.Background(), "aaaa1111-0000-0000-0000-000000000000", Approval{
+		By: "olaf@acme.example", Role: RoleDeployer, Reason: "crossing production",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(path, "aaaa1111-0000-0000-0000-000000000000") {
+		t.Errorf("posted to %q, want the trail's approvals", path)
+	}
+	if got["on_behalf_of"] != "olaf@acme.example" || got["role"] != RoleDeployer {
+		t.Errorf("body = %v", got)
+	}
+}

@@ -215,3 +215,60 @@ func (c *Client) ReportArtifact(ctx context.Context, a Artifact) error {
 	}
 	return c.do(ctx, http.MethodPost, "/api/v1/artifacts", body, nil)
 }
+
+// Approval roles, as Fides names them when it evaluates segregation of duties.
+const (
+	// RoleApprover is a reviewer's sign-off.
+	RoleApprover = "approver"
+	// RoleDeployer is the identity that triggers the deployment. Distinct from
+	// the approver on purpose: Fides refuses a trail where they are the same
+	// person, which is the whole point of four-eyes.
+	RoleDeployer = "deployer"
+)
+
+// Approval is one identity signing off on a trail in one role.
+type Approval struct {
+	// By is the human the approval belongs to. Required.
+	//
+	// Sent as `on_behalf_of`, because Hecate authenticates to Fides with a
+	// service token: without it every approval Hecate records would carry the
+	// service account's identity, every identity would be equal, and
+	// segregation of duties would evaluate one person having done everything.
+	// Fides honours the delegation only when it is configured to and the email
+	// is a known user in the organisation — so this can be refused, and a
+	// refusal is a real answer rather than a transport failure.
+	By string
+	// Role is RoleApprover or RoleDeployer.
+	Role string
+	// Reason is free text stored with the approval.
+	Reason string
+}
+
+// RecordApproval records a sign-off on a trail, so Fides can evaluate
+// segregation of duties over the identities involved.
+//
+// Fides derives its verdict from the trail's committer tag plus the recorded
+// approvals: committer, approver and deployer must be three distinct people. It
+// treats a missing role as non-compliant rather than absent, so recording only
+// one of them leaves the change gate holding for a reason that reads like a
+// policy failure.
+func (c *Client) RecordApproval(ctx context.Context, trail string, a Approval) error {
+	switch {
+	case strings.TrimSpace(trail) == "":
+		return errors.New("fides: no trail to record an approval on")
+	case strings.TrimSpace(a.By) == "":
+		// Fides would happily attribute this to the service token, and an
+		// approval every promotion shares is not an approval.
+		return errors.New("fides: an approval must name the human who gave it")
+	case a.Role != RoleApprover && a.Role != RoleDeployer:
+		return fmt.Errorf("fides: %q is not an approval role (want %s or %s)",
+			a.Role, RoleApprover, RoleDeployer)
+	}
+
+	return c.do(ctx, http.MethodPost, "api/v1/trails/"+url.PathEscape(trail)+"/approvals",
+		map[string]any{
+			"role":         a.Role,
+			"on_behalf_of": a.By,
+			"reason":       a.Reason,
+		}, nil)
+}

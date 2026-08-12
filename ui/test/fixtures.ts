@@ -53,7 +53,7 @@ export const travelled: Bundle = {
     ],
   },
   status: {
-    approvedFor: ["production"],
+    approvedFor: [{ gate: "production", actor: "olaf@acme.example", at: "2026-08-11T12:00:00Z" }],
     // Deliberately out of order relative to `blocked`, so the timeline has to
     // sort rather than concatenate.
     cleared: [

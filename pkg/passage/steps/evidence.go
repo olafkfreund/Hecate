@@ -212,6 +212,12 @@ func (e *EvidenceGate) Run(ctx context.Context, sc *passage.StepContext) (passag
 	}
 
 	if selected[GateChange] {
+		// Before the verdict is read, never after: Fides evaluates segregation
+		// of duties from the identities recorded on the trail, and a verdict
+		// read first would be the one that says nobody is deploying this.
+		if err := e.recordDeployer(ctx, fidesClient, sc, trail); err != nil {
+			return passage.StepResult{Output: output}, err
+		}
 		return e.changeGate(ctx, fidesClient, sc, cfg, trail, output)
 	}
 
@@ -258,6 +264,32 @@ func (e *EvidenceGate) allowlist(
 					"`fides allowlist add --env %s --sha %s`",
 				StepEvidenceGate, digest, environment, strings.TrimPrefix(digest, "sha256:"))
 		}
+	}
+	return nil
+}
+
+// recordDeployer tells Fides who is performing this deployment, which is the
+// third identity its segregation-of-duties check needs — the other two being
+// the committer CI recorded and the approver `hecate approve` recorded.
+//
+// **An automatic crossing records nobody.** Hecate is not a person, and naming
+// it as the deployer would let a change pass four-eyes with two humans and a
+// robot. The change gate then holds with "no deployer recorded", which is the
+// correct answer: a control requiring a human to deploy is not satisfied by
+// nothing having required one.
+func (e *EvidenceGate) recordDeployer(
+	ctx context.Context, c *fides.Client, sc *passage.StepContext, trail string,
+) error {
+	if sc.Actor == "" || sc.Actor == passage.ActorController {
+		return nil
+	}
+	err := c.RecordApproval(ctx, trail, fides.Approval{
+		By:     sc.Actor,
+		Role:   fides.RoleDeployer,
+		Reason: fmt.Sprintf("crossing Gate %s in %s", sc.Gate, sc.Namespace),
+	})
+	if err != nil {
+		return unavailable("recording the deployer", err)
 	}
 	return nil
 }

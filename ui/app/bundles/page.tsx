@@ -46,7 +46,7 @@ function BundleList({ ns }: { ns: string }) {
                     <span className="text-[var(--muted-foreground)]">{b.spec.beacon}</span>
                     {b.status?.approvedFor?.length ? (
                       <span className="ml-auto text-[var(--muted-foreground)]">
-                        approved for {b.status.approvedFor.join(", ")}
+                        approved for {b.status.approvedFor.map((a) => a.gate).join(", ")}
                       </span>
                     ) : null}
                   </li>

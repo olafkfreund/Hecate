@@ -155,11 +155,37 @@ spec:
             properties:
               approvedFor:
                 description: |-
-                  ApprovedFor lists Gates a human has explicitly approved this Bundle for,
-                  letting it skip the normal upstream ordering.
+                  ApprovedFor lists the Gates a human has explicitly approved this Bundle
+                  for, letting it skip the normal upstream ordering.
+
+                  Each entry names its approver. An approval that does not say who gave it
+                  cannot satisfy four-eyes anywhere downstream — Fides evaluates
+                  segregation of duties by comparing the committer, the approver and the
+                  deployer as identities, and "approved" with no name is indistinguishable
+                  from the author approving their own change.
                 items:
-                  type: string
+                  description: BundleApproval is one human's sign-off for one Gate.
+                  properties:
+                    actor:
+                      description: Actor is who approved it. Required, and the whole
+                        point of the record.
+                      type: string
+                    at:
+                      description: At is when the approval was given.
+                      format: date-time
+                      type: string
+                    gate:
+                      description: Gate is the Gate this Bundle is approved for.
+                      type: string
+                  required:
+                  - actor
+                  - at
+                  - gate
+                  type: object
                 type: array
+                x-kubernetes-list-map-keys:
+                - gate
+                x-kubernetes-list-type: map
               blocked:
                 description: Blocked lists Gates that rejected this Bundle, with the
                   reason.

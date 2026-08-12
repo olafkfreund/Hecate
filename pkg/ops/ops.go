@@ -15,6 +15,7 @@ package ops
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -22,6 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/olafkfreund/hecate/api/v1alpha1"
+	"github.com/olafkfreund/hecate/pkg/fides"
 )
 
 // Ops answers questions and performs actions against a cluster.
@@ -29,10 +31,24 @@ type Ops struct {
 	Client client.Client
 	// Now is the clock, injectable for tests and for judging promotion windows.
 	Now func() metav1.Time
+	// FidesServer is the default Fides server, used when a Gate names none of
+	// its own. Approvals are recorded there so segregation of duties can be
+	// evaluated over real identities.
+	FidesServer string
+	// DialFides is injectable so tests can point at a fake Fides. Nil is the
+	// real client.
+	DialFides func(fides.Config) (*fides.Client, error)
 }
 
 // New returns an Ops over the given client.
-func New(c client.Client) *Ops { return &Ops{Client: c} }
+//
+// The Fides server defaults from FIDES_SERVER_URL — the same variable the
+// controller's --fides-server reads — so the CLI, the API server and the MCP
+// server all find it without three flags that have to agree. A Gate's own
+// evidence.serverURL still wins.
+func New(c client.Client) *Ops {
+	return &Ops{Client: c, FidesServer: os.Getenv("FIDES_SERVER_URL")}
+}
 
 func (o *Ops) now() metav1.Time {
 	if o.Now != nil {

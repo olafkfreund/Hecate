@@ -1455,3 +1455,60 @@ crossing in every cluster that has never heard of Fides emits a warning.
 step ran, its trail is reused rather than looked up again, so the crossing is
 attested on the chain that permitted it even if the artifact has since been
 relinked.
+
+---
+
+## D48 — An approval names its approver, and Hecate records it in Fides as three roles
+
+*2026-08-12 — #28*
+
+`bundle.status.approvedFor` was a list of Gate names. It recorded *that* a
+Bundle was approved and not *who* approved it, which is unusable for four-eyes:
+"approved" with no name is indistinguishable from the author approving their own
+change. It is now a list of `{gate, actor, at}`.
+
+A breaking change to `v1alpha1`, made now because the alternative is making it
+later. Nothing has released, and per the API lifecycle policy an alpha may
+change on the next alpha.
+
+**Fides evaluates segregation of duties; Hecate feeds it identities.** Fides
+compares three: the committer from the trail's tags, the approver, and the
+deployer. Hecate now supplies the two it knows —
+
+- `hecate approve` records the approving human as `role=approver`;
+- the evidence gate records the crossing's actor as `role=deployer`, before the
+  change-gate verdict is read, because a verdict read first is the one that says
+  nobody is deploying.
+
+**The distinctness rule is not reimplemented here.** #74's requirement that
+crossing rights and approval rights be separable is already structural:
+promoting is `create passages` and approving is `update bundles/status`, so a
+Role can carry one without the other and the API server enforces it. A second,
+weaker copy of the identity comparison in Hecate would be a policy that drifts
+from the one that matters.
+
+**`on_behalf_of` is not optional.** Hecate authenticates to Fides with a service
+token, so without it every approval Hecate ever recorded would carry the same
+identity, every identity would be equal, and segregation of duties would
+evaluate one actor having done everything. Fides honours the delegation only
+when configured to and only for a known user, so this can be refused — which is
+a real answer and surfaced as one.
+
+**An automatic crossing records no deployer.** Hecate is not a person, and
+naming it would let a change pass four-eyes with two humans and a robot. The
+change gate then holds on "no deployer recorded", which is correct: a control
+requiring a human to deploy is not satisfied by nothing having required one.
+
+**Fides is written before the cluster is.** If the cluster were written first, a
+retry would short-circuit on "already approved" and the Fides half would never
+be attempted — the Bundle would read as approved while the change gate went on
+reporting a missing sign-off, with nothing left to retry. This way a half-failed
+approval is simply not recorded and running the command again completes it; the
+Fides write is an upsert keyed on trail and approver, so repeating it is a no-op.
+
+**A known sharp edge, upstream.** Fides upserts on `(trail_id, approved_by)` and
+overwrites the role, so one person recorded in both roles collapses to a single
+row — the gate then holds on "no deployer recorded" rather than naming the
+collision. It still fails closed, so the control holds and only the message is
+poor. Not worked around here: a pre-check would be a second copy of Fides' own
+rule, and the fix belongs in the upsert.

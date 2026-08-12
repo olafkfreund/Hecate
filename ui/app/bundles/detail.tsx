@@ -37,8 +37,12 @@ export function BundleDetail() {
               </p>
               {b.status?.approvedFor?.length ? (
                 <p className="mt-2 text-sm">
-                  Approved for{" "}
-                  <span className="font-medium">{b.status.approvedFor.join(", ")}</span>
+                  {b.status.approvedFor.map((a) => (
+                    <span key={a.gate} className="mr-3">
+                      Approved for <span className="font-medium">{a.gate}</span>
+                      {a.actor ? <> by <span className="font-medium">{a.actor}</span></> : null}
+                    </span>
+                  ))}
                 </p>
               ) : null}
             </header>

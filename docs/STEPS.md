@@ -511,6 +511,18 @@ crossing proceeds. The Gate must carry `evidence.fidesEnvironment` and
 | `policy` | does the environment's policy accept this build? | environment + the build's trail |
 | `change` | evidence-backed approval verdict and 0–100 risk score | the build's trail |
 
+The `change` gate also reports **who is deploying**. Before it reads the verdict
+it records the crossing's actor on the trail as the deployer, which is the third
+identity Fides compares when it evaluates segregation of duties — the other two
+being the committer CI recorded and the approver `hecate approve` recorded. All
+three must be distinct people.
+
+An automatic crossing records nobody: Hecate is not a person, and naming it
+would let a change pass four-eyes with two humans and a robot. The gate then
+holds on "no deployer recorded", which is the correct answer for a control that
+requires a human to deploy.
+
+
 `reportArtifacts: true` records every image digest in the Bundle against the
 trail, so a change gate judges the whole release rather than only the image
 whose trail was looked up.

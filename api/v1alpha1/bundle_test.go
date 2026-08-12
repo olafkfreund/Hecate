@@ -98,7 +98,7 @@ func TestPhaseTerminal(t *testing.T) {
 func TestBundleClearedAndApproved(t *testing.T) {
 	b := &Bundle{Status: BundleStatus{
 		Cleared:     []GateCrossing{{Gate: "dev"}, {Gate: "staging"}},
-		ApprovedFor: []string{"production"},
+		ApprovedFor: []BundleApproval{{Gate: "production", Actor: "olaf@acme.example"}},
 	}}
 	if !b.HasCleared("staging") {
 		t.Error("staging should be cleared")

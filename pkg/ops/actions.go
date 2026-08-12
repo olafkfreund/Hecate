@@ -10,7 +10,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/olafkfreund/hecate/api/v1alpha1"
+	"github.com/olafkfreund/hecate/pkg/fides"
 	"github.com/olafkfreund/hecate/pkg/gate"
+	"github.com/olafkfreund/hecate/pkg/passage"
 )
 
 // RefusedError is an action the rules do not allow.
@@ -102,7 +104,8 @@ func (o *Ops) Approve(ctx context.Context, namespace, bundleName, gateName, acto
 
 	// The Gate must exist: approving for a name nobody has defined records an
 	// approval that will never be read, and reads as done.
-	if _, err := o.Gate(ctx, namespace, gateName); err != nil {
+	g, err := o.Gate(ctx, namespace, gateName)
+	if err != nil {
 		return err
 	}
 
@@ -113,6 +116,21 @@ func (o *Ops) Approve(ctx context.Context, namespace, bundleName, gateName, acto
 	if b.IsApprovedFor(gateName) {
 		return nil // Already approved. Asking twice is not an error.
 	}
+
+	// Fides first, the cluster second, and the order is the point.
+	//
+	// If the cluster were written first, a retry would short-circuit on
+	// IsApprovedFor above and the Fides half would never be attempted — the
+	// Bundle would read as approved here while the change gate went on
+	// reporting a missing sign-off, with nothing to retry. This way a failed
+	// approval is simply not recorded, and running the same command again
+	// completes it: the Fides write is an upsert keyed on the trail and the
+	// approver, so repeating it is a no-op.
+	if err := o.recordApprovalInFides(ctx, g, b, actor); err != nil {
+		return err
+	}
+
+	approval := v1alpha1.BundleApproval{Gate: gateName, Actor: actor, At: o.now()}
 
 	// Retried rather than patched: this appends to a list, and a merge patch
 	// would replace the whole list with the one we computed — silently dropping
@@ -125,10 +143,58 @@ func (o *Ops) Approve(ctx context.Context, namespace, bundleName, gateName, acto
 		if fresh.IsApprovedFor(gateName) {
 			return nil
 		}
-		fresh.Status.ApprovedFor = append(fresh.Status.ApprovedFor, gateName)
+		fresh.Status.ApprovedFor = append(fresh.Status.ApprovedFor, approval)
 		return o.Client.Status().Update(ctx, fresh)
 	}); err != nil {
 		return fmt.Errorf("recording approval: %w", err)
+	}
+	return nil
+}
+
+// recordApprovalInFides tells the compliance system who signed off, so its
+// segregation-of-duties evaluation has an approver identity to compare against
+// the committer and the deployer.
+//
+// A Gate that names no Fides environment is not using any of this, and this is
+// a no-op. Everything else is a hard failure rather than a warning: an approval
+// that only half-landed leaves the Bundle looking approved in the cluster while
+// the change gate still holds, and the operator has no way to tell which half
+// is missing. Refusing outright means "run it again" is always the right answer.
+func (o *Ops) recordApprovalInFides(
+	ctx context.Context, g *v1alpha1.Gate, b *v1alpha1.Bundle, actor string,
+) error {
+	if g.Spec.Evidence == nil {
+		return nil
+	}
+
+	c, err := passage.DialFides(ctx, o.Client, g.Namespace, o.FidesServer, g.Spec.Evidence, o.DialFides)
+	if err != nil {
+		return fmt.Errorf("reaching Fides to record the approval: %w", err)
+	}
+
+	digests := passage.ImageDigests(b)
+	if len(digests) == 0 {
+		return &RefusedError{Action: "approve", Reason: fmt.Sprintf(
+			"Gate %s checks evidence, but Bundle %s pins no image digest — there is nothing to "+
+				"record an approval against", g.Name, b.Name)}
+	}
+	trail, err := c.TrailForArtifact(ctx, digests[0])
+	if err != nil {
+		return fmt.Errorf("looking up the artifact's trail: %w", err)
+	}
+	if trail == "" {
+		return &RefusedError{Action: "approve", Reason: fmt.Sprintf(
+			"Fides has no record of %s, so an approval has nothing to attach to — the build that "+
+				"produced it did not report the artifact", digests[0])}
+	}
+
+	err = c.RecordApproval(ctx, trail, fides.Approval{
+		By:     actor,
+		Role:   fides.RoleApprover,
+		Reason: fmt.Sprintf("approved for Gate %s in %s", g.Name, g.Namespace),
+	})
+	if err != nil {
+		return fmt.Errorf("recording the approval in Fides: %w", err)
 	}
 	return nil
 }

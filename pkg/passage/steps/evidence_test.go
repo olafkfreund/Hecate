@@ -38,6 +38,11 @@ type fidesServer struct {
 	status     int
 	// reported holds the bodies POSTed to /artifacts.
 	reported []map[string]any
+	// approvals holds the bodies POSTed to a trail's /approvals.
+	approvals []map[string]any
+	// order is every call in the order it arrived, because some of these are
+	// only correct in a particular order.
+	order []string
 }
 
 func decodeBody(t *testing.T, r *http.Request) map[string]any {
@@ -72,7 +77,14 @@ func (f *fidesServer) start(t *testing.T) string {
 			body = or(f.policy, `{"compliant":true}`)
 		case strings.HasSuffix(path, "/change-gate"):
 			f.asked[GateChange]++
+			f.order = append(f.order, "change")
 			body = or(f.change, `{"recommendation":"approve","approved":true,"risk_score":5,"risk_level":"low"}`)
+		case strings.HasSuffix(path, "/approvals"):
+			f.order = append(f.order, "approval")
+			f.approvals = append(f.approvals, decodeBody(t, r))
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"status":"approved"}`))
+			return
 		case strings.HasSuffix(path, "/artifacts") && r.Method == http.MethodPost:
 			// Reporting, not looking up. Same path, different verb — the fake
 			// has to tell them apart or a report would be answered with a list.
@@ -476,5 +488,52 @@ func TestEvidenceGateDoesNotReportUnlessAsked(t *testing.T) {
 	}
 	if len(fake.reported) != 0 {
 		t.Errorf("reported %d artifacts without being asked", len(fake.reported))
+	}
+}
+
+// The third identity Fides needs. Without it the change gate holds on "no
+// deployer recorded" — a verdict about missing evidence that reads like a
+// policy failure.
+func TestTheChangeGateRecordsWhoIsDeploying(t *testing.T) {
+	fake := &fidesServer{}
+	server := fake.start(t)
+
+	sc := evidenceCtx(t, EvidenceGateConfig{Gates: []string{GateChange}}, testDigest)
+	sc.Actor = "olaf@acme.example"
+
+	if _, err := evidenceStep(t, server, nil).Run(context.Background(), sc); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(fake.approvals) != 1 {
+		t.Fatalf("recorded %d deployers, want one", len(fake.approvals))
+	}
+	a := fake.approvals[0]
+	if a["role"] != fides.RoleDeployer {
+		t.Errorf("role = %v, want %s", a["role"], fides.RoleDeployer)
+	}
+	if a["on_behalf_of"] != "olaf@acme.example" {
+		t.Errorf("on_behalf_of = %v, want the actor who asked for the crossing", a["on_behalf_of"])
+	}
+	if fake.order[len(fake.order)-1] != "change" {
+		t.Errorf("call order was %v — the deployer must be recorded before the verdict is "+
+			"read, or the verdict is the one that says nobody is deploying", fake.order)
+	}
+}
+
+// Hecate is not a person. Recording it as the deployer would let a change pass
+// four-eyes with two humans and a robot.
+func TestAnAutomaticCrossingRecordsNoDeployer(t *testing.T) {
+	fake := &fidesServer{}
+	server := fake.start(t)
+
+	sc := evidenceCtx(t, EvidenceGateConfig{Gates: []string{GateChange}}, testDigest)
+	sc.Actor = passage.ActorController
+
+	if _, err := evidenceStep(t, server, nil).Run(context.Background(), sc); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.approvals) != 0 {
+		t.Errorf("an automatic crossing recorded %v as a human deployer", fake.approvals)
 	}
 }

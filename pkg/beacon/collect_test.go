@@ -110,7 +110,7 @@ func TestCollectBelowTheLimitDoesNothing(t *testing.T) {
 func TestCollectNeverTouchesBundlesInUse(t *testing.T) {
 	current := aBundle("in-production", 0) // oldest, so first in line to go
 	approved := aBundle("approved", 1)
-	approved.Status.ApprovedFor = []string{"production"}
+	approved.Status.ApprovedFor = []v1alpha1.BundleApproval{{Gate: "production", Actor: "olaf@acme.example"}}
 	crossed := aBundle("has-a-passage", 2)
 
 	gate := &v1alpha1.Gate{

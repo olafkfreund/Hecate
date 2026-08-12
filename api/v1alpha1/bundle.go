@@ -127,11 +127,29 @@ type BundleStatus struct {
 	//
 	// +optional
 	Blocked []GateCrossing `json:"blocked,omitempty"`
-	// ApprovedFor lists Gates a human has explicitly approved this Bundle for,
-	// letting it skip the normal upstream ordering.
+	// ApprovedFor lists the Gates a human has explicitly approved this Bundle
+	// for, letting it skip the normal upstream ordering.
+	//
+	// Each entry names its approver. An approval that does not say who gave it
+	// cannot satisfy four-eyes anywhere downstream — Fides evaluates
+	// segregation of duties by comparing the committer, the approver and the
+	// deployer as identities, and "approved" with no name is indistinguishable
+	// from the author approving their own change.
 	//
 	// +optional
-	ApprovedFor []string `json:"approvedFor,omitempty"`
+	// +listType=map
+	// +listMapKey=gate
+	ApprovedFor []BundleApproval `json:"approvedFor,omitempty"`
+}
+
+// BundleApproval is one human's sign-off for one Gate.
+type BundleApproval struct {
+	// Gate is the Gate this Bundle is approved for.
+	Gate string `json:"gate"`
+	// Actor is who approved it. Required, and the whole point of the record.
+	Actor string `json:"actor"`
+	// At is when the approval was given.
+	At metav1.Time `json:"at"`
 }
 
 // GateCrossing records one Bundle/Gate outcome.
@@ -205,12 +223,21 @@ func (b *Bundle) HasCleared(gate string) bool {
 // IsApprovedFor reports whether a human has explicitly approved this Bundle for
 // the named Gate, bypassing upstream ordering.
 func (b *Bundle) IsApprovedFor(gate string) bool {
-	for _, g := range b.Status.ApprovedFor {
-		if g == gate {
-			return true
+	return b.ApprovalFor(gate) != nil
+}
+
+// ApprovalFor returns the approval recorded for a Gate, or nil.
+//
+// Callers that need the approver — recording it in Fides, showing who signed
+// off — want this rather than the boolean, so the name never has to be looked
+// up a second way.
+func (b *Bundle) ApprovalFor(gate string) *BundleApproval {
+	for i, a := range b.Status.ApprovedFor {
+		if a.Gate == gate {
+			return &b.Status.ApprovedFor[i]
 		}
 	}
-	return false
+	return nil
 }
 
 // +kubebuilder:object:root=true
