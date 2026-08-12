@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { api, type Gate } from "@/lib/api";
 import { Panel, useApi, useNamespace } from "@/components/loader";
 import { HealthDot } from "@/components/health";
@@ -35,7 +36,14 @@ export default function Gates() {
                 <tbody>
                   {gates.map((g: Gate) => (
                     <tr key={g.metadata.name} className="border-b border-[var(--line)]">
-                      <td className="py-2.5 font-medium">{g.metadata.name}</td>
+                      <td className="py-2.5 font-medium">
+                        <Link
+                          href={{ pathname: "/gates/", query: { name: g.metadata.name, namespace: ns } }}
+                          className="underline decoration-[var(--line)] underline-offset-4 hover:decoration-current"
+                        >
+                          {g.metadata.name}
+                        </Link>
+                      </td>
                       <td className="py-2.5 text-[var(--muted)]">
                         {g.status?.current?.bundle ?? "—"}
                       </td>

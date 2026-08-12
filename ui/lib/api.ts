@@ -89,6 +89,28 @@ async function get<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify(body),
+  });
+
+  if (res.status === 401) throw new Unauthenticated();
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const parsed = (await res.json()) as { error?: string };
+      if (parsed.error) detail = parsed.error;
+    } catch {
+      /* not JSON; the status text stands */
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return (await res.json()) as T;
+}
+
 const base = (ns: string) => `/api/v1alpha1/namespaces/${encodeURIComponent(ns)}`;
 
 export const api = {
@@ -99,22 +121,50 @@ export const api = {
   bundles: (ns: string) => get<Bundle[]>(`${base(ns)}/bundles`),
   passages: (ns: string) => get<Passage[]>(`${base(ns)}/passages`),
   health: () => get<{ status: string; version: string }>("/healthz"),
+
+  /**
+   * promote asks a Gate to cross a Bundle.
+   *
+   * No actor is sent: the API takes it from the authenticated caller and
+   * ignores anything the body claims, because a promotion is a compliance
+   * record and a self-declared identity is not one.
+   */
+  promote: (ns: string, gate: string, bundle: string) =>
+    post<Passage>(`${base(ns)}/gates/${encodeURIComponent(gate)}/promote`, { bundle }),
 };
 
+/**
+ * These mirror pkg/ops exactly, field for field.
+ *
+ * Hand-written rather than generated, and therefore able to drift — the first
+ * version of this file invented `reason` and `remedy` where the Go type has
+ * `kind` and `fix`, and TypeScript was perfectly happy because nothing checks a
+ * response against a schema at runtime. Worth generating from the Go types
+ * eventually; until then, changing pkg/ops means changing this.
+ */
 export interface Blocker {
+  /** A stable code, so the UI can branch without parsing prose. */
+  kind: string;
+  detail: string;
+  /** What would unblock it, when there is a single obvious answer. */
+  fix?: string;
+}
+
+export interface Waiting {
+  bundle: string;
   reason: string;
-  detail?: string;
-  remedy?: string;
 }
 
 export interface Explanation {
   gate: string;
+  namespace: string;
   state: string;
-  summary?: string;
-  health?: Health;
+  summary: string;
   blockers?: Blocker[];
+  current?: string;
   eligible?: string[];
-  waiting?: { bundle: string; reason: string }[];
+  waiting?: Waiting[];
+  health?: Health;
 }
 
 /**
