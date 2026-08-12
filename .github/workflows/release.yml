@@ -128,8 +128,10 @@ jobs:
           v="${{ needs.version.outputs.version }}"
           # Version comes from the flag, so Chart.yaml never needs bumping and
           # can never disagree with the release.
-          helm package charts/hecate --version "$v" --app-version "$v" --destination dist
+          # Lint first: linting a chart that has already been packaged cannot
+          # stop it being packaged.
           helm lint charts/hecate
+          helm package charts/hecate --version "$v" --app-version "$v" --destination dist
 
       # Helm installs a chart's crds/ once and never upgrades them, so an
       # upgrading user needs the CRDs as something they can apply themselves.
@@ -264,5 +266,15 @@ jobs:
             --certificate-oidc-issuer https://token.actions.githubusercontent.com
           \`\`\`
           EOF
-          gh release create "$GITHUB_REF_NAME" dist/*.tgz dist/hecate-* dist/checksums.txt \
+          # Listed explicitly rather than with `dist/*.tgz dist/hecate-*`, which
+          # was wrong twice over: those globs both match the chart tarball, so
+          # it was passed as two assets of the same name — and neither matched
+          # crds.yaml, which the upgrade instructions above tell people to
+          # download. An upgrade path pointing at a 404 is the worst asset to
+          # get wrong, because it is found mid-rollout.
+          gh release create "$GITHUB_REF_NAME" \
+            dist/hecate-*.tgz \
+            dist/crds.yaml \
+            dist/hecate-linux-* dist/hecate-darwin-* \
+            dist/checksums.txt \
             --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag
