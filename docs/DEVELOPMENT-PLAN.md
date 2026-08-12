@@ -176,13 +176,24 @@ because retrofitting tracing is far more expensive than building with it.
 
 ## 5. Supported versions
 
-Stated, tested, and enforced in CI — not "latest".
+Stated, and mostly enforced in CI rather than asserted — with the exception named
+below, because a matrix that overstates itself is the fiction this section exists to
+prevent.
 
-| | Supported |
-|---|---|
-| Kubernetes | N-2, matching Flux |
-| Flux | The three minor versions Flux itself supports |
-| Hecate | The latest **two** minors |
+| | Supported | Proved by |
+|---|---|---|
+| Kubernetes | N-2 — currently v1.34, v1.35, v1.36 | one e2e leg each |
+| Flux | The three minors Flux itself supports — v2.7, v2.8, v2.9 | one e2e leg each |
+| Hecate | The latest **two** minors | nothing; there is no release yet |
+
+The three e2e legs each pin one Flux **and** one Kubernetes, paired oldest-with-oldest.
+That covers both ranges in three jobs rather than nine, at the cost of never testing the
+cross product: new Flux on old Kubernetes is untested, and the README says so. The
+pairing is chosen because oldest-with-oldest is where a compatibility break is most
+likely to surface.
+
+Hecate's own two-minor promise is enforced by nothing, and cannot be until there is a
+release to support. Stated here so the gap is visible rather than assumed away.
 
 Flux currently ships [v2.9 (June 2026)](https://fluxcd.io/blog/2026/06/flux-v2.9.0/),
 maintains three minors at a time, and releases roughly every four months following the

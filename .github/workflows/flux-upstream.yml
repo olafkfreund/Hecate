@@ -66,7 +66,8 @@ jobs:
             echo "Hecate supports the three minors Flux itself supports, so this needs a"
             echo "rotation rather than a bump: add \`$latest_minor\`, drop the oldest."
             echo
-            echo "- [ ] \`.github/workflows/e2e.yml\` — rotate \`flux: [...]\`"
+            echo "- [ ] \`.github/workflows/e2e.yml\` — rotate \`flux: [...]\` **and** the paired"
+            echo "      \`k3s:\` images under \`include:\`, which track Kubernetes N-2 separately"
             echo "- [ ] \`README.md\` and \`docs/DEVELOPMENT-PLAN.md\` — the stated support matrix"
             echo "- [ ] \`pkg/flux/testdata/\` — capture fixtures for $latest_minor, drop the dropped minor's"
             echo "- [ ] Read the release notes for removed API versions; \`pkg/health\` defaults one per kind"

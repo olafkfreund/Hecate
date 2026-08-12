@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   crossing:
-    name: Crossing on k3d (Flux ${{ matrix.flux }})
+    name: Crossing on k3d (Flux ${{ matrix.flux }}, k8s ${{ matrix.k3s }})
     runs-on: ubuntu-latest
     # A hung step otherwise runs until GitHub's six-hour default. k3d cluster
     # creation has hung here once, mid-"Starting agents", which burned twenty
@@ -32,7 +32,26 @@ jobs:
       matrix:
         # The three minors Flux itself supports. A Flux release that breaks us
         # fails a build rather than a user's cluster — see #90.
+        #
+        # This list is read by .github/workflows/flux-upstream.yml, which opens
+        # an issue when a Flux minor appears that is not in it. Keep the shape.
         flux: ['2.7', '2.8', '2.9']
+        # Each leg also pins a different Kubernetes, so the three between them
+        # span the N-2 range the README claims (#88). `include` adds a field to
+        # a combination that already exists rather than multiplying the matrix,
+        # so this stays three jobs rather than nine.
+        #
+        # The pairing is oldest-with-oldest deliberately: that is the
+        # combination most likely to break. It does mean the *cross* product is
+        # untested — new Flux on old Kubernetes is not covered — and the support
+        # matrix says so rather than implying otherwise.
+        include:
+          - flux: '2.7'
+            k3s: 'rancher/k3s:v1.34.10-k3s1'   # N-2
+          - flux: '2.8'
+            k3s: 'rancher/k3s:v1.35.7-k3s1'    # N-1
+          - flux: '2.9'
+            k3s: 'rancher/k3s:v1.36.3-k3s1'    # N
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -65,7 +84,9 @@ jobs:
 
       # The same script developers run, so a break here is a break for them
       # too — and the script itself gets tested rather than only the workflow.
-      - name: Create the cluster
+      - name: Create the cluster (Kubernetes ${{ matrix.k3s }})
+        env:
+          K3S_IMAGE: ${{ matrix.k3s }}
         run: ./scripts/dev-cluster.sh up
 
       # The two phases below select tests by name, because one needs Hecate

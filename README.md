@@ -251,11 +251,16 @@ charts/hecate/crds/   Generated CRDs.
 
 ## Compatibility
 
-| | Supported |
-|---|---|
-| **Flux** | The three minor versions Flux itself supports (currently v2.7–v2.9) |
-| **Kubernetes** | N-2, matching Flux |
-| **Hecate** | The latest two minors |
+| | Supported | Proved by |
+|---|---|---|
+| **Flux** | The three minors Flux itself supports — currently v2.7, v2.8, v2.9 | every e2e run, one leg each |
+| **Kubernetes** | N-2 — currently v1.34, v1.35, v1.36 | the same three legs, one version each |
+| **Hecate** | The latest two minors | nothing yet; there is no release |
+
+Each e2e leg pairs one Flux with one Kubernetes, oldest with oldest, so three jobs cover
+both ranges. **The cross product is not tested** — new Flux on old Kubernetes is not a
+combination CI exercises — and the pairing puts together the versions most likely to
+break rather than pretending to more coverage than nine jobs would buy.
 
 Hecate reads Flux resources and never writes them. The exact API versions and status
 fields it depends on are listed in

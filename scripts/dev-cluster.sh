@@ -41,8 +41,12 @@ up() {
     log "creating k3d cluster $CLUSTER with a local registry on :$REGISTRY_PORT"
     # A local registry means the dev image never leaves the machine, so the
     # inner loop does not depend on GHCR or on being online.
+    # K3S_IMAGE pins the Kubernetes version. Unset means k3d's default, which
+    # is right for local work; CI sets it so the three e2e legs between them
+    # span the Kubernetes range we claim to support (#88).
     k3d cluster create "$CLUSTER" \
       --agents 1 \
+      ${K3S_IMAGE:+--image "$K3S_IMAGE"} \
       --registry-create "${REGISTRY}:0.0.0.0:${REGISTRY_PORT}" \
       --wait
   fi
