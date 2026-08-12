@@ -16,6 +16,7 @@ import (
 
 	"github.com/olafkfreund/hecate/api/v1alpha1"
 	"github.com/olafkfreund/hecate/pkg/metrics"
+	"github.com/olafkfreund/hecate/pkg/telemetry"
 )
 
 // Reconciler drives a Passage's steps to completion.
@@ -100,6 +101,17 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, fmt.Errorf("creating work directory: %w", err)
 	}
 
+	// Allocated before the first step runs, because git-commit writes it into a
+	// `traceparent` trailer during the crossing — long before the trace is
+	// emitted. Advance deep-copies status, so setting it here carries through.
+	//
+	// Only when tracing is configured: an ID naming a trace nobody exported
+	// would be worse than an empty field, and a trailer promising one worse
+	// still (D41).
+	if passage.Status.TraceID == "" && telemetry.Enabled() {
+		passage.Status.TraceID = telemetry.NewTraceID()
+	}
+
 	before := passage.Status.Phase
 	outcome := r.Engine.Advance(ctx, &passage, bundle, r.WorkDir(&passage))
 
@@ -111,12 +123,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		passage.Status.Watch = outcome.Watch
 	}
 
-	// Emitted before the status write, because the trace ID has to be persisted
-	// in the same update that records the terminal phase. A Passage is never
-	// reconciled again once terminal, so a second update afterwards is a second
-	// chance to lose it permanently.
 	if passage.Status.Phase.Terminal() {
-		passage.Status.TraceID = recordTrace(&passage)
+		recordTrace(&passage)
 	}
 
 	if err := r.Status().Update(ctx, &passage); err != nil {

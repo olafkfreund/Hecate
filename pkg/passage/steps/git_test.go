@@ -363,3 +363,84 @@ func TestClassifyGitErrors(t *testing.T) {
 		}
 	}
 }
+
+// Git is the rendezvous, so git is where the trace context has to travel: this
+// trailer is the link that lets one trace span the CI run, the crossing and the
+// reconciliation that applied it.
+func TestGitCommitWritesTheTraceparentTrailer(t *testing.T) {
+	const tp = "00-4bf92f3577b34da6a3ce929d0e0e4736-a3ce929d0e0e4736-01"
+
+	origin, work := originRepo(t), t.TempDir()
+	mustRun(t, NewGitClone(nil), gitCtx(t, work, GitCloneConfig{Repo: origin}))
+	if err := os.WriteFile(filepath.Join(work, "repo", "app.yaml"),
+		[]byte("image: acme:2.0.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sc := gitCtx(t, work, GitCommitConfig{Message: "promote podinfo to production"})
+	sc.Traceparent = tp
+	res := mustRun(t, NewGitCommit(), sc)
+
+	msg := commitMessage(t, work, res.Output["sha"].(string))
+	want := "promote podinfo to production\n\ntraceparent: " + tp + "\n"
+	if msg != want {
+		t.Errorf("commit message =\n%q\nwant\n%q", msg, want)
+	}
+	// A trailer must be its own paragraph or git reads it as prose.
+	if !strings.Contains(msg, "\n\ntraceparent: ") {
+		t.Error("the trailer is not separated from the body by a blank line")
+	}
+}
+
+// The commit SHA is reproducible by design (D19/D42): a retried crossing must
+// re-create the same commit rather than stack a second one on the branch. That
+// only holds because the trace ID is allocated once per Passage and persisted,
+// so this is the test that fails if anyone moves generation into the step.
+func TestGitCommitStaysReproducibleWithATrailer(t *testing.T) {
+	const tp = "00-4bf92f3577b34da6a3ce929d0e0e4736-a3ce929d0e0e4736-01"
+
+	sha := func(t *testing.T) string {
+		origin, work := originRepo(t), t.TempDir()
+		mustRun(t, NewGitClone(nil), gitCtx(t, work, GitCloneConfig{Repo: origin}))
+		if err := os.WriteFile(filepath.Join(work, "repo", "app.yaml"),
+			[]byte("image: acme:2.0.0\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		sc := gitCtx(t, work, GitCommitConfig{Message: "promote"})
+		sc.Traceparent = tp
+		return mustRun(t, NewGitCommit(), sc).Output["sha"].(string)
+	}
+	if a, b := sha(t), sha(t); a != b {
+		t.Errorf("the same crossing produced two commits: %s and %s", a, b)
+	}
+}
+
+// Tracing off means no trailer at all — not an empty one, and not a
+// `traceparent` naming a trace nobody exported.
+func TestGitCommitOmitsTheTrailerWhenTracingIsOff(t *testing.T) {
+	origin, work := originRepo(t), t.TempDir()
+	mustRun(t, NewGitClone(nil), gitCtx(t, work, GitCloneConfig{Repo: origin}))
+	if err := os.WriteFile(filepath.Join(work, "repo", "app.yaml"),
+		[]byte("image: acme:2.0.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res := mustRun(t, NewGitCommit(), gitCtx(t, work, GitCommitConfig{Message: "promote"}))
+
+	if msg := commitMessage(t, work, res.Output["sha"].(string)); msg != "promote" {
+		t.Errorf("commit message = %q, want the message untouched", msg)
+	}
+}
+
+func commitMessage(t *testing.T, work, sha string) string {
+	t.Helper()
+	repo, err := git.PlainOpen(filepath.Join(work, "repo"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit, err := repo.CommitObject(plumbing.NewHash(sha))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return commit.Message
+}

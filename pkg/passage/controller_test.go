@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/olafkfreund/hecate/api/v1alpha1"
+	"github.com/olafkfreund/hecate/pkg/telemetry"
 )
 
 func scheme(t *testing.T) *runtime.Scheme {
@@ -303,28 +304,58 @@ func drainFor(t *testing.T, rec *record.FakeRecorder, reason string) {
 	}
 }
 
-// The trace ID has to be written in the same status update that records the
-// terminal phase. A Passage is never reconciled again once terminal, so an
-// update that happened before recordTrace ran would lose the ID permanently and
-// nothing downstream would notice.
-func TestPassagePersistsItsTraceID(t *testing.T) {
+// The whole chain in one test: the trace ID is allocated before the first step
+// runs, the step sees it as a traceparent, and the trace that is finally emitted
+// uses that same ID.
+//
+// Getting any link wrong is silent and permanent — a commit trailer pointing at
+// a trace that does not exist, or a trace nothing in git refers to.
+func TestPassageAllocatesATraceIDAndEmitsUnderIt(t *testing.T) {
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318")
 	sr := recorder(t)
+
+	var seen string
 	step := &scripted{name: "a", results: []StepResult{ok("done")}}
+	step.observe = func(sc *StepContext) { seen = sc.Traceparent }
 	r, c, _ := newController(t, []Runner{step}, passageObj(v1alpha1.Step{Uses: "a"}), bundleObj())
 
 	advance(t, r)
 
 	got := getPassage(t, c)
 	if got.Status.TraceID == "" {
-		t.Fatal("a finished Passage must record the trace it emitted")
+		t.Fatal("a traced Passage must record the trace it emitted")
 	}
+	// The step ran before the status was written, so it can only have seen the
+	// ID if allocation happens up front rather than at the end.
+	if want := telemetry.Traceparent(got.Status.TraceID); seen != want {
+		t.Errorf("the step saw traceparent %q, want %q", seen, want)
+	}
+
 	spans := sr.Ended()
 	if len(spans) == 0 {
 		t.Fatal("no spans were emitted")
 	}
 	root := spans[len(spans)-1]
 	if root.SpanContext().TraceID().String() != got.Status.TraceID {
-		t.Errorf("status.traceID %q does not name the trace that was exported (%q)",
-			got.Status.TraceID, root.SpanContext().TraceID())
+		t.Errorf("the exported trace is %q, but status.traceID says %q",
+			root.SpanContext().TraceID(), got.Status.TraceID)
+	}
+}
+
+// With no collector configured there is no trace, so there must be no trace ID
+// and no commit trailer promising one.
+func TestPassageAllocatesNoTraceIDWhenTracingIsOff(t *testing.T) {
+	var seen = "unset"
+	step := &scripted{name: "a", results: []StepResult{ok("done")}}
+	step.observe = func(sc *StepContext) { seen = sc.Traceparent }
+	r, c, _ := newController(t, []Runner{step}, passageObj(v1alpha1.Step{Uses: "a"}), bundleObj())
+
+	advance(t, r)
+
+	if got := getPassage(t, c); got.Status.TraceID != "" {
+		t.Errorf("status.traceID = %q, want empty with tracing off", got.Status.TraceID)
+	}
+	if seen != "" {
+		t.Errorf("the step saw traceparent %q, want none", seen)
 	}
 }

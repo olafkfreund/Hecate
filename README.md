@@ -204,7 +204,8 @@ authoritative and Hecate removable.
   first-class API field rather than an annotation bolted on later. Point
   `OTEL_EXPORTER_OTLP_ENDPOINT` at your collector and crossings show up there; every
   other knob is the standard `OTEL_*` variable, and with none of them set nothing is
-  exported. Trace context in git commit trailers and DORA metrics are still to come.
+  exported. Every promotion commit carries a `traceparent` trailer, so one trace spans
+  the CI run, the crossing and the Flux reconciliation. DORA metrics are still to come.
 - **A UI and CLI worth using.** Next.js 16 + React 19 + Tailwind v4, matching the
   Fides portal. The CLI is the product — every UI action has a CLI equivalent and
   gates return documented exit codes.

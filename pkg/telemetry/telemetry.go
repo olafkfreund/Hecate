@@ -9,7 +9,10 @@
 package telemetry
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 
@@ -117,4 +120,54 @@ func spanExporter(ctx context.Context) (*otlptrace.Exporter, error) {
 // Attr is a convenience for the hecate.* attributes shared by traces.
 func Attr(key, value string) attribute.KeyValue {
 	return attribute.String("hecate."+key, value)
+}
+
+// NewTraceID returns a fresh W3C trace ID as 32 hex characters.
+//
+// Allocated when a Passage starts rather than when its trace is emitted,
+// because a `traceparent` git trailer has to be written *during* the crossing —
+// long before the trace exists. Persisting it in `status.traceID` also keeps
+// commits reproducible: a retried Passage writes the same trailer, so it
+// produces the same commit SHA (D42).
+func NewTraceID() string {
+	var id [16]byte
+	for {
+		if _, err := rand.Read(id[:]); err != nil {
+			// crypto/rand does not fail on any platform we run on, and a
+			// promotion must not be blocked by telemetry. No ID means no trace.
+			return ""
+		}
+		// Both halves must be non-zero: the second is the parent span ID
+		// (Traceparent below), and an all-zero span ID is invalid.
+		if !bytes.Equal(id[:8], zero8) && !bytes.Equal(id[8:], zero8) {
+			return hex.EncodeToString(id[:])
+		}
+	}
+}
+
+var zero8 = make([]byte, 8)
+
+// Traceparent renders a W3C `traceparent` header value for a Passage's trace.
+//
+// **The parent span ID is the trace ID's own second half.** It therefore needs
+// no field of its own — anyone holding `status.traceID` can recompute the exact
+// trailer that was written — and it names a span Hecate never emits: the
+// promotion commit itself. Git is the rendezvous (D3), so the commit is where
+// the crossing and whatever reconciles it downstream both hang from.
+//
+// Returns "" for anything that is not a valid trace ID, so a caller can treat
+// "no trace" and "no trailer" as the same case.
+func Traceparent(traceID string) string {
+	if len(traceID) != 32 {
+		return ""
+	}
+	if _, err := hex.DecodeString(traceID); err != nil {
+		return ""
+	}
+	if traceID[:16] == "0000000000000000" || traceID[16:] == "0000000000000000" {
+		return ""
+	}
+	// version 00, sampled: Hecate only allocates a trace ID when it is
+	// exporting, so a trailer that exists describes a trace that exists.
+	return "00-" + traceID + "-" + traceID[16:] + "-01"
 }

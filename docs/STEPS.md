@@ -80,6 +80,20 @@ stack a second commit ([D23](DECISIONS.md)). A clean tree succeeds and reports
 HEAD, because that is exactly what a re-run looks like — with `committed: false`,
 so a following step can tell the difference.
 
+When tracing is configured, the commit carries the crossing's W3C trace context
+as a trailer, so one trace can span the CI run, the promotion and the Flux
+reconciliation ([D42](DECISIONS.md)):
+
+```
+promote podinfo to production
+
+traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-a3ce929d0e0e4736-01
+```
+
+The trace ID is allocated once per Passage and persisted, so a retry writes the
+identical trailer and therefore the identical commit. With no collector
+configured there is no trace and no trailer.
+
 **Output:** `sha`, `committed`.
 
 **Reasons:** `WorkDirLost`, `GitFailed`, `InvalidConfig`.

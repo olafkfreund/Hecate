@@ -14,7 +14,7 @@ import (
 const tracerName = "github.com/olafkfreund/hecate/pkg/passage"
 
 // recordTrace emits a finished Passage as one trace — the Passage a root span,
-// each step a child — and returns the trace ID for `status.traceID`.
+// each step a child — under the trace ID allocated when the Passage started.
 //
 // **The trace is reconstructed from the persisted status rather than held open
 // across the crossing.** A Passage spans many reconciles and can outlive the
@@ -29,18 +29,23 @@ const tracerName = "github.com/olafkfreund/hecate/pkg/passage"
 // allocate the ID up front and seed a parent span context here — a contained
 // change, and one with a reason to exist by then.
 //
-// Returns "" when tracing is off: the no-op provider yields an invalid span
-// context, and a traceID field pointing at a trace nobody exported would be
-// worse than an empty one.
-func recordTrace(p *v1alpha1.Passage) string {
+// An empty `status.traceID` means tracing was off when the Passage started, so
+// there is nothing to emit and nothing to emit it under.
+func recordTrace(p *v1alpha1.Passage) {
 	if p.Status.StartedAt == nil || p.Status.FinishedAt == nil {
 		// A Passage that failed before its first step ran — no span has an
 		// honest duration, so there is nothing to say.
-		return ""
+		return
+	}
+	parent := parentContext(p.Status.TraceID)
+	if !parent.IsValid() {
+		return
 	}
 
 	tracer := otel.Tracer(tracerName)
-	ctx, root := tracer.Start(context.Background(), "passage "+p.Spec.Gate,
+	ctx, root := tracer.Start(
+		trace.ContextWithSpanContext(context.Background(), parent),
+		"passage "+p.Spec.Gate,
 		trace.WithTimestamp(p.Status.StartedAt.Time),
 		trace.WithAttributes(
 			telemetry.Attr("gate", p.Spec.Gate),
@@ -59,11 +64,35 @@ func recordTrace(p *v1alpha1.Passage) string {
 		root.SetStatus(codes.Error, p.Status.Message)
 	}
 	root.End(trace.WithTimestamp(p.Status.FinishedAt.Time))
+}
 
-	if sc := root.SpanContext(); sc.IsValid() {
-		return sc.TraceID().String()
+// parentContext rebuilds the span context named by the Passage's `traceparent`
+// trailer, so Hecate's own spans land in the same trace as anything downstream
+// that read the commit.
+//
+// The span it names is deliberately never emitted by Hecate: it stands for the
+// promotion commit, which is the rendezvous both sides hang from (D42). A
+// backend renders the Passage span as the trace's root with an absent parent,
+// which is what any span whose parent lives in another system looks like.
+func parentContext(traceID string) trace.SpanContext {
+	tp := telemetry.Traceparent(traceID)
+	if tp == "" {
+		return trace.SpanContext{}
 	}
-	return ""
+	tid, err := trace.TraceIDFromHex(traceID)
+	if err != nil {
+		return trace.SpanContext{}
+	}
+	sid, err := trace.SpanIDFromHex(traceID[16:])
+	if err != nil {
+		return trace.SpanContext{}
+	}
+	return trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    tid,
+		SpanID:     sid,
+		TraceFlags: trace.FlagsSampled,
+		Remote:     true,
+	})
 }
 
 // traceStep emits one step's span.

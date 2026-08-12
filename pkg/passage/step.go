@@ -51,6 +51,10 @@ type StepContext struct {
 	Outputs map[string]map[string]any
 	// Attempt is how many times this step has already run, starting at 0.
 	Attempt int32
+	// Traceparent is the W3C trace context for this crossing, or empty when
+	// tracing is off. Steps that write something durable should carry it, so a
+	// promotion can be correlated end to end (D42).
+	Traceparent string
 	// StartedAt is when the Passage began.
 	//
 	// Steps that produce content should derive timestamps from this rather than

@@ -139,3 +139,42 @@ func TestStartExportsSpansOverOTLPHTTP(t *testing.T) {
 		t.Fatal("no span reached the collector")
 	}
 }
+
+func TestNewTraceIDIsUsableAsATraceparent(t *testing.T) {
+	seen := map[string]bool{}
+	for range 100 {
+		id := NewTraceID()
+		if len(id) != 32 {
+			t.Fatalf("trace ID %q is not 32 hex characters", id)
+		}
+		if seen[id] {
+			t.Fatalf("NewTraceID repeated %q", id)
+		}
+		seen[id] = true
+
+		// The second half doubles as the parent span ID, so it must never be
+		// all-zero — that is the invalid span ID, and a backend drops it.
+		if id[16:] == "0000000000000000" || id[:16] == "0000000000000000" {
+			t.Fatalf("trace ID %q has a zero half", id)
+		}
+		if tp := Traceparent(id); tp != "00-"+id+"-"+id[16:]+"-01" {
+			t.Fatalf("Traceparent(%q) = %q", id, tp)
+		}
+	}
+}
+
+func TestTraceparentRefusesWhatIsNotATraceID(t *testing.T) {
+	for _, bad := range []string{
+		"",
+		"too short",
+		"00000000000000000000000000000000",   // all zero
+		"0000000000000000ffffffffffffffff",   // zero trace half
+		"ffffffffffffffff0000000000000000",   // zero span half
+		"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",   // not hex
+		"ffffffffffffffffffffffffffffffffff", // too long
+	} {
+		if got := Traceparent(bad); got != "" {
+			t.Errorf("Traceparent(%q) = %q, want empty", bad, got)
+		}
+	}
+}

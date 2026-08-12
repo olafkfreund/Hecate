@@ -11,6 +11,7 @@ import (
 
 	"github.com/olafkfreund/hecate/api/v1alpha1"
 	"github.com/olafkfreund/hecate/pkg/expr"
+	"github.com/olafkfreund/hecate/pkg/telemetry"
 )
 
 // Engine advances a Passage by running its steps in order.
@@ -159,16 +160,17 @@ func (e *Engine) Advance(
 		}
 
 		res, err := runner.Run(ctx, &StepContext{
-			Namespace: p.Namespace,
-			Gate:      p.Spec.Gate,
-			Passage:   p.Name,
-			Bundle:    bundle,
-			Actor:     p.Spec.Actor,
-			WorkDir:   workDir,
-			Config:    cfg,
-			Outputs:   outputs,
-			Attempt:   st.Attempts - 1,
-			StartedAt: status.StartedAt.Time,
+			Namespace:   p.Namespace,
+			Traceparent: telemetry.Traceparent(status.TraceID),
+			Gate:        p.Spec.Gate,
+			Passage:     p.Name,
+			Bundle:      bundle,
+			Actor:       p.Spec.Actor,
+			WorkDir:     workDir,
+			Config:      cfg,
+			Outputs:     outputs,
+			Attempt:     st.Attempts - 1,
+			StartedAt:   status.StartedAt.Time,
 		})
 
 		// A step that produced output records it even on failure — the output

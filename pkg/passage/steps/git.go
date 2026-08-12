@@ -361,7 +361,7 @@ func (g *GitCommit) Run(_ context.Context, sc *passage.StepContext) (passage.Ste
 	}
 
 	sig := signature(cfg.Author, sc.StartedAt)
-	hash, err := tree.Commit(cfg.Message, &git.CommitOptions{
+	hash, err := tree.Commit(withTraceparent(cfg.Message, sc.Traceparent), &git.CommitOptions{
 		Author: sig, Committer: sig, AllowEmptyCommits: cfg.AllowEmpty,
 	})
 	if err != nil {
@@ -375,6 +375,28 @@ func (g *GitCommit) Run(_ context.Context, sc *passage.StepContext) (passage.Ste
 			"sha": hash.String(), "short": hash.String()[:8], "committed": true,
 		},
 	}, nil
+}
+
+// withTraceparent appends the W3C trace context as a git trailer.
+//
+// Git is the rendezvous (D3), so git is where the trace context has to travel:
+// this is the link that lets one trace span the CI run that built the artifact,
+// the crossing that promoted it, and the reconciliation that applied it.
+//
+// A trailer is the right shape for it — a `key: value` line in the message's
+// last paragraph, which `git interpret-trailers` and every forge already
+// understand — and it changes nothing for a reader who does not care.
+//
+// The trace ID is allocated once per Passage and persisted, so a retried
+// crossing writes the identical trailer and therefore the identical commit SHA.
+// Generating it here instead would give every attempt a new hash and turn a
+// harmless retry into a second commit on the branch.
+func withTraceparent(message, traceparent string) string {
+	if traceparent == "" {
+		return message
+	}
+	// A trailer must be its own paragraph, or git reads it as prose.
+	return strings.TrimRight(message, "\n") + "\n\ntraceparent: " + traceparent + "\n"
 }
 
 // stage adds the configured paths, or everything when none are given.

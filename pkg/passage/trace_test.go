@@ -25,6 +25,10 @@ func recorder(t *testing.T) *tracetest.SpanRecorder {
 	return sr
 }
 
+// The trace ID a Passage is given when it starts, so git-commit can write a
+// traceparent trailer long before the trace exists.
+const allocatedTraceID = "4bf92f3577b34da6a3ce929d0e0e4736"
+
 func at(base time.Time, seconds int) *metav1.Time {
 	return &metav1.Time{Time: base.Add(time.Duration(seconds) * time.Second)}
 }
@@ -37,6 +41,7 @@ func finishedPassage(base time.Time) *v1alpha1.Passage {
 		},
 		Status: v1alpha1.PassageStatus{
 			Phase:      v1alpha1.PassageSucceeded,
+			TraceID:    allocatedTraceID,
 			StartedAt:  at(base, 0),
 			FinishedAt: at(base, 90),
 			Steps: []v1alpha1.StepStatus{
@@ -57,14 +62,11 @@ func TestRecordTraceEmitsAPassageAndItsSteps(t *testing.T) {
 	sr := recorder(t)
 	base := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
 
-	id := recordTrace(finishedPassage(base))
+	recordTrace(finishedPassage(base))
 
 	spans := sr.Ended()
 	if len(spans) != 3 {
 		t.Fatalf("want a root span and two step spans, got %d", len(spans))
-	}
-	if id == "" {
-		t.Fatal("want a trace ID for a traced Passage, got none")
 	}
 
 	// Steps end before the root, so the recorder sees them first.
@@ -72,9 +74,17 @@ func TestRecordTraceEmitsAPassageAndItsSteps(t *testing.T) {
 	if root.Name() != "passage production" {
 		t.Errorf("root span name = %q", root.Name())
 	}
-	if root.SpanContext().TraceID().String() != id {
-		t.Errorf("returned trace ID %q does not match the root span's %q",
-			id, root.SpanContext().TraceID())
+	// The trace must be the one the commit trailer already promised, or the
+	// trailer points at a trace that does not exist.
+	if got := root.SpanContext().TraceID().String(); got != allocatedTraceID {
+		t.Errorf("trace ID = %q, want the one allocated at the start (%q)",
+			got, allocatedTraceID)
+	}
+	// Parented under the span the trailer names — the promotion commit, which
+	// Hecate never emits itself.
+	if got := root.Parent().SpanID().String(); got != allocatedTraceID[16:] {
+		t.Errorf("root parent = %q, want the trailer's parent span %q",
+			got, allocatedTraceID[16:])
 	}
 
 	// The point of the whole exercise: one trace, steps under the Passage.
@@ -151,8 +161,21 @@ func TestRecordTraceReturnsNothingWhenTracingIsOff(t *testing.T) {
 	t.Cleanup(func() { otel.SetTracerProvider(previous) })
 
 	base := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
-	if id := recordTrace(finishedPassage(base)); id != "" {
-		t.Errorf("want no trace ID when tracing is off, got %q", id)
+	recordTrace(finishedPassage(base))
+}
+
+// No trace ID means tracing was off when the Passage started: no trailer was
+// written, so there is nothing to emit and nothing to emit it under.
+func TestRecordTraceEmitsNothingWithoutAnAllocatedID(t *testing.T) {
+	sr := recorder(t)
+	base := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
+
+	p := finishedPassage(base)
+	p.Status.TraceID = ""
+	recordTrace(p)
+
+	if got := len(sr.Ended()); got != 0 {
+		t.Errorf("want no spans without an allocated trace ID, got %d", got)
 	}
 }
 
@@ -164,13 +187,12 @@ func TestRecordTraceIgnoresAPassageThatNeverStarted(t *testing.T) {
 		Spec:       v1alpha1.PassageSpec{Gate: "production", Bundle: "gone"},
 		Status: v1alpha1.PassageStatus{
 			Phase:      v1alpha1.PassageFailed,
+			TraceID:    allocatedTraceID,
 			Message:    "Bundle gone no longer exists",
 			FinishedAt: at(time.Now(), 0),
 		},
 	}
-	if id := recordTrace(p); id != "" {
-		t.Errorf("want no trace for a Passage with no start time, got %q", id)
-	}
+	recordTrace(p)
 	if got := len(sr.Ended()); got != 0 {
 		t.Errorf("want no spans, got %d", got)
 	}

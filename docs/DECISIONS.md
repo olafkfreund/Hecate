@@ -1169,3 +1169,51 @@ traces-specific form, or an explicit `OTEL_TRACES_EXPORTER=otlp`) before it
 configures anything. Every other knob — endpoint, protocol, headers, sampler,
 resource attributes — is read from the standard `OTEL_*` variables and never
 overridden, so an operator's collector configuration works here unchanged.
+
+## D42 — The trace ID is allocated when a Passage starts, and travels in a commit trailer
+
+**Decision:** a Passage is given its trace ID before its first step runs, not
+when its trace is emitted. `git-commit` writes it into every promotion commit as
+a W3C trailer:
+
+```
+promote podinfo to production
+
+traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-a3ce929d0e0e4736-01
+```
+
+Git is the rendezvous (D3), so git is where the trace context has to travel.
+This is the link that lets a single trace span the CI run that built the
+artifact, the crossing that promoted it, and the reconciliation that applied it
+— none of which share a process, a cluster or a clock. A trailer is the right
+shape: `git interpret-trailers` and every forge already parse it, and it changes
+nothing for a reader who does not care.
+
+This is the piece D41 deferred. Emitting the trace at the end still stands; only
+the *identifier* moves to the front, which is the minimum that makes the trailer
+possible.
+
+**The parent span ID is the trace ID's own second half.** It therefore needs no
+field of its own — anyone holding `status.traceID` can recompute the exact
+trailer that was written, and the two can never disagree. The alternative, a
+second status field, is a second thing to keep in sync for no gain.
+
+**The span that trailer names is deliberately never emitted.** It stands for the
+promotion commit itself: Hecate's crossing hangs from it, and so does anything
+downstream that reads the commit. A backend renders the Passage span as the
+trace's root with an absent parent, which is exactly what any span whose parent
+lives in another system looks like — and here the other system is git, which is
+the whole architecture.
+
+**Allocating once per Passage is what keeps commits reproducible.** The commit
+SHA is deterministic by design (D19): the same tree, parent and message must
+yield the same hash, so a retried crossing re-creates the identical commit
+rather than stacking a second one on the branch. A trace ID generated inside the
+step would give every attempt a new trailer and therefore a new hash, quietly
+destroying that. Persisting it in status is what prevents it, and
+`TestGitCommitStaysReproducibleWithATrailer` is what notices if anyone moves it.
+
+**No trailer when tracing is off.** No collector means no trace, so a
+`traceparent` in the commit would be a permanent, immutable reference to
+something that never existed. Git remembers forever; that is the wrong place to
+write a promise we did not keep.

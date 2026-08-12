@@ -21,11 +21,17 @@ type scripted struct {
 	results []StepResult
 	errs    []error
 	calls   int
+	// observe records what the step was handed, for tests about the
+	// StepContext rather than the outcome.
+	observe func(*StepContext)
 }
 
 func (s *scripted) Name() string { return s.name }
 
-func (s *scripted) Run(context.Context, *StepContext) (StepResult, error) {
+func (s *scripted) Run(_ context.Context, sc *StepContext) (StepResult, error) {
+	if s.observe != nil {
+		s.observe(sc)
+	}
 	i := s.calls
 	s.calls++
 	if i >= len(s.results) {
