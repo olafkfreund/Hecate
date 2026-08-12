@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -41,6 +42,20 @@ func main() {
 	certFile := fs.String("tls-cert-file", "", "serve HTTPS with this certificate")
 	keyFile := fs.String("tls-private-key-file", "", "the key for --tls-cert-file")
 	showVersion := fs.Bool("version", false, "print the version and exit")
+	// Browser sign-in. Absent, the API still serves anyone holding a Kubernetes
+	// token, which is every CLI and script — this exists for the people who
+	// have a browser and no kubeconfig.
+	oidcIssuer := fs.String("oidc-issuer", os.Getenv("HECATE_OIDC_ISSUER"),
+		"OIDC provider to sign users in against. The cluster must be configured to trust "+
+			"the same issuer, or every login will succeed and every request will be rejected.")
+	oidcClientID := fs.String("oidc-client-id", os.Getenv("HECATE_OIDC_CLIENT_ID"), "OIDC client ID")
+	oidcRedirect := fs.String("oidc-redirect-url", os.Getenv("HECATE_OIDC_REDIRECT_URL"),
+		"this server's public URL plus /auth/callback")
+	oidcScopes := fs.String("oidc-scopes", "profile,email,groups",
+		"extra scopes beyond openid, comma separated")
+	oidcInsecure := fs.Bool("oidc-insecure-cookie", false,
+		"allow the session cookie over plain HTTP. Local development only: it is the "+
+			"difference between a token the network can read and one it cannot.")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		os.Exit(2)
 	}
@@ -49,13 +64,36 @@ func main() {
 		return
 	}
 
-	if err := run(*addr, *certFile, *keyFile); err != nil {
+	// Read from the environment rather than a flag: a client secret on a
+	// command line is visible in `ps` and in every process listing.
+	login := api.LoginConfig{
+		Issuer:       *oidcIssuer,
+		ClientID:     *oidcClientID,
+		ClientSecret: os.Getenv("HECATE_OIDC_CLIENT_SECRET"),
+		RedirectURL:  *oidcRedirect,
+		Scopes:       splitScopes(*oidcScopes),
+		Insecure:     *oidcInsecure,
+	}
+
+	if err := run(*addr, *certFile, *keyFile, login); err != nil {
 		fmt.Fprintf(os.Stderr, "hecate-api: %s\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(addr, certFile, keyFile string) error {
+// splitScopes turns a comma-separated list into scopes, ignoring the empty
+// entries a trailing comma leaves behind.
+func splitScopes(s string) []string {
+	var out []string
+	for _, v := range strings.Split(s, ",") {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+func run(addr, certFile, keyFile string, login api.LoginConfig) error {
 	if (certFile == "") != (keyFile == "") {
 		return errors.New("--tls-cert-file and --tls-private-key-file go together")
 	}
@@ -86,6 +124,19 @@ func run(addr, certFile, keyFile string) error {
 		Ops:     ops.New(c),
 		Auth:    &api.Authenticator{Client: c},
 		Version: version,
+	}
+
+	// Discovery happens here, before the listener opens, so a misspelt or
+	// unreachable issuer is a failed rollout rather than a login that breaks
+	// for the first person to try it.
+	if login.Issuer != "" {
+		l, err := api.NewLogin(context.Background(), login)
+		if err != nil {
+			return err
+		}
+		server.Login = l
+		fmt.Fprintf(os.Stderr, "browser sign-in enabled against %s — the cluster must trust the same issuer\n",
+			login.Issuer)
 	}
 
 	httpServer := &http.Server{

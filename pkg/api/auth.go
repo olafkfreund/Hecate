@@ -148,11 +148,24 @@ func (a *Authenticator) Authorize(ctx context.Context, s Subject, act Action, na
 }
 
 // bearerToken reads the credential a caller presented.
+// bearerToken reads the caller's credential from the Authorization header, or
+// failing that from the session cookie a browser login set.
+//
+// One function for both because they carry the same thing: an OIDC ID token
+// from the issuer the cluster trusts is a Kubernetes bearer token, so a browser
+// session and a `kubectl`-style token are the same credential arriving by
+// different routes, and Authenticate below cannot tell them apart. That is the
+// point — there is one authorisation path, not one per client.
+//
+// The header wins, so a script that sets it explicitly is never overridden by a
+// cookie the browser happened to attach.
 func bearerToken(r *http.Request) string {
 	header := r.Header.Get("Authorization")
-	token, found := strings.CutPrefix(header, "Bearer ")
-	if !found {
-		return ""
+	if token, found := strings.CutPrefix(header, "Bearer "); found {
+		return strings.TrimSpace(token)
 	}
-	return strings.TrimSpace(token)
+	if c, err := r.Cookie(SessionCookie); err == nil {
+		return strings.TrimSpace(c.Value)
+	}
+	return ""
 }

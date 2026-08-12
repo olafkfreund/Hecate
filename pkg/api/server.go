@@ -19,6 +19,10 @@ type Server struct {
 	// Version is reported at /healthz, so an operator can tell which build is
 	// answering without reading the deployment.
 	Version string
+	// Login is the browser sign-in flow. Nil serves the API to callers who
+	// already hold a Kubernetes token — which is every CLI and script, and is
+	// why this is optional rather than required.
+	Login *Login
 }
 
 // Handler returns the routes.
@@ -34,6 +38,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": s.Version})
 	})
+
+	// Unauthenticated by necessity: these are how a caller *becomes*
+	// authenticated. They are safe because neither issues anything without a
+	// code the provider will only send to the registered redirect URL, and a
+	// state this server set.
+	if s.Login != nil {
+		s.Login.Routes(mux)
+	}
 
 	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/beacons",
 		s.guard(ActionRead, s.listBeacons))
