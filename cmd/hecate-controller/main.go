@@ -156,6 +156,7 @@ func run() error {
 	stepRunners.MustRegister(steps.NewFluxReconcile(mgr.GetClient(), !opts.noCrossNS))
 	stepRunners.MustRegister(steps.NewHTTP(mgr.GetClient()))
 	stepRunners.MustRegister(steps.NewEvidenceGate(mgr.GetClient(), opts.fidesServer))
+	stepRunners.MustRegister(steps.NewCommitStatus(mgr.GetClient()))
 
 	if err := (&beacon.Reconciler{
 		Client:   mgr.GetClient(),

@@ -129,3 +129,40 @@ func (g *gitlabProvider) PullRequest(ctx context.Context, repo Repo, number int)
 	}
 	return mr.convert(), nil
 }
+
+// gitlabState maps a crossing's outcome onto GitLab's vocabulary.
+var gitlabState = map[CommitState]string{
+	StatePending: "pending",
+	StateSuccess: "success",
+	StateFailure: "failed",
+}
+
+// SetCommitStatus implements Provider.
+func (g *gitlabProvider) SetCommitStatus(ctx context.Context, status CommitStatus) error {
+	if err := status.validate(); err != nil {
+		return fmt.Errorf("gitlab: %w", err)
+	}
+	body := map[string]any{
+		"state":       gitlabState[status.State],
+		"name":        status.Context,
+		"description": truncate(status.Description, 140),
+	}
+	if status.TargetURL != "" {
+		body["target_url"] = status.TargetURL
+	}
+
+	err := g.c.do(ctx,
+		http.MethodPost, "projects/"+project(status.Repo)+"/statuses/"+status.SHA, body, nil)
+
+	// GitLab models a commit status as a state machine and refuses a
+	// transition to the state it is already in — "Cannot transition status via
+	// :run from :running". Steps are re-entrant (D19), so a retried crossing
+	// reports the same state again as a matter of course, and treating that
+	// refusal as an error would fail a Passage for successfully having done
+	// what it was asked to. The status is already what we wanted.
+	if err != nil && statusIs(err, http.StatusBadRequest) &&
+		strings.Contains(err.Error(), "Cannot transition status") {
+		return nil
+	}
+	return err
+}

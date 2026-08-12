@@ -238,14 +238,27 @@ func (g *GitPullRequest) token(
 			"%s: credentialsRef is required — opening a pull request needs an API token, "+
 				"which is not the same thing as push access", StepGitPullRequest)
 	}
-	if g.client == nil {
+	return apiToken(ctx, g.client, namespace, ref, StepGitPullRequest)
+}
+
+// apiToken reads a host API token from a Secret, shared by every step that
+// talks to a git host's API.
+//
+// `token` wins over `password` so one Secret can carry both push credentials
+// and an API token — which is the common case, since they are frequently the
+// same string on GitHub and frequently not on GitLab.
+func apiToken(
+	ctx context.Context, c client.Client, namespace string,
+	ref *v1alpha1.LocalSecretRef, step string,
+) (string, error) {
+	if c == nil {
 		return "", passage.FailTerminal(ReasonInvalidConfig,
-			"%s: credentialsRef set but the step has no client", StepGitPullRequest)
+			"%s: credentialsRef set but the step has no client", step)
 	}
 	var secret corev1.Secret
-	if err := g.client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: ref.Name}, &secret); err != nil {
+	if err := c.Get(ctx, client.ObjectKey{Namespace: namespace, Name: ref.Name}, &secret); err != nil {
 		return "", passage.FailTerminal(ReasonInvalidConfig,
-			"%s: reading Secret %s/%s: %s", StepGitPullRequest, namespace, ref.Name, err)
+			"%s: reading Secret %s/%s: %s", step, namespace, ref.Name, err)
 	}
 	for _, key := range []string{"token", "password"} {
 		if v := string(secret.Data[key]); v != "" {
@@ -253,7 +266,7 @@ func (g *GitPullRequest) token(
 		}
 	}
 	return "", passage.FailTerminal(ReasonInvalidConfig,
-		"%s: Secret %s has no token or password", StepGitPullRequest, ref.Name)
+		"%s: Secret %s has no token or password", step, ref.Name)
 }
 
 // providerError classifies a host's refusal. A bad token will not become good

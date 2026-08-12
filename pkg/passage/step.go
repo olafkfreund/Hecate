@@ -51,6 +51,14 @@ type StepContext struct {
 	Outputs map[string]map[string]any
 	// Attempt is how many times this step has already run, starting at 0.
 	Attempt int32
+	// Failed reports that an earlier step has already failed the Passage.
+	//
+	// A step only sees this if it asked to run anyway (`if: failed` or
+	// `if: always`) — otherwise it is skipped and never invoked. It is here so
+	// a step reporting the outcome can report the real one: the engine knows,
+	// and making the user restate it in configuration would be a second place
+	// for the truth to live (D46).
+	Failed bool
 	// Traceparent is the W3C trace context for this crossing, or empty when
 	// tracing is off. Steps that write something durable should carry it, so a
 	// promotion can be correlated end to end (D42).

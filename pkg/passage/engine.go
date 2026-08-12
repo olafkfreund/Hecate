@@ -189,6 +189,7 @@ func (e *Engine) Advance(
 
 		res, err := runner.Run(ctx, &StepContext{
 			Namespace:   p.Namespace,
+			Failed:      failed,
 			Traceparent: telemetry.Traceparent(status.TraceID),
 			Gate:        p.Spec.Gate,
 			Passage:     p.Name,

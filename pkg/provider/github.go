@@ -155,3 +155,36 @@ func (s PullRequestSpec) validate() error {
 	}
 	return nil
 }
+
+// githubState maps a crossing's outcome onto GitHub's vocabulary.
+//
+// GitHub also has "error", which it renders differently from "failure". We do
+// not use it: the distinction it draws — the check itself broke, versus the
+// check ran and said no — is one Hecate cannot make honestly, because a
+// crossing that failed because git was unreachable and one that failed because
+// Flux never converged are the same object with different messages.
+var githubState = map[CommitState]string{
+	StatePending: "pending",
+	StateSuccess: "success",
+	StateFailure: "failure",
+}
+
+// SetCommitStatus implements Provider.
+func (g *githubProvider) SetCommitStatus(ctx context.Context, status CommitStatus) error {
+	if err := status.validate(); err != nil {
+		return fmt.Errorf("github: %w", err)
+	}
+	body := map[string]any{
+		"state":       githubState[status.State],
+		"context":     status.Context,
+		"description": truncate(status.Description, 140),
+	}
+	if status.TargetURL != "" {
+		body["target_url"] = status.TargetURL
+	}
+	// GitHub appends rather than replaces, and reports the newest status per
+	// context — so posting the same state twice is harmless and needs no
+	// special handling here, unlike GitLab.
+	return g.c.do(ctx,
+		http.MethodPost, "repos/"+status.Repo.Slug()+"/statuses/"+status.SHA, body, nil)
+}

@@ -144,6 +144,40 @@ type PullRequestSpec struct {
 	Labels []string
 }
 
+// CommitState is the outcome being reported against a commit.
+//
+// Three, not the union of what the hosts accept. GitHub also has `error` and
+// GitLab has `running` and `canceled`; a crossing is starting, it worked, or it
+// did not, and offering states with no Hecate meaning would only invite
+// disagreement about which to use.
+type CommitState string
+
+const (
+	// StatePending means the crossing is under way.
+	StatePending CommitState = "Pending"
+	// StateSuccess means it finished and the environment converged.
+	StateSuccess CommitState = "Success"
+	// StateFailure means it did not.
+	StateFailure CommitState = "Failure"
+)
+
+// CommitStatus is an outcome to report against a commit.
+type CommitStatus struct {
+	Repo Repo
+	// SHA is the commit being reported on — the one Flux applied, not the one
+	// that built the image. Hecate does not know the latter.
+	SHA string
+	// State is the outcome.
+	State CommitState
+	// Context names the check, and is what the host de-duplicates on. One per
+	// Gate, so `production` and `staging` do not overwrite each other.
+	Context string
+	// Description is the one-line summary shown beside the check.
+	Description string
+	// TargetURL is where a human goes for detail. Optional.
+	TargetURL string
+}
+
 // Provider is a git host's API, as far as a promotion needs it.
 type Provider interface {
 	// Kind is which host flavour this is.
@@ -156,6 +190,11 @@ type Provider interface {
 	EnsurePullRequest(ctx context.Context, spec PullRequestSpec) (*PullRequest, error)
 	// PullRequest reads one back.
 	PullRequest(ctx context.Context, repo Repo, number int) (*PullRequest, error)
+	// SetCommitStatus reports an outcome against a commit.
+	//
+	// Idempotent, because steps are re-entrant (D19): reporting the same state
+	// twice must succeed rather than fail the crossing over a duplicate.
+	SetCommitStatus(ctx context.Context, status CommitStatus) error
 }
 
 // Config is what a provider needs to reach a host.
@@ -166,6 +205,20 @@ type Config struct {
 	BaseURL string
 	// Token authenticates. A personal, project or installation access token.
 	Token string
+}
+
+// validate checks what both hosts require, so a mistake is refused before a
+// request is made rather than reported as a 422 from someone else's API.
+func (s CommitStatus) validate() error {
+	switch {
+	case s.SHA == "":
+		return errors.New("no commit to report on")
+	case s.Context == "":
+		return errors.New("no context: the host de-duplicates on it, so an unnamed status overwrites every other")
+	case s.State != StatePending && s.State != StateSuccess && s.State != StateFailure:
+		return fmt.Errorf("unknown commit state %q", s.State)
+	}
+	return nil
 }
 
 // New builds a provider.

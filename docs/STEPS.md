@@ -145,6 +145,61 @@ configured there is no trace and no trailer.
 
 **Reasons:** `WorkDirLost`, `GitFailed`, `InvalidConfig`.
 
+## commit-status
+
+Reports the crossing's outcome against the commit Flux applied, as a check on
+the git host.
+
+| field | type | default |
+|---|---|---|
+| `sha` | string | HEAD of the checkout |
+| `path` | string | `repo` |
+| `repo` | string | the checkout's origin remote |
+| `provider` | `github` \| `gitlab` | inferred from the host |
+| `baseURL` | string | the public host's API |
+| `context` | string | `hecate/<gate>` |
+| `state` | `Pending` \| `Success` \| `Failure` | what actually happened |
+| `description` | string | "&lt;bundle&gt; crossed &lt;gate&gt;" |
+| `targetURL` | string | none |
+| `credentialsRef` | `{name}` | required |
+
+**Run it with `if: always`.** On the happy path it can only ever report success,
+and a check that is green whenever it appears looks like coverage and is not.
+The engine tells the step whether the Passage failed ([D46](DECISIONS.md)), so
+leaving `state` unset reports the real outcome rather than something the author
+has to keep in step with the rest of the Passage.
+
+```yaml
+      - uses: flux-wait
+        with:
+          resources: [{ kind: Kustomization, name: podinfo, namespace: flux-system }]
+      - uses: commit-status
+        if: always
+        with:
+          credentialsRef: { name: forge }
+```
+
+`context` defaults to `hecate/<gate>` because the host de-duplicates on it: two
+Gates reporting on the same commit need different names or the second silently
+replaces the first.
+
+**What it can and cannot say.** The commit is the one *Hecate* made and Flux
+applied. It is not the application commit that produced the image — Hecate
+resolves images to digests and never learns which source commit built one, so a
+check claiming "this change reached production" would have a true-looking name
+and no basis.
+
+Two consequences of running after a failure, both from [D46](DECISIONS.md): the
+step gets **one invocation** and cannot wait, which a single API call satisfies;
+and if the status call itself fails, that error is recorded against the step but
+`status.message` keeps the failure that actually broke the crossing.
+
+`credentialsRef` needs a Secret with `token` (or `password`) — an API token,
+which is not the same thing as push access.
+
+**Reasons:** `ProviderAuthFailed`, `ProviderFailed`, `WorkDirLost`,
+`InvalidConfig`.
+
 ## git-push
 
 Publishes the local commits.

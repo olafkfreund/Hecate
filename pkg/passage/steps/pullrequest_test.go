@@ -19,10 +19,20 @@ import (
 
 // fakeHost stands in for a git host's API.
 type fakeHost struct {
-	pr      *provider.PullRequest
-	opened  []provider.PullRequestSpec
-	openErr error
-	readErr error
+	pr        *provider.PullRequest
+	opened    []provider.PullRequestSpec
+	openErr   error
+	readErr   error
+	statuses  []provider.CommitStatus
+	statusErr error
+}
+
+func (f *fakeHost) SetCommitStatus(_ context.Context, s provider.CommitStatus) error {
+	if f.statusErr != nil {
+		return f.statusErr
+	}
+	f.statuses = append(f.statuses, s)
+	return nil
 }
 
 func (f *fakeHost) Kind() provider.Kind { return provider.GitHub }
