@@ -98,7 +98,8 @@ func run() error {
 		"Refuse a Gate watching resources outside its own namespace. Matches Flux's own "+
 			"posture; set false only on a single-tenant cluster.")
 	flag.StringVar(&opts.fidesServer, "fides-server", os.Getenv("FIDES_SERVER_URL"),
-		"Default Fides server for evidence-gate steps. A Gate may override it with "+
+		"Default Fides server for evidence-gate steps and for recording finished crossings. "+
+			"A Gate may override it with "+
 			"evidence.serverURL; a fleet with one Fides sets it here instead of on every Gate.")
 	flag.BoolVar(&opts.skipCRDCheck, "skip-crd-check", false,
 		"Start even if the cluster's CRDs are older than this build. The escape hatch for "+
@@ -211,6 +212,9 @@ func run() error {
 		Client:   mgr.GetClient(),
 		Engine:   &passage.Engine{Registry: stepRunners},
 		WorkRoot: opts.workRoot,
+		// So a finished crossing is recorded on the same Fides the
+		// evidence-gate step consulted.
+		FidesServer: opts.fidesServer,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("setting up the Passage controller: %w", err)
 	}

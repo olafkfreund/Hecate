@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -141,7 +140,7 @@ func (e *EvidenceGate) Run(ctx context.Context, sc *passage.StepContext) (passag
 		return passage.StepResult{}, err
 	}
 
-	digests := imageDigests(sc.Bundle)
+	digests := passage.ImageDigests(sc.Bundle)
 	if len(digests) == 0 {
 		return passage.StepResult{}, passage.FailTerminal(ReasonNoEvidence,
 			"%s: the Bundle pins no image digests — there is nothing to check compliance of. "+
@@ -347,34 +346,10 @@ func (e *EvidenceGate) evidenceConfig(
 func (e *EvidenceGate) connect(
 	ctx context.Context, sc *passage.StepContext, evidence *v1alpha1.EvidenceConfig,
 ) (*fides.Client, error) {
-	server := evidence.ServerURL
-	if server == "" {
-		server = e.defaultServer
-	}
-
-	ref := evidence.CredentialsRef
-	if ref == nil {
-		// Named here rather than left to the client's "no API token", which
-		// says nothing about where to put one.
-		return nil, passage.FailTerminal(ReasonInvalidConfig,
-			"%s: Gate %s has no evidence.credentialsRef — Fides rejects an unauthenticated "+
-				"request, so there is no useful check to run without one", StepEvidenceGate, sc.Gate)
-	}
-	var secret corev1.Secret
-	key := client.ObjectKey{Namespace: sc.Namespace, Name: ref.Name}
-	if err := e.client.Get(ctx, key, &secret); err != nil {
-		return nil, passage.FailTerminal(ReasonInvalidConfig,
-			"%s: reading Secret %s/%s: %s", StepEvidenceGate, sc.Namespace, ref.Name, err)
-	}
-	token := string(secret.Data["token"])
-	if token == "" {
-		return nil, passage.FailTerminal(ReasonInvalidConfig,
-			"%s: Secret %s has no token", StepEvidenceGate, ref.Name)
-	}
-
-	c, err := e.dial(fides.Config{BaseURL: server, Token: token})
+	c, err := passage.DialFides(ctx, e.client, sc.Namespace, e.defaultServer, evidence, e.dial)
 	if err != nil {
-		return nil, passage.FailTerminal(ReasonInvalidConfig, "%s: %s", StepEvidenceGate, err)
+		return nil, passage.FailTerminal(ReasonInvalidConfig,
+			"%s: Gate %s: %s", StepEvidenceGate, sc.Gate, err)
 	}
 	return c, nil
 }
@@ -389,7 +364,6 @@ func unavailable(what string, err error) error {
 	return passage.Fail(ReasonEvidenceUnavailable, "%s: %s: %s", StepEvidenceGate, what, err)
 }
 
-// imageDigests lists the Bundle's pinned image digests.
 // report records the Bundle's images against the trail, so the change gate
 // judges the release rather than one image of it.
 //
@@ -416,17 +390,4 @@ func (e *EvidenceGate) report(
 		n++
 	}
 	return n, nil
-}
-
-func imageDigests(bundle *v1alpha1.Bundle) []string {
-	if bundle == nil {
-		return nil
-	}
-	var out []string
-	for _, a := range bundle.Spec.Artifacts {
-		if a.Image != nil && a.Image.Digest != "" {
-			out = append(out, a.Image.Digest)
-		}
-	}
-	return out
 }

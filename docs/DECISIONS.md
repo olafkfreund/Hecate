@@ -1410,3 +1410,48 @@ operator has to reason about from the phase alone.
 
 This is the prerequisite for commit status on #100, which is why it landed
 first and separately: the provider work is small and the semantics here are not.
+
+---
+
+## D47 — A crossing is attested at most once, and never retried
+
+*2026-08-12 — #27*
+
+Every finished Passage is recorded on the Bundle's Fides trail: which Bundle
+crossed which Gate, on whose say-so, which steps ran and how each of them
+ended. Fides already holds the SBOM and the scans CI attached; without this it
+never learns the artifact was promoted, so an auditor can see what was built and
+not what was shipped.
+
+**Written from the persisted status, at the moment the Passage goes terminal.**
+Same reasoning as D41's traces: a crossing outlives the controller process, so
+anything held in memory across it is lost by a restart. Status is the only thing
+that survives, so status is what the record is built from — including the steps
+that were skipped, which is exactly the fact a record listing only successes
+would hide.
+
+**Failure is reported, not retried.** The controller never re-runs a terminal
+Passage, so an attestation that fails leaves a crossing with no record —
+surfaced as an `AttestationFailed` event and an empty `status.evidence.trail`.
+
+The alternative was a retry loop, and it is worse. Fides chains attestations
+into a tamper-evident hash chain, and a retry that cannot prove the previous
+attempt did not land writes a second chained record of a single promotion.
+Nobody reading the chain afterwards can distinguish that from a replay, which is
+precisely the property the chain exists to provide. A visible gap says "the
+evidence system was down"; two records say something false about what happened.
+Idempotency belongs upstream — if Fides grows a deduplicating write, this
+becomes retryable and should.
+
+**The promotion is not failed over a missing record.** The crossing happened;
+marking it failed because the compliance system was unreachable would be a lie
+about the cluster, and it would strand a Bundle that is already deployed.
+
+**Silent when the Gate does not use Fides.** No `spec.evidence`, or a Gate that
+has since been deleted, means no attestation and no event — otherwise every
+crossing in every cluster that has never heard of Fides emits a warning.
+
+**Recorded on the trail the gates were judged against.** If an evidence-gate
+step ran, its trail is reused rather than looked up again, so the crossing is
+attested on the chain that permitted it even if the artifact has since been
+relinked.

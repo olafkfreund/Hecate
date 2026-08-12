@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/olafkfreund/hecate/api/v1alpha1"
+	"github.com/olafkfreund/hecate/pkg/fides"
 	"github.com/olafkfreund/hecate/pkg/metrics"
 	"github.com/olafkfreund/hecate/pkg/telemetry"
 )
@@ -34,6 +35,12 @@ type Reconciler struct {
 	WorkRoot string
 	// Now is the clock, injectable for tests.
 	Now func() time.Time
+	// FidesServer is the controller's --fides-server, used to record a finished
+	// crossing when a Gate does not name one of its own.
+	FidesServer string
+	// DialFides is injectable so tests can point at a fake Fides. Nil is the
+	// real client.
+	DialFides func(fides.Config) (*fides.Client, error)
 }
 
 func (r *Reconciler) now() time.Time {
@@ -69,6 +76,8 @@ func (r *Reconciler) WorkDir(p *v1alpha1.Passage) string {
 // +kubebuilder:rbac:groups=hecate.dev,resources=passages,verbs=get;list;watch;update
 // +kubebuilder:rbac:groups=hecate.dev,resources=passages/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=hecate.dev,resources=bundles,verbs=get;list;watch
+// +kubebuilder:rbac:groups=hecate.dev,resources=gates,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
 // Reconcile advances one Passage.
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -125,6 +134,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	if passage.Status.Phase.Terminal() {
 		recordTrace(&passage)
+		// Before the status update, not after: attest sets
+		// status.evidence.trail, and a record written after the update would
+		// need a second write to say where it went.
+		r.attest(ctx, &passage, bundle)
 	}
 
 	if err := r.Status().Update(ctx, &passage); err != nil {

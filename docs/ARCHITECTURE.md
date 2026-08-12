@@ -97,6 +97,14 @@ The step list is **copied** from the Gate at creation time rather than reference
 Editing a Gate must not retroactively change what an in-flight or completed Passage
 did.
 
+When the Gate names a Fides environment, a finished Passage is also recorded on the
+artifact's trail as a `promotion` attestation — the Bundle, the Gate, the actor, every
+step including the skipped ones, and the outcome. Chained into Fides' tamper-evident
+hash chain, that turns a crossing into evidence rather than a log line in a cluster
+that will be rebuilt next quarter, and it is what `hecate verify` checks. Written once,
+never retried, and a failure to write it never fails the promotion — see
+[D47](DECISIONS.md).
+
 ## Health is not verification
 
 Two different questions, deliberately kept apart:
