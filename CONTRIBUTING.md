@@ -67,6 +67,13 @@ client, no I/O — and is tested against
 you add a case, capture it; hand-written status only ever confirms the
 assumption that produced it.
 
+**UI changes** need a test in `ui/test/`. The fixtures there are copied from
+real API responses rather than written by hand, because the types in
+`lib/api.ts` are hand-written against the Go structs and have been wrong —
+`Explanation` once had `reason` and `remedy` where the server sends `kind` and
+`fix`, which compiled perfectly and rendered blanks. A fixture invented from the
+same memory as the type cannot catch that.
+
 **A new e2e test** must be claimed by a phase in `.github/workflows/e2e.yml`.
 There is a step that fails the build otherwise, because a test that runs in
 neither phase is a test that never runs, and that has happened.

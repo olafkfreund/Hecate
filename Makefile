@@ -21,7 +21,7 @@ DEV_TAG        := dev-$(shell date +%s)
 export KUBECONFIG ?= $(CURDIR)/.dev/kubeconfig
 
 .DEFAULT_GOAL := help
-.PHONY: help test vet fmt lint check flake-hash generate build run ui ui-dev oidc-check cluster cluster-rm cluster-load install uninstall collector e2e secrets-edit secrets-rekey clean
+.PHONY: help test vet fmt lint check flake-hash generate build run ui ui-test ui-dev oidc-check cluster cluster-rm cluster-load install uninstall collector e2e secrets-edit secrets-rekey clean
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -158,6 +158,9 @@ ui: ## Build the web UI into the API binary
 	touch pkg/api/ui/.gitkeep
 	cp -r ui/out/. pkg/api/ui/
 	@echo "UI built into pkg/api/ui — rebuild hecate-api to pick it up"
+
+ui-test: ## Run the UI's tests
+	cd ui && npm test
 
 ui-dev: ## Run the UI against a local hecate-api on :8080
 	cd ui && npm run dev
