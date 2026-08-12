@@ -10,7 +10,7 @@ export default function Passages() {
   return (
     <div>
       <h1 className="text-xl font-semibold tracking-tight">Passages</h1>
-      <p className="mt-1 text-sm text-[var(--muted)]">
+      <p className="mt-1 text-sm text-[var(--muted-foreground)]">
         One attempt to move one Bundle through one Gate.
       </p>
 
@@ -18,20 +18,20 @@ export default function Passages() {
         <Panel state={state}>
           {(passages) =>
             passages.length === 0 ? (
-              <p className="text-sm text-[var(--muted)]">
+              <p className="text-sm text-[var(--muted-foreground)]">
                 No Passages in <code>{ns}</code>.
               </p>
             ) : (
-              <ul className="divide-y divide-[var(--line)] text-sm">
+              <ul className="divide-y divide-[var(--border)] text-sm">
                 {passages.map((p: Passage) => (
                   <li key={p.metadata.name} className="py-2.5">
                     <div className="flex items-baseline gap-3">
                       <span className="font-medium">{p.spec.bundle}</span>
-                      <span className="text-[var(--muted)]">→ {p.spec.gate}</span>
+                      <span className="text-[var(--muted-foreground)]">→ {p.spec.gate}</span>
                       <span className="ml-auto">{p.status?.phase ?? "Pending"}</span>
                     </div>
                     {p.status?.message && (
-                      <p className="mt-1 text-[var(--muted)]">{p.status.message}</p>
+                      <p className="mt-1 text-[var(--muted-foreground)]">{p.status.message}</p>
                     )}
                   </li>
                 ))}

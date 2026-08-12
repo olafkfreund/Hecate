@@ -22,7 +22,7 @@ function BundleList({ ns }: { ns: string }) {
   return (
     <div>
       <h1 className="text-xl font-semibold tracking-tight">Bundles</h1>
-      <p className="mt-1 text-sm text-[var(--muted)]">
+      <p className="mt-1 text-sm text-[var(--muted-foreground)]">
         An immutable, content-addressed set of artifact versions. The unit that moves.
       </p>
 
@@ -30,22 +30,22 @@ function BundleList({ ns }: { ns: string }) {
         <Panel state={state}>
           {(bundles) =>
             bundles.length === 0 ? (
-              <p className="text-sm text-[var(--muted)]">
+              <p className="text-sm text-[var(--muted-foreground)]">
                 No Bundles in <code>{ns}</code>.
               </p>
             ) : (
-              <ul className="divide-y divide-[var(--line)] text-sm">
+              <ul className="divide-y divide-[var(--border)] text-sm">
                 {bundles.map((b: Bundle) => (
                   <li key={b.metadata.name} className="flex items-baseline gap-3 py-2.5">
                     <Link
                       href={{ pathname: "/bundles/", query: { name: b.metadata.name, namespace: ns } }}
-                      className="font-medium underline decoration-[var(--line)] underline-offset-4 hover:decoration-current"
+                      className="font-medium underline decoration-[var(--border)] underline-offset-4 hover:decoration-current"
                     >
                       {b.spec.alias || b.metadata.name}
                     </Link>
-                    <span className="text-[var(--muted)]">{b.spec.beacon}</span>
+                    <span className="text-[var(--muted-foreground)]">{b.spec.beacon}</span>
                     {b.status?.approvedFor?.length ? (
-                      <span className="ml-auto text-[var(--muted)]">
+                      <span className="ml-auto text-[var(--muted-foreground)]">
                         approved for {b.status.approvedFor.join(", ")}
                       </span>
                     ) : null}

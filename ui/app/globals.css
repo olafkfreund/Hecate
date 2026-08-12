@@ -1,48 +1,135 @@
 @import "tailwindcss";
 
-/* Hand-rolled tokens rather than a component library, matching the Fides
-   portal. Both themes are defined here as variables so a component never
-   branches on the theme — it uses a token and the theme decides what it is. */
-@theme {
-  --color-ink: #0b0d10;
-  --color-surface: #ffffff;
-  --color-raised: #f6f7f9;
-  --color-line: #e3e6ea;
-  --color-muted: #5c6673;
-  --color-accent: #7c3aed;
+/* Dark mode is class-based, toggled by next-themes on <html>. */
+@custom-variant dark (&:is(.dark *));
 
-  --color-healthy: #16a34a;
-  --color-progressing: #2563eb;
-  --color-degraded: #dc2626;
-  --color-unknown: #a16207;
+/*
+ * The Fides portal's tokens, verbatim.
+ *
+ * Copied rather than approximated, and copied *whole* rather than
+ * cherry-picked: the point of #48 is that the two products look like one
+ * platform, and an eye notices a gold that is nearly right faster than it
+ * notices anything else. The source is evidance-vault/portal/src/app/globals.css
+ * — if that changes, this should be re-copied rather than patched to match.
+ *
+ * Hecate adds only what Flux health needs and Fides has no opinion about.
+ */
+:root {
+  --background: #ffffff;
+  --foreground: #0a0a0a;
+  --card: #ffffff;
+  --card-foreground: #0a0a0a;
+  --popover: #ffffff;
+  --popover-foreground: #0a0a0a;
+  --primary: #fac800;
+  --primary-foreground: #733e0a;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #18181b;
+  --muted: #f5f5f5;
+  --muted-foreground: #737373;
+  --accent: #f5f5f5;
+  --accent-foreground: #171717;
+  --destructive: #e40014;
+  --border: #e5e5e5;
+  --input: #e5e5e5;
+  --ring: #a1a1a1;
+  --radius: 0.625rem;
+  --sidebar: #fafafa;
+  --sidebar-foreground: #0a0a0a;
+  --sidebar-primary: #cd8900;
+  --sidebar-primary-foreground: #fefce8;
+  --sidebar-accent: #f5f5f5;
+  --sidebar-accent-foreground: #171717;
+  --sidebar-border: #e5e5e5;
+  --sidebar-ring: #a1a1a1;
+
+  /* Hecate's own: the health of a Flux resource. Not in Fides because Fides
+     has nothing to say about it. `--destructive` is reused for Degraded rather
+     than a second red, so a failure looks the same in both products. */
+  --healthy: #16a34a;
+  --progressing: #2563eb;
+  --unknown: #a16207;
+}
+
+.dark {
+  --background: #0a0a0a;
+  --foreground: #fafafa;
+  --card: #171717;
+  --card-foreground: #fafafa;
+  --popover: #171717;
+  --popover-foreground: #fafafa;
+  --primary: #edb200;
+  --primary-foreground: #733e0a;
+  --secondary: #27272a;
+  --secondary-foreground: #fafafa;
+  --muted: #262626;
+  --muted-foreground: #a1a1a1;
+  --accent: #262626;
+  --accent-foreground: #fafafa;
+  --destructive: #ff6568;
+  --border: #ffffff1a;
+  --input: #ffffff26;
+  --ring: #737373;
+  --sidebar: #171717;
+  --sidebar-foreground: #fafafa;
+  --sidebar-primary: #edb200;
+  --sidebar-primary-foreground: #fefce8;
+  --sidebar-accent: #262626;
+  --sidebar-accent-foreground: #fafafa;
+  --sidebar-border: #ffffff1a;
+  --sidebar-ring: #737373;
+
+  --healthy: #4ade80;
+  --progressing: #60a5fa;
+  --unknown: #fbbf24;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+
+  --color-healthy: var(--healthy);
+  --color-progressing: var(--progressing);
+  --color-unknown: var(--unknown);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 }
 
 @layer base {
-  :root {
-    --bg: var(--color-surface);
-    --fg: var(--color-ink);
-    --raised: var(--color-raised);
-    --line: var(--color-line);
-    --muted: var(--color-muted);
+  * {
+    border-color: var(--border);
+    outline-color: color-mix(in oklab, var(--ring) 50%, transparent);
   }
-
-  /* class, not media: next-themes toggles it, and a viewer who has chosen
-     light on a dark system must get light. */
-  .dark {
-    --bg: #0b0d10;
-    --fg: #e8eaed;
-    --raised: #14171c;
-    --line: #242a32;
-    --muted: #98a2b3;
-  }
-
-  html {
-    color-scheme: light dark;
-  }
-
   body {
-    background: var(--bg);
-    color: var(--fg);
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    background-color: var(--background);
+    color: var(--foreground);
   }
 }

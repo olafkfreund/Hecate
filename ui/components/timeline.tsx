@@ -5,9 +5,9 @@ import { timeline, type TimelineEvent } from "@/lib/timeline";
 import type { Bundle } from "@/lib/api";
 
 const marks = {
-  emitted: { Icon: Sparkles, tone: "text-[var(--muted)]", what: "emitted" },
-  cleared: { Icon: CircleCheck, tone: "text-[var(--color-healthy)]", what: "cleared" },
-  blocked: { Icon: CircleX, tone: "text-[var(--color-degraded)]", what: "did not clear" },
+  emitted: { Icon: Sparkles, tone: "text-[var(--muted-foreground)]", what: "emitted" },
+  cleared: { Icon: CircleCheck, tone: "text-[var(--healthy)]", what: "cleared" },
+  blocked: { Icon: CircleX, tone: "text-[var(--destructive)]", what: "did not clear" },
 } as const;
 
 /** How this Bundle got to where it is. */
@@ -15,11 +15,11 @@ export function Timeline({ bundle }: { bundle: Bundle }) {
   const events = timeline(bundle);
 
   if (events.length === 0) {
-    return <p className="text-sm text-[var(--muted)]">Nothing has happened to this Bundle yet.</p>;
+    return <p className="text-sm text-[var(--muted-foreground)]">Nothing has happened to this Bundle yet.</p>;
   }
 
   return (
-    <ol className="relative space-y-5 border-l border-[var(--line)] pl-6">
+    <ol className="relative space-y-5 border-l border-[var(--border)] pl-6">
       {events.map((e, i) => (
         <Event key={`${e.kind}-${e.gate ?? "emitted"}-${i}`} event={e} />
       ))}
@@ -32,7 +32,7 @@ function Event({ event }: { event: TimelineEvent }) {
 
   return (
     <li className="relative">
-      <span className={`absolute -left-[31px] bg-[var(--bg)] p-0.5 ${tone}`}>
+      <span className={`absolute -left-[31px] bg-[var(--background)] p-0.5 ${tone}`}>
         <Icon size={15} aria-hidden />
       </span>
 
@@ -40,12 +40,12 @@ function Event({ event }: { event: TimelineEvent }) {
         <span className="font-medium">{event.gate ? `${what} ${event.gate}` : "emitted"}</span>
         {/* The actor is the point of an audit trail. "controller" is a real
             answer — it says nobody asked, the Gate crosses automatically. */}
-        {event.actor && <span className="text-[var(--muted)]"> by {event.actor}</span>}
+        {event.actor && <span className="text-[var(--muted-foreground)]"> by {event.actor}</span>}
       </p>
 
-      {event.reason && <p className="mt-0.5 text-sm text-[var(--muted)]">{event.reason}</p>}
+      {event.reason && <p className="mt-0.5 text-sm text-[var(--muted-foreground)]">{event.reason}</p>}
 
-      <p className="mt-0.5 text-xs text-[var(--muted)]">
+      <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">
         <time dateTime={event.at}>{when(event.at)}</time>
         {event.passage && <span className="ml-2 font-mono">{event.passage}</span>}
       </p>

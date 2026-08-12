@@ -1,11 +1,11 @@
 import type { Health } from "@/lib/api";
 
 const tone: Record<Health, string> = {
-  Healthy: "text-[var(--color-healthy)]",
-  Progressing: "text-[var(--color-progressing)]",
-  Degraded: "text-[var(--color-degraded)]",
-  Unknown: "text-[var(--color-unknown)]",
-  NotApplicable: "text-[var(--muted)]",
+  Healthy: "text-[var(--healthy)]",
+  Progressing: "text-[var(--progressing)]",
+  Degraded: "text-[var(--destructive)]",
+  Unknown: "text-[var(--unknown)]",
+  NotApplicable: "text-[var(--muted-foreground)]",
 };
 
 /**

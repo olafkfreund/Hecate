@@ -19,7 +19,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-6">
-      <header className="flex items-center gap-6 border-b border-[var(--line)] py-4">
+      <header className="flex items-center gap-6 border-b border-[var(--border)] py-4">
         <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight">
           <span aria-hidden className="text-lg">
             ⛿
@@ -39,8 +39,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
                 aria-current={active ? "page" : undefined}
                 className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors ${
                   active
-                    ? "bg-[var(--raised)] font-medium"
-                    : "text-[var(--muted)] hover:bg-[var(--raised)]"
+                    ? "bg-[var(--secondary)] font-medium"
+                    : "text-[var(--muted-foreground)] hover:bg-[var(--secondary)]"
                 }`}
               >
                 <Icon size={15} aria-hidden />
@@ -58,7 +58,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
       <main className="flex-1 py-8">{children}</main>
 
-      <footer className="border-t border-[var(--line)] py-4 text-xs text-[var(--muted)]">
+      <footer className="border-t border-[var(--border)] py-4 text-xs text-[var(--muted-foreground)]">
         <Version />
       </footer>
     </div>
@@ -83,7 +83,7 @@ function Namespace() {
   const ns = edited ?? current;
 
   return (
-    <label className="flex items-center gap-2 text-sm text-[var(--muted)]">
+    <label className="flex items-center gap-2 text-sm text-[var(--muted-foreground)]">
       <span className="sr-only">Namespace</span>
       <input
         value={ns}
@@ -97,7 +97,7 @@ function Namespace() {
           url.searchParams.set("namespace", edited);
           window.location.href = url.toString();
         }}
-        className="w-32 rounded-md border border-[var(--line)] bg-transparent px-2 py-1 text-[var(--fg)]"
+        className="w-32 rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-[var(--foreground)]"
         aria-label="Namespace"
       />
     </label>
@@ -117,7 +117,7 @@ function ThemeToggle() {
   return (
     <button
       onClick={() => setTheme(next)}
-      className="rounded-md p-2 text-[var(--muted)] hover:bg-[var(--raised)]"
+      className="rounded-md p-2 text-[var(--muted-foreground)] hover:bg-[var(--secondary)]"
       aria-label={`Theme: ${theme ?? "system"}. Switch to ${next}.`}
       title={`Theme: ${theme ?? "system"}`}
     >

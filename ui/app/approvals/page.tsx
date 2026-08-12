@@ -41,7 +41,7 @@ export default function Approvals() {
   return (
     <div>
       <h1 className="text-xl font-semibold tracking-tight">Approvals</h1>
-      <p className="mt-1 text-sm text-[var(--muted)]">
+      <p className="mt-1 text-sm text-[var(--muted-foreground)]">
         Bundles that cannot cross until someone says so.
       </p>
 
@@ -49,9 +49,9 @@ export default function Approvals() {
         <Panel state={state}>
           {(pending) =>
             pending.length === 0 ? (
-              <p className="text-sm text-[var(--muted)]">Nothing is waiting on you.</p>
+              <p className="text-sm text-[var(--muted-foreground)]">Nothing is waiting on you.</p>
             ) : (
-              <ul className="divide-y divide-[var(--line)]">
+              <ul className="divide-y divide-[var(--border)]">
                 {pending.map((p) => (
                   <Row
                     key={`${p.gate}/${p.bundle}`}
@@ -107,16 +107,16 @@ function Row({
       <div className="flex items-center gap-3 text-sm">
         <Link
           href={{ pathname: "/bundles/", query: { name: pending.bundle, namespace } }}
-          className="font-medium underline decoration-[var(--line)] underline-offset-4 hover:decoration-current"
+          className="font-medium underline decoration-[var(--border)] underline-offset-4 hover:decoration-current"
         >
           {pending.bundle}
         </Link>
-        <span className="text-[var(--muted)]">→ {pending.gate}</span>
+        <span className="text-[var(--muted-foreground)]">→ {pending.gate}</span>
 
         <button
           onClick={approve}
           disabled={busy}
-          className="ml-auto flex items-center gap-1.5 rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+          className="ml-auto flex items-center gap-1.5 rounded-md bg-[var(--primary)] px-3 py-1.5 text-sm font-medium text-[var(--primary-foreground)] disabled:opacity-50"
         >
           {busy ? (
             <Loader2 size={14} className="animate-spin" aria-hidden />
@@ -127,13 +127,13 @@ function Row({
         </button>
       </div>
 
-      <p className="mt-1 flex items-center gap-1.5 text-xs text-[var(--muted)]">
+      <p className="mt-1 flex items-center gap-1.5 text-xs text-[var(--muted-foreground)]">
         <ShieldCheck size={12} aria-hidden />
         Approving records you as the approver. It does not cross the Gate.
       </p>
 
       {failed && (
-        <p role="alert" className="mt-2 text-sm text-[var(--color-degraded)]">
+        <p role="alert" className="mt-2 text-sm text-[var(--destructive)]">
           {failed}
         </p>
       )}

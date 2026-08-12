@@ -49,20 +49,20 @@ export function Panel<T>({
   children: (data: T) => React.ReactNode;
 }) {
   if (state.loading) {
-    return <p className="text-sm text-[var(--muted)]">Loading…</p>;
+    return <p className="text-sm text-[var(--muted-foreground)]">Loading…</p>;
   }
 
   if (state.error instanceof Unauthenticated) {
     return (
-      <div className="rounded-lg border border-[var(--line)] p-6">
+      <div className="rounded-lg border border-[var(--border)] p-6">
         <h2 className="font-medium">Sign in</h2>
-        <p className="mt-1 text-sm text-[var(--muted)]">
+        <p className="mt-1 text-sm text-[var(--muted-foreground)]">
           Hecate asks Kubernetes who you are and what you may do. Signing in gets a token the
           cluster already trusts — it grants nothing on its own.
         </p>
         <button
           onClick={signIn}
-          className="mt-4 flex items-center gap-2 rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-medium text-white"
+          className="mt-4 flex items-center gap-2 rounded-md bg-[var(--primary)] px-3 py-1.5 text-sm font-medium text-[var(--primary-foreground)]"
         >
           <LogIn size={15} aria-hidden />
           Sign in
@@ -75,15 +75,15 @@ export function Panel<T>({
     const err = state.error;
     const forbidden = err instanceof ApiError && err.status === 403;
     return (
-      <div className="flex items-start gap-3 rounded-lg border border-[var(--line)] p-6">
-        <TriangleAlert size={18} className="mt-0.5 text-[var(--color-degraded)]" aria-hidden />
+      <div className="flex items-start gap-3 rounded-lg border border-[var(--border)] p-6">
+        <TriangleAlert size={18} className="mt-0.5 text-[var(--destructive)]" aria-hidden />
         <div>
           <h2 className="font-medium">{forbidden ? "Not permitted" : "Could not load"}</h2>
-          <p className="mt-1 text-sm text-[var(--muted)]">
+          <p className="mt-1 text-sm text-[var(--muted-foreground)]">
             {err instanceof Error ? err.message : String(err)}
           </p>
           {forbidden && (
-            <p className="mt-2 text-sm text-[var(--muted)]">
+            <p className="mt-2 text-sm text-[var(--muted-foreground)]">
               Your Kubernetes user may read some namespaces and not others. Hecate does not
               decide this; the cluster does.
             </p>

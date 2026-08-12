@@ -5,11 +5,11 @@ import { build, NODE_H, NODE_W, type Node } from "@/lib/graph";
 import type { Gate, Health } from "@/lib/api";
 
 const stroke: Record<Health, string> = {
-  Healthy: "var(--color-healthy)",
-  Progressing: "var(--color-progressing)",
-  Degraded: "var(--color-degraded)",
-  Unknown: "var(--color-unknown)",
-  NotApplicable: "var(--line)",
+  Healthy: "var(--healthy)",
+  Progressing: "var(--progressing)",
+  Degraded: "var(--destructive)",
+  Unknown: "var(--unknown)",
+  NotApplicable: "var(--border)",
 };
 
 /**
@@ -45,7 +45,7 @@ export function PipelineGraph({ gates, namespace }: { gates: Gate[]; namespace: 
             markerHeight="7"
             orient="auto-start-reverse"
           >
-            <path d="M0,0 L8,4 L0,8 z" fill="var(--muted)" />
+            <path d="M0,0 L8,4 L0,8 z" fill="var(--muted-foreground)" />
           </marker>
         </defs>
 
@@ -63,7 +63,7 @@ export function PipelineGraph({ gates, namespace }: { gates: Gate[]; namespace: 
               <path
                 d={`M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}`}
                 fill="none"
-                stroke="var(--line)"
+                stroke="var(--border)"
                 strokeWidth="1.5"
                 markerEnd="url(#arrow)"
               />
@@ -74,7 +74,7 @@ export function PipelineGraph({ gates, namespace }: { gates: Gate[]; namespace: 
                   x={mid}
                   y={(y1 + y2) / 2 - 6}
                   textAnchor="middle"
-                  className="fill-[var(--muted)] text-[10px]"
+                  className="fill-[var(--muted-foreground)] text-[10px]"
                 >
                   approval
                 </text>
@@ -100,17 +100,17 @@ function GraphNode({ node, namespace }: { node: Node; namespace: string }) {
         width={NODE_W}
         height={NODE_H}
         rx="8"
-        fill="var(--raised)"
-        stroke={node.kind === "gate" ? stroke[node.health ?? "Unknown"] : "var(--line)"}
+        fill="var(--secondary)"
+        stroke={node.kind === "gate" ? stroke[node.health ?? "Unknown"] : "var(--border)"}
         strokeWidth="1.5"
         // A Beacon is a source, not an environment; dashing it says so without
         // needing a legend.
         strokeDasharray={node.kind === "beacon" ? "4 3" : undefined}
       />
-      <text x={node.x + 12} y={node.y + 23} className="fill-[var(--fg)] text-[13px] font-medium">
+      <text x={node.x + 12} y={node.y + 23} className="fill-[var(--foreground)] text-[13px] font-medium">
         {node.label}
       </text>
-      <text x={node.x + 12} y={node.y + 41} className="fill-[var(--muted)] text-[11px]">
+      <text x={node.x + 12} y={node.y + 41} className="fill-[var(--muted-foreground)] text-[11px]">
         {node.kind === "beacon" ? "beacon" : (node.current ?? "nothing yet")}
       </text>
     </g>

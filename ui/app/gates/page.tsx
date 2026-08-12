@@ -27,7 +27,7 @@ export default function GateDetail() {
 
   if (!name) {
     return (
-      <p className="text-sm text-[var(--muted)]">
+      <p className="text-sm text-[var(--muted-foreground)]">
         No Gate named. <Link href="/" className="underline">Back to Gates</Link>.
       </p>
     );
@@ -37,7 +37,7 @@ export default function GateDetail() {
     <div>
       <Link
         href="/"
-        className="mb-4 inline-flex items-center gap-1.5 text-sm text-[var(--muted)] hover:text-[var(--fg)]"
+        className="mb-4 inline-flex items-center gap-1.5 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
       >
         <ArrowLeft size={14} aria-hidden />
         Gates
@@ -49,12 +49,12 @@ export default function GateDetail() {
             <header>
               <div className="flex items-baseline gap-3">
                 <h1 className="text-xl font-semibold tracking-tight">{ex.gate}</h1>
-                <span className="text-sm text-[var(--muted)]">{ex.state}</span>
+                <span className="text-sm text-[var(--muted-foreground)]">{ex.state}</span>
                 <span className="ml-auto">
                   <HealthDot health={ex.health} />
                 </span>
               </div>
-              <p className="mt-1 text-sm text-[var(--muted)]">{ex.summary}</p>
+              <p className="mt-1 text-sm text-[var(--muted-foreground)]">{ex.summary}</p>
               {ex.current && (
                 <p className="mt-2 text-sm">
                   Running now: <span className="font-medium">{ex.current}</span>
@@ -70,18 +70,18 @@ export default function GateDetail() {
                     <li key={`${b.kind}-${i}`} className="flex gap-3 text-sm">
                       <CircleAlert
                         size={16}
-                        className="mt-0.5 shrink-0 text-[var(--color-unknown)]"
+                        className="mt-0.5 shrink-0 text-[var(--unknown)]"
                         aria-hidden
                       />
                       <div>
                         <p>
-                          <span className="font-mono text-xs text-[var(--muted)]">{b.kind}</span>{" "}
+                          <span className="font-mono text-xs text-[var(--muted-foreground)]">{b.kind}</span>{" "}
                           {b.detail}
                         </p>
                         {/* The fix is the whole point of an explanation: a
                             diagnosis nobody can act on is just a status. */}
                         {b.fix && (
-                          <p className="mt-1 font-mono text-xs text-[var(--muted)]">→ {b.fix}</p>
+                          <p className="mt-1 font-mono text-xs text-[var(--muted-foreground)]">→ {b.fix}</p>
                         )}
                       </div>
                     </li>
@@ -104,7 +104,7 @@ export default function GateDetail() {
                   {ex.waiting.map((w) => (
                     <li key={w.bundle} className="flex gap-3">
                       <span className="font-medium">{w.bundle}</span>
-                      <span className="text-[var(--muted)]">{w.reason}</span>
+                      <span className="text-[var(--muted-foreground)]">{w.reason}</span>
                     </li>
                   ))}
                 </ul>
@@ -135,7 +135,7 @@ function Eligible({
     return (
       <section>
         <h2 className="text-sm font-medium">Eligible</h2>
-        <p className="mt-2 text-sm text-[var(--muted)]">Nothing may cross right now.</p>
+        <p className="mt-2 text-sm text-[var(--muted-foreground)]">Nothing may cross right now.</p>
       </section>
     );
   }
@@ -169,7 +169,7 @@ function Eligible({
             <button
               onClick={() => cross(b)}
               disabled={busy !== null}
-              className="ml-auto flex items-center gap-1.5 rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+              className="ml-auto flex items-center gap-1.5 rounded-md bg-[var(--primary)] px-3 py-1.5 text-sm font-medium text-[var(--primary-foreground)] disabled:opacity-50"
             >
               {busy === b ? (
                 <Loader2 size={14} className="animate-spin" aria-hidden />
@@ -182,7 +182,7 @@ function Eligible({
         ))}
       </ul>
       {failed && (
-        <p role="alert" className="mt-3 text-sm text-[var(--color-degraded)]">
+        <p role="alert" className="mt-3 text-sm text-[var(--destructive)]">
           {failed}
         </p>
       )}

@@ -18,7 +18,7 @@ export function BundleDetail() {
     <div>
       <Link
         href="/bundles/"
-        className="mb-4 inline-flex items-center gap-1.5 text-sm text-[var(--muted)] hover:text-[var(--fg)]"
+        className="mb-4 inline-flex items-center gap-1.5 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
       >
         <ArrowLeft size={14} aria-hidden />
         Bundles
@@ -31,7 +31,7 @@ export function BundleDetail() {
               <h1 className="text-xl font-semibold tracking-tight">
                 {b.spec.alias || b.metadata.name}
               </h1>
-              <p className="mt-1 text-sm text-[var(--muted)]">
+              <p className="mt-1 text-sm text-[var(--muted-foreground)]">
                 {b.spec.alias ? `${b.metadata.name} · ` : ""}
                 from {b.spec.beacon ?? "an unknown Beacon"}
               </p>
@@ -54,7 +54,7 @@ export function BundleDetail() {
                       {/* The digest is what was deployed; the tag is only what
                           it was called at the time. */}
                       {detail && (
-                        <span className="ml-2 break-all font-mono text-xs text-[var(--muted)]">
+                        <span className="ml-2 break-all font-mono text-xs text-[var(--muted-foreground)]">
                           {detail}
                         </span>
                       )}
@@ -62,7 +62,7 @@ export function BundleDetail() {
                   );
                 })}
                 {(b.spec.artifacts ?? []).length === 0 && (
-                  <li className="text-[var(--muted)]">No artifacts recorded.</li>
+                  <li className="text-[var(--muted-foreground)]">No artifacts recorded.</li>
                 )}
               </ul>
             </section>
