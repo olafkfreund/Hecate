@@ -21,7 +21,7 @@ DEV_TAG        := dev-$(shell date +%s)
 export KUBECONFIG ?= $(CURDIR)/.dev/kubeconfig
 
 .DEFAULT_GOAL := help
-.PHONY: help test vet fmt lint check flake-hash generate build run ui ui-dev cluster cluster-rm cluster-load install uninstall collector e2e secrets-edit secrets-rekey clean
+.PHONY: help test vet fmt lint check flake-hash generate build run ui ui-dev oidc-check cluster cluster-rm cluster-load install uninstall collector e2e secrets-edit secrets-rekey clean
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -161,6 +161,9 @@ ui: ## Build the web UI into the API binary
 
 ui-dev: ## Run the UI against a local hecate-api on :8080
 	cd ui && npm run dev
+
+oidc-check: ## Prove browser sign-in works, by doing it
+	./scripts/oidc.sh check
 
 collector: ## Deploy a span-printing OTel collector into the dev cluster
 	kubectl apply -f dev/collector.yaml

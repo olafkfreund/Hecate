@@ -16,6 +16,40 @@ metadata:
   name: hecate-auth
 ---
 apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dex
+  namespace: hecate-auth
+---
+# Dex creates and manages its own CRDs to store keys, auth requests and
+# refresh tokens. Cluster-wide because CRDs are cluster-scoped; broad because
+# this is a disposable development cluster and narrowing it would be ceremony.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dex
+rules:
+  - apiGroups: ["dex.coreos.com"]
+    resources: ["*"]
+    verbs: ["*"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["create", "get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dex
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: dex
+subjects:
+  - kind: ServiceAccount
+    name: dex
+    namespace: hecate-auth
+---
+apiVersion: v1
 kind: Secret
 metadata:
   name: dex-tls
@@ -34,20 +68,30 @@ data:
   config.yaml: |
     issuer: ISSUER
     storage:
-      type: memory
+      # Kubernetes rather than memory, and this is not a preference.
+      #
+      # In-memory storage means Dex mints **new signing keys on every restart**,
+      # and kube-apiserver does not refetch the key set promptly — so a
+      # perfectly good token fails with "oidc: verify token: failed to verify
+      # signature" and stays failing for minutes, with nothing in any log
+      # saying why. Persisting the keys in the cluster makes a restart a
+      # non-event, which is what it should be.
+      type: kubernetes
+      config:
+        inCluster: true
     web:
       https: 0.0.0.0:5556
       tlsCert: /etc/dex/tls/tls.crt
       tlsKey: /etc/dex/tls/tls.key
-    # No consent screen: a one-user development cluster, and the extra click
-    # teaches nothing.
-    #
-    # The password grant is enabled only so the setup can be *tested* without a
-    # browser: it is what lets a script obtain an ID token and check that
-    # Kubernetes accepts it, which is the half of this that silently fails.
-    # Dex requires the client to opt in.
     oauth2:
+      # No consent screen: a one-user development cluster, and the extra click
+      # teaches nothing.
       skipApprovalScreen: true
+      # Lets the login form be driven by a script as well as by a person, which
+      # is what makes `make oidc-check` possible. Note that Dex no longer
+      # supports the OAuth password *grant* — it is not in
+      # grant_types_supported — so a token cannot be fetched without walking
+      # the browser flow, which is what that check does.
       passwordConnector: local
     staticClients:
       - id: hecate
@@ -77,9 +121,14 @@ spec:
     metadata:
       labels: { app: dex }
       annotations:
-        # Restart when the config changes, so editing it takes effect.
+        # Over the *config*, not the certificate. It was the certificate, which
+        # is reused between runs — so changing the config produced an identical
+        # Deployment, nothing restarted, and Dex went on serving the old one
+        # while kubectl reported a successful rollout. That cost an hour of
+        # believing a correct config was deployed.
         checksum/config: "CONFIG_SUM"
     spec:
+      serviceAccountName: dex
       containers:
         - name: dex
           image: ghcr.io/dexidp/dex:v2.44.0

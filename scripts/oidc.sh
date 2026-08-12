@@ -99,12 +99,20 @@ install() {
 
   log "installing Dex at $issuer"
 
-  # bcrypt of "hecate-dev". Hard-coded rather than generated: htpasswd is not
-  # in the dev shell, and a fixed hash for a fixed throwaway password in an
-  # offline cluster is not a secret worth protecting.
-  local hash='$2a$10$2b2cu/tw3.nkkNw6kAfXcuTb0aq9tYD1L4Iy3EjPTV9NkYSNqTEmm'
+  # bcrypt of "hecate-dev", generated and verified rather than typed. The first
+  # version of this line was a hash I asserted was bcrypt of that password and
+  # never checked; it was not, so Dex rejected every login with "Invalid Email
+  # Address and password" — after the whole cluster had been rebuilt around it.
+  #
+  # Hard-coded rather than generated at install time because a fixed hash for a
+  # fixed throwaway password in an offline cluster is not a secret, and
+  # generating it would need a bcrypt implementation the dev shell does not
+  # otherwise carry. `make oidc-hash` regenerates it if the password changes.
+  local hash='$2a$10$Wu3phLaPTxK.W.4Y777Erut8L1cL7mVo.s.Q1a7njRSA976m8ilSm'
 
-  sum=$(sha256sum "$OUT/tls.crt" | cut -c1-16)
+  # Over the rendered config, so a changed issuer or password actually
+  # restarts Dex. See the annotation's comment in dex.yaml.tmpl.
+  sum=$(printf '%s%s' "$issuer" "$hash" | sha256sum | cut -c1-16)
   sed -e "s|ISSUER|$issuer|g" \
       -e "s|BCRYPT_HASH|$hash|g" \
       -e "s|CONFIG_SUM|$sum|g" \
@@ -140,8 +148,54 @@ sent to $host — accept it once and the flow completes.
 EOF
 }
 
+# check walks the whole browser flow with curl and asserts the session works.
+#
+# This is the difference between "SSO is implemented" and "SSO works". Both
+# failures that made it not work were invisible from the code: a bcrypt hash
+# that was not the hash of the password it claimed, and a restart annotation
+# over the wrong file, so a corrected config was never loaded. Nothing but
+# driving the real flow would have found either.
+check() {
+  local api="${HECATE_API:-http://127.0.0.1:18099}"
+  local jar; jar=$(mktemp)
+  local host issuer state final
+  host="dex.$(host_ip).nip.io"
+  issuer="https://$host:5556/dex"
+  # shellcheck disable=SC2064
+  trap "rm -f $jar" RETURN
+
+  curl -sf -o /dev/null "$api/healthz" \
+    || die "$api is not answering — start hecate-api with the environment above"
+
+  state=$(curl -s -L -c "$jar" -b "$jar" --cacert "$OUT/ca.crt" \
+    -o /dev/null -w '%{url_effective}' "$api/auth/login" |
+    grep -o 'state=[a-z0-9]*' | cut -d= -f2)
+  [ -n "$state" ] || die "the login did not reach $issuer"
+
+  final=$(curl -s -L -c "$jar" -b "$jar" --cacert "$OUT/ca.crt" \
+    -d "login=olaf@hecate.test" -d "password=hecate-dev" \
+    -o /dev/null -w '%{url_effective}' \
+    "$issuer/auth/local/login?back=&state=$state")
+
+  case "$final" in
+    "$api"/*) ;;
+    *) die "the flow ended at $final rather than back at $api — Dex refused the login" ;;
+  esac
+  grep -q hecate_session "$jar" || die "no session cookie was set"
+
+  local code
+  code=$(curl -s -b "$jar" -o /dev/null -w '%{http_code}' \
+    "$api/api/v1alpha1/namespaces/default/gates")
+  [ "$code" = "200" ] || die "the session was set but the API answered $code — \
+the cluster is most likely not trusting $issuer; check \
+'docker logs k3d-hecate-dev-server-0 | grep oidc'"
+
+  log "sign-in works: Dex issued a token, the cluster accepted it, the API answered 200"
+}
+
 case "${1:-install}" in
   args) args ;;
   install) install ;;
-  *) die "usage: $0 [args|install]" ;;
+  check) check ;;
+  *) die "usage: $0 [args|install|check]" ;;
 esac

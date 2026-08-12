@@ -193,10 +193,34 @@ the browser objects once.
 Everything here is disposable — a throwaway CA, one static password, a client
 secret in a ConfigMap. The cluster is offline and holds nothing.
 
+Prove it works without opening a browser at all:
+
+```console
+$ make oidc-check
+==> sign-in works: Dex issued a token, the cluster accepted it, the API answered 200
+```
+
+That walks the real flow — authorize, log in, exchange, session cookie, an
+authenticated API call — and it exists because every failure here was invisible
+from the code. Three of them, in order of how long each took to see:
+
+- A **bcrypt hash that was not the hash of the password it claimed to be.** Dex
+  answered "Invalid Email Address and password" and nothing else was wrong.
+- A **restart annotation over the TLS certificate rather than the config.** The
+  certificate is reused between runs, so a corrected config produced an
+  identical Deployment, nothing restarted, and `kubectl` cheerfully reported
+  success while Dex went on serving the old one.
+- **`storage: memory`,** which makes Dex mint new signing keys on every restart.
+  kube-apiserver does not refetch the key set promptly, so a perfectly valid
+  token fails with `oidc: verify token: failed to verify signature` and keeps
+  failing for minutes. Dex now stores its keys in the cluster, which makes a
+  restart a non-event.
+
 **If sign-in succeeds and every request afterwards is refused**, the cluster is
-not trusting the issuer. Check `docker logs k3d-hecate-dev-server-0 | grep oidc`:
-`initializing plugin: ... EOF` means the API server cannot reach Dex, which is
-the failure this whole arrangement exists to avoid.
+not trusting the issuer. `docker logs k3d-hecate-dev-server-0 | grep oidc`:
+`initializing plugin: ... EOF` means the API server cannot reach Dex. A
+signature failure after changing anything about Dex means the API server is
+holding a stale key set — `docker restart k3d-hecate-dev-server-0` clears it.
 
 ### Looking at traces
 
