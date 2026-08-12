@@ -146,7 +146,27 @@ jobs:
           done
           # An asset that does not apply is worse than none: it would be found
           # mid-upgrade, by someone whose controller is already rolling out.
-          kubectl apply --dry-run=client -f dist/crds.yaml
+          #
+          # Checked by counting documents rather than with `kubectl apply
+          # --dry-run=client`, which was here first and cannot work: client
+          # dry-run still fetches the OpenAPI schema and still needs the
+          # server's API group list to resolve the kind, so it fails on a runner
+          # with no cluster. It would have failed the first tag ever pushed.
+          #
+          # The CRDs themselves are already validated elsewhere — `make check`
+          # fails if the committed output has drifted from the Go types, and
+          # every e2e run applies them to a real API server. What is unproven at
+          # this point is only the *concatenation*, and a document count catches
+          # the ways that goes wrong: a truncated file, a missing separator, an
+          # empty loop over a directory that moved.
+          want=$(ls charts/hecate/crds/*.yaml | wc -l)
+          got=$(grep -c '^kind: CustomResourceDefinition' dist/crds.yaml || true)
+          test "$want" -gt 0 || { echo "::error::no CRDs found to collect"; exit 1; }
+          if [ "$got" != "$want" ]; then
+            echo "::error::crds.yaml has $got CustomResourceDefinition documents, want $want"
+            exit 1
+          fi
+          echo "crds.yaml: $got CRDs, $(wc -c < dist/crds.yaml) bytes"
 
       - name: Push as an OCI artifact
         if: needs.version.outputs.publish == 'true'
