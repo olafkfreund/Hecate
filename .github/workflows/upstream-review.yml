@@ -1,0 +1,84 @@
+# Opens the quarterly upstream review as an issue.
+#
+# This is item five of the tracking mechanism, and it is last on purpose: the
+# e2e matrix, the new-minor check, the status fixtures and the startup discovery
+# check all run without anyone remembering to. This one is the backstop for what
+# none of them can see — a deprecation announced but not yet enacted, a new
+# extension point worth using, a roadmap change that affects what we should
+# build next.
+#
+# A recurring issue rather than a note in a document, because a checklist nobody
+# is assigned does not get done, and "review it quarterly" with no mechanism is
+# exactly the failure the development plan calls out.
+name: Upstream review
+
+on:
+  schedule:
+    # The first Monday-ish of January, April, July and October — roughly Flux's
+    # own ~4-month minor cadence, offset so it lands after a release rather than
+    # before one.
+    - cron: "0 9 1 1,4,7,10 *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  open:
+    name: Open the quarterly review
+    runs-on: ubuntu-latest
+    steps:
+      - name: File it, unless it is already open
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          quarter="$(date -u +%Y) Q$(( ($(date -u +%-m) - 1) / 3 + 1 ))"
+          title="Upstream review: $quarter"
+
+          if gh issue list --state open --search "$title in:title" --json title \
+               --jq '.[].title' | grep -qxF "$title"; then
+            echo "$title is already open."
+            exit 0
+          fi
+
+          {
+            echo "The quarterly look at FluxCD and the ecosystem. Everything here is"
+            echo "something the automation cannot notice on its own."
+            echo
+            echo "## Flux"
+            echo
+            echo "- [ ] New or removed API versions in the groups we read — \`kustomize.toolkit\`,"
+            echo "      \`helm.toolkit\`, \`source.toolkit\`. Removals are the ones that bite:"
+            echo "      \`pkg/health\` defaults one version per kind."
+            echo "- [ ] Deprecations *announced* but not yet enacted. The startup check only"
+            echo "      sees what has already happened."
+            echo "- [ ] Changes to the status fields listed in the"
+            echo "      [Flux compatibility surface](../blob/main/docs/ARCHITECTURE.md#flux-compatibility-surface)."
+            echo "- [ ] New extension points. Every capability Flux absorbs is one we should"
+            echo "      delete rather than duplicate — that is the maintenance strategy, not a"
+            echo "      concession."
+            echo "- [ ] Is the support matrix still the three minors Flux supports?"
+            echo
+            echo "## Ecosystem"
+            echo
+            echo "- [ ] Has anything appeared that overlaps the promotion model? The"
+            echo "      [ecosystem page](https://fluxcd.io/ecosystem/) had no promotion category"
+            echo "      when we started; if that changes, it changes the product argument."
+            echo "- [ ] Flux Operator, Flagger, notification-controller: anything we could now"
+            echo "      reuse instead of maintaining."
+            echo
+            echo "## Ours"
+            echo
+            echo "- [ ] Do the [decision records](../blob/main/docs/DECISIONS.md) still hold?"
+            echo "      Several are 'rejected for now' and worth re-reading against reality."
+            echo "- [ ] Are the README's claims still true? They have drifted before."
+            echo
+            echo "Close this with a comment saying what changed, even if the answer is"
+            echo "nothing — a review with no record is indistinguishable from one nobody did."
+          } > /tmp/review.md
+
+          gh issue create --title "$title" --label upstream --body-file /tmp/review.md
