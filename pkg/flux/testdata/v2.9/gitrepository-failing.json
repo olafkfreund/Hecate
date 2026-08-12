@@ -1,0 +1,49 @@
+{
+  "apiVersion": "source.toolkit.fluxcd.io/v1",
+  "kind": "GitRepository",
+  "metadata": {
+    "name": "git-broken",
+    "namespace": "fixtures",
+    "generation": 1
+  },
+  "spec": {
+    "interval": "1m",
+    "ref": {
+      "branch": "main"
+    },
+    "secretRef": {
+      "name": "git"
+    },
+    "timeout": "60s",
+    "url": "http://gitea.hecate-git.svc.cluster.local:3000/hecate/does-not-exist.git"
+  },
+  "status": {
+    "conditions": [
+      {
+        "lastTransitionTime": "2026-08-12T11:53:50Z",
+        "message": "building artifact",
+        "observedGeneration": 1,
+        "reason": "ProgressingWithRetry",
+        "status": "True",
+        "type": "Reconciling"
+      },
+      {
+        "lastTransitionTime": "2026-08-12T11:53:50Z",
+        "message": "failed to checkout and determine revision: unable to clone 'http://gitea.hecate-git.svc.cluster.local:3000/hecate/does-not-exist.git': repository not found: Repository not found",
+        "observedGeneration": 1,
+        "reason": "GitOperationFailed",
+        "status": "False",
+        "type": "Ready"
+      },
+      {
+        "lastTransitionTime": "2026-08-12T11:53:03Z",
+        "message": "failed to checkout and determine revision: unable to clone 'http://gitea.hecate-git.svc.cluster.local:3000/hecate/does-not-exist.git': repository not found: Repository not found",
+        "observedGeneration": 1,
+        "reason": "GitOperationFailed",
+        "status": "True",
+        "type": "FetchFailed"
+      }
+    ],
+    "observedGeneration": -1
+  }
+}

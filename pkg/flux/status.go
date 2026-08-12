@@ -90,11 +90,13 @@ func Evaluate(obj *unstructured.Unstructured, opts Options) Result {
 
 	revision := appliedRevision(obj)
 
+	ready, hasReady := condition(obj, "Ready")
+
 	// A stale status is the classic false-green: spec has moved on, Ready=True
-	// still describes the previous generation. Check this before conditions.
+	// still describes the previous generation. Decided before any condition is
+	// believed.
 	gen := obj.GetGeneration()
-	observed, found, _ := unstructured.NestedInt64(obj.Object, "status", "observedGeneration")
-	if !found || observed < gen {
+	if observed, current := describesGeneration(obj, ready, hasReady, gen); !current {
 		return Result{
 			Health:   v1alpha1.HealthProgressing,
 			Revision: revision,
@@ -113,8 +115,7 @@ func Evaluate(obj *unstructured.Unstructured, opts Options) Result {
 		}
 	}
 
-	ready, ok := condition(obj, "Ready")
-	if !ok {
+	if !hasReady {
 		return Result{
 			Health:   v1alpha1.HealthProgressing,
 			Revision: revision,
@@ -224,11 +225,36 @@ func appliedRevision(obj *unstructured.Unstructured) string {
 	return ""
 }
 
+// describesGeneration reports whether the status about to be read belongs to
+// the current spec, and the generation it does describe.
+//
+// **The Ready condition's own observedGeneration wins over the top-level one.**
+// Flux sets `status.observedGeneration` to -1 on a resource that has never
+// successfully reconciled, while its conditions already describe the current
+// generation perfectly well. Reading only the top-level field therefore reports
+// a permanently broken source — a GitRepository with a wrong URL, a registry
+// refusing connections — as "not observed yet" for ever: never Degraded however
+// long it fails, with the real error buried behind a message about generations.
+// Captured Flux output is what surfaced that; hand-written status never would
+// have, because we would have written the sentinel we expected.
+//
+// Preferring the condition is also simply more correct. metav1.Condition
+// carries ObservedGeneration for exactly this purpose, and a condition left
+// over from a previous spec still carries that spec's number.
+func describesGeneration(obj *unstructured.Unstructured, ready cond, hasReady bool, gen int64) (int64, bool) {
+	if hasReady && ready.ObservedGeneration > 0 {
+		return ready.ObservedGeneration, ready.ObservedGeneration >= gen
+	}
+	observed, found, _ := unstructured.NestedInt64(obj.Object, "status", "observedGeneration")
+	return observed, found && observed >= gen
+}
+
 // cond is a status condition, decoded from unstructured.
 type cond struct {
 	Status             string
 	Reason             string
 	Message            string
+	ObservedGeneration int64
 	LastTransitionTime time.Time
 }
 
@@ -249,6 +275,9 @@ func condition(obj *unstructured.Unstructured, condType string) (cond, bool) {
 		c.Status, _ = m["status"].(string)
 		c.Reason, _ = m["reason"].(string)
 		c.Message, _ = m["message"].(string)
+		if g, ok := m["observedGeneration"].(int64); ok {
+			c.ObservedGeneration = g
+		}
 		if ts, ok := m["lastTransitionTime"].(string); ok {
 			c.LastTransitionTime, _ = time.Parse(time.RFC3339, ts)
 		}

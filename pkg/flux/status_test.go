@@ -1,6 +1,7 @@
 package flux
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -187,5 +188,85 @@ func TestAppliedRevisionFromHelmReleaseHistory(t *testing.T) {
 	}
 	if got.Revision != "6.3.5" {
 		t.Errorf("revision = %q, want 6.3.5", got.Revision)
+	}
+}
+
+// Flux writes status.observedGeneration = -1 on a resource that has never
+// successfully reconciled, while its conditions already describe the current
+// generation. Believing only the top-level field reports a permanently broken
+// source as "not observed yet" for ever: never Degraded however long it fails,
+// and with the real error hidden behind a message about generations.
+//
+// This is stated separately from the captured fixtures because it is the rule,
+// not an example of it — a future Flux could stop using -1 and this must still
+// hold for any status whose conditions are current.
+func TestNeverReconciledIsJudgedByItsConditions(t *testing.T) {
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "source.toolkit.fluxcd.io/v1",
+		"kind":       "GitRepository",
+		"metadata":   map[string]any{"name": "fleet", "namespace": "acme", "generation": int64(1)},
+		"status": map[string]any{
+			"observedGeneration": int64(-1),
+			"conditions": []any{
+				map[string]any{
+					"type": "Ready", "status": "False",
+					"observedGeneration": int64(1),
+					"reason":             "GitOperationFailed",
+					"message":            "repository not found",
+					"lastTransitionTime": "2026-08-12T11:53:50Z",
+				},
+			},
+		},
+	}}
+
+	// Long enough that Flux is still plausibly retrying.
+	got := Evaluate(obj, Options{
+		Now:       time.Date(2026, 8, 12, 11, 54, 0, 0, time.UTC),
+		FailAfter: time.Hour,
+	})
+	if got.Health != v1alpha1.HealthProgressing {
+		t.Errorf("health = %s, want Progressing while the failure is fresh", got.Health)
+	}
+	if !strings.Contains(got.Issues[0], "repository not found") {
+		t.Errorf("issue = %q, want the actual error rather than a message about generations",
+			got.Issues[0])
+	}
+
+	// And it must eventually give up, which is impossible if the staleness
+	// check short-circuits on the -1.
+	got = Evaluate(obj, Options{
+		Now:       time.Date(2026, 8, 12, 13, 0, 0, 0, time.UTC),
+		FailAfter: time.Minute,
+	})
+	if got.Health != v1alpha1.HealthDegraded {
+		t.Errorf("health = %s, want Degraded: a source that has failed for an hour "+
+			"is not still starting up", got.Health)
+	}
+}
+
+// The genuine stale case must still be caught: a condition left over from a
+// previous spec carries that spec's generation, and must not be believed.
+func TestConditionFromAPreviousGenerationIsStale(t *testing.T) {
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "kustomize.toolkit.fluxcd.io/v1",
+		"kind":       "Kustomization",
+		"metadata":   map[string]any{"name": "app", "namespace": "acme", "generation": int64(4)},
+		"status": map[string]any{
+			"observedGeneration":  int64(3),
+			"lastAppliedRevision": "main@sha1:abc",
+			"conditions": []any{
+				map[string]any{
+					"type": "Ready", "status": "True",
+					"observedGeneration": int64(3),
+					"reason":             "ReconciliationSucceeded",
+					"lastTransitionTime": "2026-08-12T11:53:50Z",
+				},
+			},
+		},
+	}}
+
+	if got := Evaluate(obj, Options{}); got.Health != v1alpha1.HealthProgressing {
+		t.Errorf("health = %s, want Progressing: this Ready=True describes generation 3, "+
+			"not the current 4", got.Health)
 	}
 }

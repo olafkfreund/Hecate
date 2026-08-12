@@ -1,0 +1,43 @@
+{
+  "apiVersion": "source.toolkit.fluxcd.io/v1",
+  "kind": "HelmRepository",
+  "metadata": {
+    "name": "helm-broken",
+    "namespace": "fixtures",
+    "generation": 1
+  },
+  "spec": {
+    "interval": "5m",
+    "provider": "generic",
+    "url": "https://example.invalid/does-not-exist"
+  },
+  "status": {
+    "conditions": [
+      {
+        "lastTransitionTime": "2026-08-12T11:53:50Z",
+        "message": "building artifact",
+        "observedGeneration": 1,
+        "reason": "ProgressingWithRetry",
+        "status": "True",
+        "type": "Reconciling"
+      },
+      {
+        "lastTransitionTime": "2026-08-12T11:53:50Z",
+        "message": "failed to fetch Helm repository index: failed to cache index to temporary file: Get \"https://example.invalid/does-not-exist/index.yaml\": dial tcp: lookup example.invalid on 10.43.0.10:53: no such host",
+        "observedGeneration": 1,
+        "reason": "Failed",
+        "status": "False",
+        "type": "Ready"
+      },
+      {
+        "lastTransitionTime": "2026-08-12T11:53:03Z",
+        "message": "failed to fetch Helm repository index: failed to cache index to temporary file: Get \"https://example.invalid/does-not-exist/index.yaml\": dial tcp: lookup example.invalid on 10.43.0.10:53: no such host",
+        "observedGeneration": 1,
+        "reason": "Failed",
+        "status": "True",
+        "type": "FetchFailed"
+      }
+    ],
+    "observedGeneration": -1
+  }
+}

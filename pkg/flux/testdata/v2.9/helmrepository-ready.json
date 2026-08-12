@@ -1,0 +1,44 @@
+{
+  "apiVersion": "source.toolkit.fluxcd.io/v1",
+  "kind": "HelmRepository",
+  "metadata": {
+    "name": "helm-ok",
+    "namespace": "fixtures",
+    "generation": 1
+  },
+  "spec": {
+    "interval": "5m",
+    "provider": "generic",
+    "url": "https://stefanprodan.github.io/podinfo"
+  },
+  "status": {
+    "artifact": {
+      "digest": "sha256:c210838a2628a3aa988c6d9b041f5566e632025278857ff21f8f839bbbb93465",
+      "lastUpdateTime": "2026-08-12T11:53:03Z",
+      "path": "helmrepository/fixtures/helm-ok/index-616e9b4128d1df741234ee73d2411fd56d17c47046c506a7f47b82416c946a9b.yaml",
+      "revision": "sha256:616e9b4128d1df741234ee73d2411fd56d17c47046c506a7f47b82416c946a9b",
+      "size": 81032,
+      "url": "http://source-controller.flux-system.svc.cluster.local./helmrepository/fixtures/helm-ok/index-616e9b4128d1df741234ee73d2411fd56d17c47046c506a7f47b82416c946a9b.yaml"
+    },
+    "conditions": [
+      {
+        "lastTransitionTime": "2026-08-12T11:53:03Z",
+        "message": "stored artifact: revision 'sha256:616e9b4128d1df741234ee73d2411fd56d17c47046c506a7f47b82416c946a9b'",
+        "observedGeneration": 1,
+        "reason": "Succeeded",
+        "status": "True",
+        "type": "Ready"
+      },
+      {
+        "lastTransitionTime": "2026-08-12T11:53:03Z",
+        "message": "stored artifact: revision 'sha256:616e9b4128d1df741234ee73d2411fd56d17c47046c506a7f47b82416c946a9b'",
+        "observedGeneration": 1,
+        "reason": "Succeeded",
+        "status": "True",
+        "type": "ArtifactInStorage"
+      }
+    ],
+    "observedGeneration": 1,
+    "url": "http://source-controller.flux-system.svc.cluster.local./helmrepository/fixtures/helm-ok/index.yaml"
+  }
+}

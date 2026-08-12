@@ -1,0 +1,48 @@
+{
+  "apiVersion": "source.toolkit.fluxcd.io/v1",
+  "kind": "OCIRepository",
+  "metadata": {
+    "name": "oci-broken",
+    "namespace": "fixtures",
+    "generation": 1
+  },
+  "spec": {
+    "insecure": true,
+    "interval": "1m",
+    "provider": "generic",
+    "ref": {
+      "tag": "latest"
+    },
+    "timeout": "60s",
+    "url": "oci://hecate-registry:5001/nothing/here"
+  },
+  "status": {
+    "conditions": [
+      {
+        "lastTransitionTime": "2026-08-12T11:53:50Z",
+        "message": "building artifact",
+        "observedGeneration": 1,
+        "reason": "ProgressingWithRetry",
+        "status": "True",
+        "type": "Reconciling"
+      },
+      {
+        "lastTransitionTime": "2026-08-12T11:53:50Z",
+        "message": "failed to determine artifact digest: Get \"https://hecate-registry:5001/v2/\": dial tcp 172.18.0.5:5001: connect: connection refused; Get \"http://hecate-registry:5001/v2/\": dial tcp 172.18.0.5:5001: connect: connection refused",
+        "observedGeneration": 1,
+        "reason": "OCIArtifactPullFailed",
+        "status": "False",
+        "type": "Ready"
+      },
+      {
+        "lastTransitionTime": "2026-08-12T11:53:03Z",
+        "message": "failed to determine artifact digest: Get \"https://hecate-registry:5001/v2/\": dial tcp 172.18.0.5:5001: connect: connection refused; Get \"http://hecate-registry:5001/v2/\": dial tcp 172.18.0.5:5001: connect: connection refused",
+        "observedGeneration": 1,
+        "reason": "OCIArtifactPullFailed",
+        "status": "True",
+        "type": "FetchFailed"
+      }
+    ],
+    "observedGeneration": -1
+  }
+}

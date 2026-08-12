@@ -224,6 +224,13 @@ Most naive Flux health checks are wrong in the same ways. These are all tested:
 - **Suspended is not progressing.** It will never reconcile — waiting is pointless.
 - **An unregistered checker is reported, not skipped.** Silently ignoring a check you
   asked for inflates Gate health.
+- **A never-reconciled resource is judged by its conditions.** Flux writes
+  `observedGeneration: -1` there while the conditions are already current, so reading
+  the top-level field reports a source that will never work as one still starting up.
+
+The status these are tested against is [captured from a real
+Flux](pkg/flux/testdata/), not written by hand — the last one on that list was a live
+bug that only real output revealed.
 
 ## Repository layout
 

@@ -1311,3 +1311,52 @@ annotation woke it — and it does fail when the predicate is added.
 with no CI job and no cluster credentials. That needs a real receiver, and it is
 a much smaller audience than "CI that just built the image". Left open on #102
 rather than built speculatively.
+
+## D45 — A resource is judged by its conditions' generation, and the fixtures come from a real Flux
+
+**Decision:** staleness is decided by the **Ready condition's own**
+`observedGeneration`, falling back to the top-level `status.observedGeneration`
+only when the condition does not carry one. And `pkg/flux`'s fixtures are
+captured off a running cluster, one directory per Flux minor, never written by
+hand.
+
+The two halves are one decision because the first was found by the second.
+
+**The bug.** Flux writes `status.observedGeneration: -1` on a resource that has
+never successfully reconciled, while the conditions on that same object already
+describe generation 1 correctly. Hecate believed the top-level field, so:
+
+- a GitRepository with a wrong URL, an OCIRepository against a refusing
+  registry, a HelmRepository whose host does not resolve — all reported
+  **Progressing for ever**. The `failAfter` deadline was unreachable, so they
+  could never become Degraded however long they failed;
+- and the operator was told *"has not observed generation 1 yet
+  (observedGeneration=-1)"* instead of *"repository not found"*. The real error
+  was in the object the whole time.
+
+A Gate watching a source that would never work looked like a Gate patiently
+waiting. That is the exact class of mistake `pkg/flux` exists to prevent,
+inverted: not a false green but a false "still trying".
+
+**Preferring the condition is also simply more correct.** `metav1.Condition`
+carries `ObservedGeneration` for precisely this purpose, and a condition left
+over from a previous spec still carries that spec's number — so the genuine
+stale case is caught more precisely, not less. Both directions are tested: the
+`-1` case must be judged on its conditions, and a Ready=True condition from an
+older generation must still be refused.
+
+**Why hand-written fixtures could not have found it.** They encode the status we
+already believe in. We would have written `observedGeneration: 1` on a failing
+source, because that is what we assumed, and the test would have passed while
+the product was wrong. Every trap this package handles came from an assumption
+about a field; the fixtures exist so the assumptions are checked against
+something that did not come from us.
+
+**The failing fixtures are the valuable ones.** A source that works looks the
+same everywhere. A source that is broken is where the contract shows — which
+condition carries the reason, whether a field is a sentinel, whether a stale
+artifact is still reported.
+
+**Organised by Flux minor**, with the test discovering the directories itself,
+so #91 adds v2.7 and v2.8 without touching code. A contract change in a new Flux
+then fails a unit test in milliseconds rather than arriving as a support ticket.

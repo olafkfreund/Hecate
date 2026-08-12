@@ -1,0 +1,49 @@
+{
+  "apiVersion": "source.toolkit.fluxcd.io/v1",
+  "kind": "GitRepository",
+  "metadata": {
+    "name": "git-ok",
+    "namespace": "fixtures",
+    "generation": 1
+  },
+  "spec": {
+    "interval": "1m",
+    "ref": {
+      "branch": "main"
+    },
+    "secretRef": {
+      "name": "git"
+    },
+    "timeout": "60s",
+    "url": "http://gitea.hecate-git.svc.cluster.local:3000/hecate/fleet.git"
+  },
+  "status": {
+    "artifact": {
+      "digest": "sha256:53162df1aa9910be10986dfa83d0b9402552e4264a5f4588a9152e4bb57ef1cd",
+      "lastUpdateTime": "2026-08-12T11:53:03Z",
+      "path": "gitrepository/fixtures/git-ok/fa90646efc64f7c6e9cba163eddae6ca467f71fa.tar.gz",
+      "revision": "main@sha1:fa90646efc64f7c6e9cba163eddae6ca467f71fa",
+      "size": 438,
+      "url": "http://source-controller.flux-system.svc.cluster.local./gitrepository/fixtures/git-ok/fa90646efc64f7c6e9cba163eddae6ca467f71fa.tar.gz"
+    },
+    "conditions": [
+      {
+        "lastTransitionTime": "2026-08-12T11:53:03Z",
+        "message": "stored artifact for revision 'main@sha1:fa90646efc64f7c6e9cba163eddae6ca467f71fa'",
+        "observedGeneration": 1,
+        "reason": "Succeeded",
+        "status": "True",
+        "type": "Ready"
+      },
+      {
+        "lastTransitionTime": "2026-08-12T11:53:03Z",
+        "message": "stored artifact for revision 'main@sha1:fa90646efc64f7c6e9cba163eddae6ca467f71fa'",
+        "observedGeneration": 1,
+        "reason": "Succeeded",
+        "status": "True",
+        "type": "ArtifactInStorage"
+      }
+    ],
+    "observedGeneration": 1
+  }
+}
