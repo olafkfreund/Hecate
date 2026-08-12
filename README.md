@@ -17,7 +17,8 @@
 [Development plan](docs/DEVELOPMENT-PLAN.md) ·
 [Observability](docs/OBSERVABILITY.md) ·
 [Decisions](docs/DECISIONS.md) ·
-[Onboarding](docs/ONBOARDING.md)
+[Onboarding](docs/ONBOARDING.md) ·
+[Contributing](CONTRIBUTING.md)
 
 </div>
 
@@ -261,6 +262,11 @@ Each e2e leg pairs one Flux with one Kubernetes, oldest with oldest, so three jo
 both ranges. **The cross product is not tested** — new Flux on old Kubernetes is not a
 combination CI exercises — and the pairing puts together the versions most likely to
 break rather than pretending to more coverage than nine jobs would buy.
+
+The API is `v1alpha1` and can still change incompatibly. Deprecations follow Flux's own
+rules — three months' notice once a replacement exists, and a removal that fails the
+rollout rather than silently pruning fields. Read the
+[full policy](docs/DEVELOPMENT-PLAN.md#api-lifecycle) before depending on it.
 
 Hecate reads Flux resources and never writes them. The exact API versions and status
 fields it depends on are listed in

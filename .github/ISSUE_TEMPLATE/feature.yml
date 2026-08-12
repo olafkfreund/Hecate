@@ -1,0 +1,34 @@
+name: Feature or change
+description: Something Hecate should do differently.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Please check [docs/DECISIONS.md](../blob/main/docs/DECISIONS.md) first.**
+        It records the options considered and rejected — no pipeline object, no
+        notifier, no monorepo decomposition in Beacon. If yours is there, the
+        reasoning is too, and arguing with the reasoning is a better
+        conversation than rediscovering it.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >-
+        What are you trying to do, and what happens today? Concrete beats
+        general: the promotion flow you actually run tells us more than the
+        feature you think would fix it.
+    validations: { required: true }
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you have in mind
+      description: Optional. The problem is the valuable half.
+  - type: textarea
+    id: existing
+    attributes:
+      label: Does Flux or its ecosystem already do this?
+      description: >-
+        Hecate deletes rather than duplicates whatever Flux absorbs. If Flagger,
+        the Flux Operator or notification-controller already covers it, say so —
+        that is an argument for *not* building it here, and a useful one.

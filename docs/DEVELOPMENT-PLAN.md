@@ -245,11 +245,41 @@ radius of any Flux change.
 |---|---|
 | Release cadence | A minor within ~1 month of each Flux minor (≈3/year); patches as needed |
 | Supported versions | Latest two Hecate minors |
-| API lifecycle | Mirrors Flux exactly: alpha deprecated on the next alpha/beta and removed after 3 months; beta deprecated on the next beta/stable; stable never removed within a major |
+| API lifecycle | Mirrors Flux exactly — [the rules in full](#api-lifecycle) |
 | Breaking changes | Majors only, announced one minor ahead, with documented migration |
 | Security | `SECURITY.md`, private reporting, 90-day disclosure, patched across all supported minors |
 | Dependencies | Renovate weekly and grouped; security updates immediately |
 | Supply chain | cosign signatures and SBOM per release, with Hecate's own provenance recorded in Fides |
+
+### API lifecycle
+
+Mirrored from [Flux's own rules](https://fluxcd.io/flux/releases/) rather than
+invented, because a second convention for the same thing is a second thing to
+learn and to get wrong.
+
+| Stage | Deprecated | Removed |
+|---|---|---|
+| **alpha** (`v1alpha1`) | when the next alpha or beta ships | **3 months** after deprecation |
+| **beta** (`v1beta1`) | when the next beta or stable ships | 6 months after deprecation |
+| **stable** (`v1`) | only by a new stable version | **never** within a major |
+
+Hecate's API is `v1alpha1` today. Concretely, that means:
+
+- **It can change, including incompatibly**, and the three-month clock only
+  starts when a replacement exists. There is no promise that a manifest written
+  now still applies in a year.
+- **A removal is never silent.** The controller refuses to start against CRDs
+  older than the build ([D39](DECISIONS.md)), so a missed upgrade is a failed
+  rollout rather than fields being pruned by the API server while everything
+  looks fine.
+- **Conversion, when it is needed.** Moving to `v1beta1` means a conversion
+  webhook and both versions served, not a flag day. Until then there is only one
+  version, and a webhook for one version would be machinery with nothing to do.
+
+The honest summary for anyone asking how long `v1alpha1` will be around: until
+there is something better, plus three months' notice. If you need a stronger
+promise than that, Hecate is not ready for you yet — which is the point of
+saying so here rather than after you have adopted it.
 
 **Long-term direction.** Stay a thin, removable layer above Flux. Every capability Flux
 or its ecosystem absorbs, we delete rather than duplicate — that is the maintenance

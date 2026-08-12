@@ -1,0 +1,40 @@
+name: Bug report
+description: Something does not behave as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If it is exploitable, close this and use
+        [private reporting](https://github.com/olafkfreund/Hecate/security/advisories/new)
+        instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected instead
+    validations: { required: true }
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: >-
+        The Beacon, Gate or Passage involved, with secrets removed. `kubectl get
+        gate <name> -o yaml` and the object's `status` are usually the two things
+        that identify the problem fastest — status is where Hecate explains
+        itself.
+      render: yaml
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Hecate, Flux (`flux version`), Kubernetes (`kubectl version`).
+      placeholder: "hecate main@abc1234, flux 2.9.4, k8s 1.35"
+    validations: { required: true }
+  - type: textarea
+    id: logs
+    attributes:
+      label: Controller logs
+      description: >-
+        `kubectl logs -n hecate-system deploy/hecate`. Events often say more than
+        logs — `kubectl get events -n <namespace>`.
+      render: shell
