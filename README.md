@@ -120,6 +120,17 @@ production is Blocked
   waiting:  podinfo-6b2 — awaiting approval
 ```
 
+Every read command takes `-o table|json|yaml`. The structured formats serialise
+the same value the table is built from, so they cannot drift apart, and the exit
+code is the same either way — `hecate verify -o json` still exits 3 on a broken
+chain, because a format that always exited 0 would break the scripting it exists
+for.
+
+```console
+$ hecate status -o json | jq -r '.[] | select(.state == "Blocked") | .gate'
+production
+```
+
 ### Promoting, and waiting for it
 
 ```console

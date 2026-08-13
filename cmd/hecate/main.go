@@ -85,7 +85,7 @@ Usage:
 
 Common flags:
   -namespace      namespace to work in  (default: the kubeconfig's)
-  -json           emit JSON             (status, explain)
+  -output, -o     table, json or yaml   (status, explain, verify)
   -watch          follow the crossing to its end  (promote)
   -timeout        give up watching after this     (promote -watch)
   -ai             add a model's summary (explain)

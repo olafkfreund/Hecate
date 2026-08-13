@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -61,7 +60,7 @@ func kubeconfigNamespace() string {
 func status(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	namespace := namespaceFlag(fs)
-	asJSON := fs.Bool("json", false, "emit JSON")
+	format := outputFlag(fs)
 	fs.Usage = usage
 	rest, err := parseArgs(fs, args)
 	if err != nil {
@@ -97,25 +96,23 @@ func status(ctx context.Context, args []string) int {
 		explanations = append(explanations, ex)
 	}
 
-	if *asJSON {
-		return emit(explanations)
-	}
-
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	// Writes to a tabwriter are buffered; Flush below reports any failure.
-	_, _ = fmt.Fprintln(w, "GATE\tSTATE\tCURRENT\tHEALTH\tSUMMARY")
-	for _, ex := range explanations {
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			ex.Gate, ex.State, dash(ex.Current), dash(string(ex.Health)), ex.Summary)
-	}
-	return flush(w)
+	return render(*format, explanations, func() int {
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		// Writes to a tabwriter are buffered; Flush below reports any failure.
+		_, _ = fmt.Fprintln(w, "GATE\tSTATE\tCURRENT\tHEALTH\tSUMMARY")
+		for _, ex := range explanations {
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+				ex.Gate, ex.State, dash(ex.Current), dash(string(ex.Health)), ex.Summary)
+		}
+		return flush(w)
+	})
 }
 
 // explain answers "why is this Gate not crossing?".
 func explain(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("explain", flag.ContinueOnError)
 	namespace := namespaceFlag(fs)
-	asJSON := fs.Bool("json", false, "emit JSON")
+	format := outputFlag(fs)
 	withAI := fs.Bool("ai", false, "add a natural-language summary from the configured model")
 	fs.Usage = usage
 	rest, err := parseArgs(fs, args)
@@ -135,46 +132,36 @@ func explain(ctx context.Context, args []string) int {
 	if err != nil {
 		return fail(exitError, "%s", err)
 	}
-	if *asJSON {
-		return emit(ex)
-	}
+	return render(*format, ex, func() int {
+		fmt.Printf("%s is %s\n%s\n", ex.Gate, ex.State, ex.Summary)
 
-	fmt.Printf("%s is %s\n%s\n", ex.Gate, ex.State, ex.Summary)
-
-	if len(ex.Blockers) > 0 {
-		fmt.Println()
-		for _, b := range ex.Blockers {
-			fmt.Printf("  [%s] %s\n", b.Kind, b.Detail)
-			if b.Fix != "" {
-				fmt.Printf("      → %s\n", b.Fix)
+		if len(ex.Blockers) > 0 {
+			fmt.Println()
+			for _, b := range ex.Blockers {
+				fmt.Printf("  [%s] %s\n", b.Kind, b.Detail)
+				if b.Fix != "" {
+					fmt.Printf("      → %s\n", b.Fix)
+				}
 			}
 		}
-	}
-	if len(ex.Eligible) > 0 {
-		fmt.Printf("\n  eligible: %s\n", strings.Join(ex.Eligible, ", "))
-	}
-	for _, w := range ex.Waiting {
-		fmt.Printf("  waiting:  %s — %s\n", w.Bundle, w.Reason)
-	}
+		if len(ex.Eligible) > 0 {
+			fmt.Printf("\n  eligible: %s\n", strings.Join(ex.Eligible, ", "))
+		}
+		for _, w := range ex.Waiting {
+			fmt.Printf("  waiting:  %s — %s\n", w.Bundle, w.Reason)
+		}
 
-	// Last, after the facts. The deterministic explanation above is the
-	// product; this is an assist and is never required — with no model
-	// configured everything above is unchanged and the flag says so.
-	if *withAI {
-		printDiagnosis(ctx, ex)
-	}
-	return exitOK
-}
-
-// emit writes a value as indented JSON, for scripts and for the UI's benefit
-// during development.
-func emit(v any) int {
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(v); err != nil {
-		return fail(exitError, "%s", err)
-	}
-	return exitOK
+		// Last, after the facts. The deterministic explanation above is the
+		// product; this is an assist and is never required — with no model
+		// configured everything above is unchanged and the flag says so.
+		//
+		// Table only: a natural-language paragraph in a JSON field invites a
+		// script to parse prose, which is the opposite of what -o json is for.
+		if *withAI {
+			printDiagnosis(ctx, ex)
+		}
+		return exitOK
+	})
 }
 
 func flush(w *tabwriter.Writer) int {

@@ -19,6 +19,7 @@ func verify(ctx context.Context, args []string) int {
 	fs, server, token := flagSet("verify")
 	trail := fs.String("trail", "", "verify this Fides trail directly, without looking at a Bundle")
 	namespace := fs.String("namespace", "", "namespace of the Bundle (default: the kubeconfig's)")
+	format := outputFlag(fs)
 	fs.Usage = usage
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -33,7 +34,7 @@ func verify(ctx context.Context, args []string) int {
 		if fs.NArg() > 0 {
 			return fail(exitUsage, "give either a Bundle or --trail, not both")
 		}
-		return report(one(ctx, client, crossing{Trail: *trail}))
+		return renderVerify(*format, one(ctx, client, crossing{Trail: *trail}))
 	}
 	if fs.NArg() != 1 {
 		return fail(exitUsage, "verify needs a Bundle name, or --trail <id>")
@@ -55,7 +56,7 @@ func verify(ctx context.Context, args []string) int {
 	for _, c := range crossings {
 		results = append(results, one(ctx, client, c))
 	}
-	return report(results...)
+	return renderVerify(*format, results...)
 }
 
 // crossing is one Passage's evidence: which Gate it crossed, and the trail it
@@ -78,11 +79,32 @@ func one(ctx context.Context, c *fides.Client, x crossing) result {
 	return result{crossing: x, chain: chain, err: err}
 }
 
-// report prints every result and returns the exit code for the worst of them.
-// Every trail is checked before returning: stopping at the first broken chain
-// would hide how much of the history is affected.
-func report(results ...result) int {
+// verdict is the exit code for a set of results, and the only place that
+// decides it.
+//
+// Separate from the printing because `-o json` must exit 3 on a broken chain
+// exactly as the table does — a structured format that always exited 0 would
+// break the scripting it exists for, and silently, since the JSON would still
+// say the chain was invalid.
+func verdict(results ...result) int {
 	code := exitOK
+	for _, r := range results {
+		switch {
+		case r.err != nil:
+			code = worst(code, exitError)
+		case !r.chain.Valid:
+			code = worst(code, exitBroken)
+		case r.chain.Count == 0:
+			code = worst(code, exitNoTrail)
+		}
+	}
+	return code
+}
+
+// report prints every result and returns the exit code for the worst of them.
+// Every trail is checked before printing stops: halting at the first broken
+// chain would hide how much of the history is affected.
+func report(results ...result) int {
 	for _, r := range results {
 		where := r.Gate
 		if where == "" {
@@ -94,11 +116,9 @@ func report(results ...result) int {
 		switch {
 		case r.err != nil:
 			fmt.Printf("? %s\n  %s\n", where, r.err)
-			code = worst(code, exitError)
 
 		case !r.chain.Valid:
 			fmt.Printf("✗ %s\n  chain BROKEN at entry %d: %s\n", where, r.chain.BrokenAt, reason(r.chain))
-			code = worst(code, exitBroken)
 
 		case r.chain.Count == 0:
 			// Fides answers 200 with {"valid":true,"count":0} for a trail that
@@ -106,14 +126,22 @@ func report(results ...result) int {
 			// empty trail proves nothing either way, so calling it verified is
 			// the false green this command exists to avoid.
 			fmt.Printf("? %s\n  no attestations — the trail is empty, or does not exist\n", where)
-			code = worst(code, exitNoTrail)
 
 		default:
 			fmt.Printf("✓ %s\n  chain valid — %s%s\n", where,
 				plural(r.chain.Count, "attestation"), anchorNote(r.chain.ExternalAnchor))
 		}
 	}
-	return code
+	return verdict(results...)
+}
+
+// renderVerify prints the results in the requested format, and exits with the
+// verdict either way.
+func renderVerify(format string, results ...result) int {
+	if code := render(format, reports(results...), func() int { return report(results...) }); code != exitOK {
+		return code
+	}
+	return verdict(results...)
 }
 
 func reason(c *fides.Chain) string {
