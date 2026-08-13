@@ -28,7 +28,7 @@ jobs:
       # Which e2e tests run in which phase. Every test in the package must
       # appear in one of these; a step below enforces that.
       BEFORE_INSTALL: 'TestCrossingAgainstRealAPI|TestFidesEnvironmentIsValidatedAtAdmission'
-      AFTER_INSTALL: 'TestDeployedControllerCrossesAGate|TestDeployedControllerPromotesThroughGit|TestAnnotationTriggersAnImmediatePoll'
+      AFTER_INSTALL: 'TestDeployedControllerCrossesAGate|TestDeployedControllerPromotesThroughGit|TestAnnotationTriggersAnImmediatePoll|TestAWaitingPassageDoesNotSpin'
       # The version flake.nix gives the dev shell, so a cluster in CI is the
       # cluster a developer gets.
       K3D_VERSION: v5.9.0

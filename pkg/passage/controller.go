@@ -13,6 +13,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/olafkfreund/hecate/api/v1alpha1"
 	"github.com/olafkfreund/hecate/pkg/fides"
@@ -258,5 +259,20 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.Passage{}).
 		Named("passage").
+		// Status writes must not wake this controller, or it never sleeps.
+		//
+		// A running step's attempt count increases on every Advance, so the
+		// status differs on every reconcile, so the write triggers the watch,
+		// which reconciles again — measured at 113 reconciles a second against
+		// a step that had asked to be retried in fifteen. RequeueAfter was
+		// correct and irrelevant: an event always arrived first.
+		//
+		// Only this controller has a field that changes every time. A Beacon or
+		// a Gate writes the status it already had, which bumps no
+		// resourceVersion and emits no event, so neither one spins.
+		//
+		// Spec changes still get through, which is what `spec.abort` needs, and
+		// polling is left to RequeueAfter where it belonged.
+		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		Complete(r)
 }

@@ -373,3 +373,76 @@ func TestAnnotationTriggersAnImmediatePoll(t *testing.T) {
 func key(o client.Object) types.NamespacedName {
 	return types.NamespacedName{Name: o.GetName(), Namespace: o.GetNamespace()}
 }
+
+// TestAWaitingPassageDoesNotSpin guards against the controller reconciling a
+// waiting Passage as fast as the API server will answer.
+//
+// It has to be an e2e test, because the bug is invisible to a unit test: the
+// engine returns the right RequeueAfter, the controller passes it on, and every
+// unit test passes. What went wrong was the watch — a running step's attempt
+// count increases on every Advance, so the status write differed every time,
+// so it triggered the very watch that had just reconciled. Measured at 113
+// reconciles a second against a step that had asked for fifteen seconds.
+//
+// The threshold is deliberately loose. This is not asserting a precise cadence,
+// it is asserting the difference between polling and spinning.
+func TestAWaitingPassageDoesNotSpin(t *testing.T) {
+	ctx := context.Background()
+	c := newClient(t)
+	requireHecateInstalled(t, c)
+	freshNamespace(t, c)
+
+	// A step that never finishes: flux-wait on a Kustomization nobody creates
+	// stays Progressing, which is exactly the state a real crossing sits in
+	// while it waits for Flux.
+	steps := []v1alpha1.Step{{
+		Uses: "flux-wait",
+		With: jsonOf(t, map[string]any{"resources": []map[string]any{
+			{"kind": "Kustomization", "name": "never-converges", "namespace": namespace},
+		}}),
+	}}
+
+	mustCreate(t, c, &v1alpha1.Bundle{
+		ObjectMeta: metav1.ObjectMeta{Name: "b1", Namespace: namespace},
+		Spec: v1alpha1.BundleSpec{
+			Beacon:    "none",
+			Artifacts: []v1alpha1.Artifact{{Image: &v1alpha1.ImageArtifact{Repo: "ghcr.io/acme/app", Tag: "1.0.0"}}},
+		},
+	})
+	passage := &v1alpha1.Passage{
+		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: namespace},
+		Spec:       v1alpha1.PassageSpec{Gate: "staging", Bundle: "b1", Steps: steps},
+	}
+	mustCreate(t, c, passage)
+
+	waitFor(t, 60*time.Second, "the Passage to start waiting", func() bool {
+		var p v1alpha1.Passage
+		if err := c.Get(ctx, key(passage), &p); err != nil {
+			return false
+		}
+		return len(p.Status.Steps) > 0 && p.Status.Steps[0].Phase == v1alpha1.StepRunning
+	})
+
+	attempts := func() int32 {
+		var p v1alpha1.Passage
+		if err := c.Get(ctx, key(passage), &p); err != nil {
+			t.Fatal(err)
+		}
+		return p.Status.Steps[0].Attempts
+	}
+
+	const window = 20 * time.Second
+	before := attempts()
+	time.Sleep(window)
+	after := attempts()
+
+	// flux-wait asks for 15s, so two or three in twenty seconds. Ten allows for
+	// scheduling noise and still fails by three orders of magnitude if the
+	// controller is spinning.
+	const spinning = 10
+	if got := after - before; got > spinning {
+		t.Errorf("%d reconciles in %s (%d/s) — the controller is spinning rather than "+
+			"waiting; a status write is waking the watch that wrote it",
+			got, window, int(float64(got)/window.Seconds()))
+	}
+}
