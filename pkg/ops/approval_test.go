@@ -31,6 +31,9 @@ type sodFides struct {
 	trail string
 	// approvalStatus fails only the approval write.
 	approvalStatus int
+	// changeGate is the verdict body, and changeGateStatus fails only that read.
+	changeGate       string
+	changeGateStatus int
 
 	approvals []map[string]any
 }
@@ -53,6 +56,13 @@ func (f *sodFides) start(t *testing.T) string {
 			f.approvals = append(f.approvals, body)
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"status":"approved"}`))
+		case strings.HasSuffix(r.URL.EscapedPath(), "/change-gate"):
+			if f.changeGateStatus != 0 {
+				w.WriteHeader(f.changeGateStatus)
+				_, _ = w.Write([]byte("unavailable"))
+				return
+			}
+			_, _ = w.Write([]byte(f.changeGate))
 		case strings.HasSuffix(r.URL.EscapedPath(), "/artifacts"):
 			if f.trail == "" {
 				_, _ = w.Write([]byte(`[]`))

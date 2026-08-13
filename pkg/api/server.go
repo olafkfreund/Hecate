@@ -61,6 +61,8 @@ func (s *Server) Handler() http.Handler {
 		s.guard(ActionRead, s.listBundles))
 	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/bundles/{name}",
 		s.guard(ActionRead, s.getBundle))
+	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/bundles/{name}/evidence",
+		s.guard(ActionRead, s.bundleEvidence))
 	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/passages",
 		s.guard(ActionRead, s.listPassages))
 	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/passages/{name}",
@@ -160,6 +162,12 @@ func (s *Server) listBundles(ctx context.Context, _ Subject, r *http.Request) (a
 
 func (s *Server) getBundle(ctx context.Context, _ Subject, r *http.Request) (any, error) {
 	return s.Ops.Bundle(ctx, r.PathValue("namespace"), r.PathValue("name"))
+}
+
+// bundleEvidence answers "why was this allowed into production, and who
+// allowed it?" — read-only, because it only reports what Fides already holds.
+func (s *Server) bundleEvidence(ctx context.Context, _ Subject, r *http.Request) (any, error) {
+	return s.Ops.Evidence(ctx, r.PathValue("namespace"), r.PathValue("name"))
 }
 
 func (s *Server) listPassages(ctx context.Context, _ Subject, r *http.Request) (any, error) {

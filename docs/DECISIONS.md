@@ -1547,3 +1547,41 @@ escalate; "hold, risk 62: no approver recorded" is a thing to fix. The reasons
 existed only inside a step's message, which is exactly the burial this issue was
 opened about, so `EvidenceRef.Blockers` carries them onto the Gate, into
 `hecate explain` as a `ChangeHeld` blocker with a fix, and into the UI.
+
+## D50 — Nothing to show and a clean bill of health are different answers
+
+*2026-08-13 — #47*
+
+The evidence panel answers one question: why was this artifact allowed into
+production, and who allowed it? It is assembled by `ops.Evidence` from the
+change gate's own response, which already carries the controls that passed,
+failed, went missing or were waived, the attestation counts, the approvers and
+Fides' segregation-of-duties finding. One call rather than four, because Fides
+had already put the whole answer in one place and Hecate was discarding most of
+it.
+
+**An absence is always explained.** No Gate configured for Fides, no digest
+pinned on the Bundle, no trail on the artifact — each is a fact about this
+deployment rather than an error, and each is reported in `unavailable` saying
+which. A panel that renders empty for "we hold no evidence" and empty for "every
+control passed" has told the reader nothing, and the two are opposite answers.
+
+**A Fides that does not answer is an error, not an absence.** That one is worth
+retrying and must never be presented as a clean record. The panel says Fides did
+not answer, in those words.
+
+**Any Gate configured for Fides will do.** The trail belongs to the artifact,
+not to a Gate, so every Gate in the namespace reaches the same record and
+requiring the caller to name one would be a question with no wrong answer. The
+Gate that was used is reported back, so a reader can see whose credentials
+answered.
+
+**Loaded separately from the Bundle.** The Bundle comes from the cluster and the
+evidence from a third-party service across a network. Folding them into one
+request would let a slow Fides hold up a page that could have rendered
+everything else.
+
+**Waivers are listed apart from passes.** A waiver is a governed exception with
+a name and an expiry attached, and an auditor's first question about a green
+gate is which part of it was waived. Counting one as the other is how a control
+becomes decorative.

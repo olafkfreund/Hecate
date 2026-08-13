@@ -164,6 +164,8 @@ export const api = {
   bundles: (ns: string) => get<Bundle[]>(`${base(ns)}/bundles`),
   bundle: (ns: string, name: string) =>
     get<Bundle>(`${base(ns)}/bundles/${encodeURIComponent(name)}`),
+  evidence: (ns: string, name: string) =>
+    get<Evidence>(`${base(ns)}/bundles/${encodeURIComponent(name)}/evidence`),
   passages: (ns: string) => get<Passage[]>(`${base(ns)}/passages`),
   health: () => get<{ status: string; version: string }>("/healthz"),
 
@@ -225,6 +227,58 @@ export interface EvidenceRef {
   risk?: number;
   blockers?: string[];
   url?: string;
+}
+
+/** One control the change gate judged. Mirrors pkg/fides.Control. */
+export interface Control {
+  control: string;
+  name: string;
+  reasons?: string[];
+  waived_reasons?: string[];
+  reason?: string;
+  approved_by?: string;
+  expires_at?: string;
+}
+
+/** The change gate's full answer for a trail. Mirrors pkg/fides.ChangeVerdict. */
+export interface ChangeVerdict {
+  recommendation: string;
+  approved: boolean;
+  risk_score: number;
+  risk_level: string;
+  passed?: string[];
+  failed?: Control[];
+  missing_evidence?: Control[];
+  waived?: Control[];
+  attestations: { total: number; non_compliant: number };
+  approvals: {
+    count: number;
+    human_approvers: number;
+    four_eyes: boolean;
+    approvers?: string[];
+    deployers?: string[];
+  };
+  segregation_of_duties?: {
+    committer?: string;
+    approvers?: string[];
+    deployers?: string[];
+    compliant: boolean;
+    violations?: string[];
+  };
+  summary?: string;
+}
+
+/** Everything Fides holds about a Bundle. Mirrors pkg/ops.Evidence. */
+export interface Evidence {
+  bundle: string;
+  namespace: string;
+  digest?: string;
+  trail?: string;
+  gate?: string;
+  verdict?: ChangeVerdict;
+  approvedIn?: BundleApproval[];
+  /** Why there is nothing to show. Empty is not the same as a clean bill. */
+  unavailable?: string;
 }
 
 export interface Explanation {

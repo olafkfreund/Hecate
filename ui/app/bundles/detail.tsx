@@ -7,6 +7,7 @@ import { Panel, useApi, useNamespace } from "@/components/loader";
 import { useQueryParam } from "@/lib/browser";
 import { Timeline } from "@/components/timeline";
 import { describeArtifact } from "@/lib/timeline";
+import { EvidencePanel } from "@/components/evidence";
 
 /** One Bundle: what it is, and how it got where it is. */
 export function BundleDetail() {
@@ -46,6 +47,8 @@ export function BundleDetail() {
                 </p>
               ) : null}
             </header>
+
+            <EvidencePanel namespace={ns} bundle={b.metadata.name} />
 
             <section>
               <h2 className="text-sm font-medium">What is in it</h2>
