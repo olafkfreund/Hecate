@@ -14,6 +14,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"sigs.k8s.io/controller-runtime/pkg/event"
+
 	"github.com/olafkfreund/hecate/api/v1alpha1"
 )
 
@@ -345,5 +347,66 @@ func TestSuspendedBeaconStillAcknowledges(t *testing.T) {
 
 	if got := getBeacon(t, c).Status.LastHandledReconcileAt; got != "abc" {
 		t.Errorf("lastHandledReconcileAt = %q, want %q even while suspended", got, "abc")
+	}
+}
+
+// The Beacon's own status write must not wake it.
+//
+// Every reconcile sets status.lastPolled to now, so the write differs from what
+// was there and triggers the watch — the Beacon then polls again, ignoring its
+// interval. Hidden by metav1.Time's one-second resolution until a poll takes
+// longer than a second, which is a slow registry, which is exactly when
+// re-polling it continuously is worst.
+func TestABeaconIsNotWokenByItsOwnStatusWrite(t *testing.T) {
+	p := pollTrigger()
+
+	old := &v1alpha1.Beacon{
+		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "acme", Generation: 1},
+	}
+	// Only the status changed, as the controller's own write does.
+	updated := old.DeepCopy()
+	updated.Status.LastPolled = &metav1.Time{Time: clock}
+	updated.ResourceVersion = "2"
+
+	if p.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: updated}) {
+		t.Error("a status-only change woke the Beacon — it will poll continuously " +
+			"and ignore the interval it was configured with")
+	}
+}
+
+// The annotation is the whole of the webhook endpoint (#102), so a predicate
+// that discarded it would leave the trigger silently dead.
+func TestAnAnnotationStillWakesTheBeacon(t *testing.T) {
+	p := pollTrigger()
+
+	old := &v1alpha1.Beacon{
+		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "acme", Generation: 1},
+	}
+	poked := old.DeepCopy()
+	poked.Annotations = map[string]string{v1alpha1.AnnotationReconcile: "1786620716793895315"}
+
+	if !p.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: poked}) {
+		t.Error("a poll request did not wake the Beacon, so `hecate poll` and the " +
+			"webhook endpoint do nothing")
+	}
+
+	// And a second, different token must wake it again: two pokes within one
+	// second have to be distinguishable, which is why the token is nanoseconds.
+	again := poked.DeepCopy()
+	again.Annotations[v1alpha1.AnnotationReconcile] = "1786620716793895999"
+	if !p.Update(event.UpdateEvent{ObjectOld: poked, ObjectNew: again}) {
+		t.Error("a second poll request was ignored")
+	}
+}
+
+// A spec change is the other reason to look at the world again.
+func TestASpecChangeWakesTheBeacon(t *testing.T) {
+	p := pollTrigger()
+	old := &v1alpha1.Beacon{ObjectMeta: metav1.ObjectMeta{Name: "app", Generation: 1}}
+	edited := old.DeepCopy()
+	edited.Generation = 2
+
+	if !p.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: edited}) {
+		t.Error("editing a Beacon's spec did not wake it")
 	}
 }

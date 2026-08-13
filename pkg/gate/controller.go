@@ -449,6 +449,19 @@ func (r *Reconciler) recordOutcome(ctx context.Context, gate *v1alpha1.Gate, pas
 	// yet (#21); when it is, this write is the single place it gates. Until
 	// then a successful crossing is treated as cleared, which is correct for a
 	// Gate that declares no verification.
+	//
+	// **Not capped, unlike Blocked above, and the asymmetry is deliberate.**
+	// This list is load-bearing: HasCleared is the upstream-ordering check, so
+	// evicting an entry would silently make a Bundle ineligible for a Gate it
+	// had genuinely cleared — a correctness bug traded for a size one.
+	//
+	// It is also bounded in practice, which Blocked was not. A Bundle already
+	// in a Gate is ineligible for it, so re-promoting adds nothing; only a
+	// rollback that moves the Gate away and back appends another entry.
+	// Measured: five promotions in a row produced one entry, and three rollback
+	// cycles produced four, at ~145 bytes each. Reaching etcd's object limit
+	// needs on the order of ten thousand rollback cycles on one Bundle, one
+	// human action at a time. #121's list grew three times a minute on its own.
 	if !hasCrossing(bundle.Status.Cleared, passage.Name) {
 		bundle.Status.Cleared = append(bundle.Status.Cleared, crossing)
 		if err := r.Status().Update(ctx, &bundle); err != nil {

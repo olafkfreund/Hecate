@@ -13,7 +13,9 @@ import (
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/olafkfreund/hecate/api/v1alpha1"
 )
@@ -241,6 +243,39 @@ func (r *Reconciler) event(beacon *v1alpha1.Beacon, eventType, reason, message s
 	r.Recorder.Event(beacon, eventType, reason, message)
 }
 
+// pollTrigger decides which changes wake the Beacon.
+//
+// **Its own status writes must not.** Every reconcile sets
+// status.lastPolled to the current time, so the write differs from what was
+// there, so it triggers the watch, so the Beacon polls again — ignoring the
+// interval it was configured with and hammering the registry.
+//
+// That was hidden by an accident of encoding: metav1.Time has one-second
+// resolution, so two reconciles inside the same second write an identical
+// value, no resourceVersion is bumped and the loop stops. It only shows up when
+// a poll takes longer than a second — a slow or unreachable registry, which is
+// exactly when hammering it is worst. Measured on a Beacon with a one-hour
+// interval watching an unroutable address: it re-polled continuously.
+//
+// **Not GenerationChangedPredicate**, which is what the Passage controller
+// uses. That discards annotation-only changes, and an annotation is how a
+// crossing is asked for on demand — `reconcile.fluxcd.io/requestedAt`, the
+// whole of the webhook endpoint (#102). Using it here would leave the trigger
+// silently dead, which is the refactor TestAnnotationTriggersAnImmediatePoll
+// exists to catch.
+func pollTrigger() predicate.Predicate {
+	return predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			// A spec change, or a poll requested by annotation. Everything
+			// else — including our own status write — is not a reason to look
+			// at the world again.
+			return e.ObjectOld.GetGeneration() != e.ObjectNew.GetGeneration() ||
+				v1alpha1.ReconcileRequestedAt(e.ObjectOld.GetAnnotations()) !=
+					v1alpha1.ReconcileRequestedAt(e.ObjectNew.GetAnnotations())
+		},
+	}
+}
+
 // SetupWithManager registers the controller.
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.Resolver == nil {
@@ -256,5 +291,6 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.Beacon{}).
 		Named("beacon").
+		WithEventFilter(pollTrigger()).
 		Complete(r)
 }
