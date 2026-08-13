@@ -16,6 +16,7 @@
 [Product plan](docs/PRODUCT-PLAN.md) ·
 [Development plan](docs/DEVELOPMENT-PLAN.md) ·
 [Permissions](docs/RBAC.md) ·
+[Signing in](docs/SSO.md) ·
 [Observability](docs/OBSERVABILITY.md) ·
 [Decisions](docs/DECISIONS.md) ·
 [Onboarding](docs/ONBOARDING.md) ·
