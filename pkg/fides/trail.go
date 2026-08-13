@@ -26,8 +26,18 @@ import (
 // ponytail: Fides has no by-digest lookup that also returns the trail — its
 // /search/artifacts filters by sha but omits trail_id, and /artifacts returns
 // trail_id but takes no filter — so this reads the org's artifacts and matches
-// here. One call per crossing, and it grows with the artifact count. The
-// upgrade path is a sha filter on /artifacts upstream; tracked in #111.
+// here. One call per crossing.
+//
+// The ceiling is lower than "grows with the artifact count" suggests, which is
+// what this comment used to say: /artifacts also runs a per-row query for each
+// artifact's SBOM and embeds the payload, so the response is the size of every
+// SBOM in the organisation. Hundreds of megabytes is reachable, to learn one
+// 36-byte trail id.
+//
+// The cheap upgrade is upstream and two lines: /search/artifacts already
+// filters by sha, already has LIMIT 100 and already joins trails, so adding
+// a.trail_id to its SELECT is the whole change. This function then becomes one
+// filtered call with no loop. Tracked in #111.
 func (c *Client) TrailForArtifact(ctx context.Context, sha256 string) (string, error) {
 	digest := strings.TrimPrefix(strings.TrimSpace(sha256), "sha256:")
 	if digest == "" {
