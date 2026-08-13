@@ -230,7 +230,7 @@ func TestNextAutoOnlyMovesForward(t *testing.T) {
 
 	t.Run("empty Gate takes the newest", func(t *testing.T) {
 		cs := Evaluate(g, []v1alpha1.Bundle{older, newer})
-		got := NextAuto(cs, nil)
+		got := NextAuto("dev", cs, nil)
 		if got == nil || got.Name != "newer" {
 			t.Fatalf("got %v, want newer", got)
 		}
@@ -243,7 +243,7 @@ func TestNextAutoOnlyMovesForward(t *testing.T) {
 		occupied.Status.Current = &v1alpha1.GateOccupant{Bundle: "newer"}
 		cs := Evaluate(occupied, []v1alpha1.Bundle{older, newer})
 
-		if got := NextAuto(cs, &newer); got != nil {
+		if got := NextAuto("dev", cs, &newer); got != nil {
 			t.Errorf("auto crossed backwards to %q", got.Name)
 		}
 	})
@@ -251,8 +251,43 @@ func TestNextAutoOnlyMovesForward(t *testing.T) {
 	t.Run("nothing eligible", func(t *testing.T) {
 		blocked := gateAdmitting("production", admits("podinfo", "staging"))
 		cs := Evaluate(blocked, []v1alpha1.Bundle{bundle("nope", "podinfo", 0)})
-		if got := NextAuto(cs, nil); got != nil {
+		if got := NextAuto("production", cs, nil); got != nil {
 			t.Errorf("got %q, want nothing", got.Name)
 		}
 	})
+}
+
+// An auto Gate that re-crosses a Bundle whose crossing already failed does it
+// again on the next reconcile, and the one after that, for ever. Measured
+// before the fix: a new Passage every twenty seconds, and status.blocked at
+// 733KB after twenty minutes — the Bundle would have exceeded etcd's object
+// limit inside an hour (#121).
+func TestAutoDoesNotRetryAFailedCrossing(t *testing.T) {
+	g := gateAdmitting("staging", admits("podinfo"))
+	b := bundle("b1", "podinfo", 0)
+	b.Status.Blocked = []v1alpha1.GateCrossing{{
+		Gate: "staging", Passage: "staging-abc123", Reason: "http: no such host",
+	}}
+
+	cs := Evaluate(g, []v1alpha1.Bundle{b})
+	// Still eligible: a human may retry, and Promote goes through this path.
+	if !cs[0].Eligible {
+		t.Fatal("a failed crossing made the Bundle ineligible, so `hecate promote` could not retry it")
+	}
+	if got := NextAuto("staging", cs, nil); got != nil {
+		t.Errorf("auto re-crossed %q after a failure — this is the loop that filled etcd", got.Name)
+	}
+}
+
+// The block is per Gate. A failure in staging must not stop production
+// crossing the same Bundle once it is entitled to.
+func TestAFailureAtOneGateDoesNotBlockAnother(t *testing.T) {
+	b := bundle("b1", "podinfo", 0, "staging")
+	b.Status.Blocked = []v1alpha1.GateCrossing{{Gate: "staging", Reason: "transient"}}
+
+	g := gateAdmitting("production", admits("podinfo", "staging"))
+	cs := Evaluate(g, []v1alpha1.Bundle{b})
+	if got := NextAuto("production", cs, nil); got == nil {
+		t.Error("a failure at staging stopped production crossing a Bundle that had cleared staging")
+	}
 }

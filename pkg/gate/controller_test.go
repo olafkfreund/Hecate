@@ -2,6 +2,7 @@ package gate
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -260,6 +261,48 @@ func TestFailedPassageIsRecordedAsBlocked(t *testing.T) {
 	}
 	if len(updated.Status.Blocked) != 1 || updated.Status.Blocked[0].Reason != "flux never converged" {
 		t.Errorf("blocked = %+v, want one entry carrying the failure reason", updated.Status.Blocked)
+	}
+}
+
+// A list inside a status subresource that only grows eventually makes the
+// object exceed etcd's size limit, at which point nothing can be recorded
+// against it at all — and a Bundle is the object a promotion cannot proceed
+// without. This one reached 733KB of identical DNS failures once (#121).
+func TestBlockedIsCappedAndNewestFirst(t *testing.T) {
+	g := autoGate("production", admits("podinfo"))
+	b := bundle("b1", "podinfo", 0)
+	// Pre-loaded past the cap, as a Bundle that had been failing for a while
+	// would be.
+	for i := range BlockedLimit + 5 {
+		b.Status.Blocked = append(b.Status.Blocked, v1alpha1.GateCrossing{
+			Gate: "production", Passage: fmt.Sprintf("old-%d", i), Reason: "an older failure",
+		})
+	}
+	r, c, _ := newReconciler(t, g, &b)
+
+	// Promote explicitly: an auto Gate no longer retries a blocked Bundle.
+	p := NewPassage(g, &b, "olaf@acme.example")
+	if err := c.Create(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	p.Status.Phase = v1alpha1.PassageFailed
+	p.Status.Message = "the newest failure"
+	if err := c.Status().Update(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	reconcileGate(t, r, "production")
+
+	var updated v1alpha1.Bundle
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "b1", Namespace: "acme"}, &updated); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(updated.Status.Blocked); n > BlockedLimit {
+		t.Errorf("blocked has %d entries, cap is %d — the list grows without limit", n, BlockedLimit)
+	}
+	// Newest first: the oldest failure is the least useful to keep, and an
+	// operator wants to know why it failed *this* time.
+	if got := updated.Status.Blocked[0].Reason; got != "the newest failure" {
+		t.Errorf("blocked[0] = %q, want the most recent failure", got)
 	}
 }
 
@@ -801,5 +844,33 @@ func TestAnApprovedVerdictDoesNotReadAsHeld(t *testing.T) {
 	}
 	if !strings.Contains(cond.Message, "in progress") {
 		t.Errorf("condition does not say the crossing is running: %s", cond.Message)
+	}
+}
+
+// A Gate that stopped because a crossing failed must say so. Reporting
+// "nothing newer than the current Bundle" sends an operator looking for a
+// missing Bundle, while the failure sits on an object they have not thought to
+// read (#121).
+func TestAGateSaysWhenItStoppedBecauseACrossingFailed(t *testing.T) {
+	g := autoGate("staging", admits("podinfo"))
+	b := bundle("b1", "podinfo", 0)
+	b.Status.Blocked = []v1alpha1.GateCrossing{{
+		Gate: "staging", Passage: "staging-abc", Reason: "http: no such host",
+	}}
+	r, c, _ := newReconciler(t, g, &b)
+
+	reconcileGate(t, r, "staging")
+
+	if n := len(listPassages(t, c)); n != 0 {
+		t.Fatalf("started %d Passages after a failure, want 0", n)
+	}
+	cond := ready(t, getGate(t, c, "staging"))
+	if cond.Reason != "CrossingFailed" {
+		t.Errorf("reason = %q, want CrossingFailed", cond.Reason)
+	}
+	for _, want := range []string{"no such host", "hecate promote staging --bundle b1"} {
+		if !strings.Contains(cond.Message, want) {
+			t.Errorf("message does not say %q: %s", want, cond.Message)
+		}
 	}
 }

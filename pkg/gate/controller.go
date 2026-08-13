@@ -40,6 +40,17 @@ const (
 	// object is rewritten on every reconcile and grows for ever; the durable
 	// record lives on the Bundle and in the evidence store. See D13.
 	HistoryLimit = 10
+
+	// BlockedLimit caps BundleStatus.Blocked, for the same reason HistoryLimit
+	// caps the Gate's history: a list inside a status subresource that only
+	// grows will eventually make the object exceed etcd's size limit, at which
+	// point nothing can be recorded against it at all.
+	//
+	// It reached 733KB and 2,065 entries in twenty minutes once, all of them
+	// the same DNS failure (#121). The retry loop that produced them is fixed,
+	// but the cap stays: an unbounded list is a defect on its own, and this one
+	// is on the object a promotion cannot proceed without.
+	BlockedLimit = 10
 )
 
 // Reconciler drives one Gate: assess health, record crossings, decide what is
@@ -226,10 +237,20 @@ func (r *Reconciler) advance(
 		return "WindowClosed", why
 	}
 
-	next := NextAuto(candidates, currentBundle(gate, bundles))
+	next := NextAuto(gate.Name, candidates, currentBundle(gate, bundles))
 	if next == nil {
 		if len(eligible) == 0 {
 			return "Idle", waitingOn(candidates)
+		}
+		// Which of the two reasons it is. "Nothing newer" on a Gate that
+		// stopped because a crossing failed sends an operator looking for a
+		// missing Bundle, and the failure — the thing they need — is on an
+		// object they have not thought to read (#121).
+		if blocked := blockedNewest(gate.Name, eligible); blocked != nil {
+			return "CrossingFailed", fmt.Sprintf(
+				"%s did not cross and will not be retried automatically: %s — "+
+					"retry with `hecate promote %s --bundle %s`",
+				blocked.Name, blockedReason(gate.Name, blocked), gate.Name, blocked.Name)
 		}
 		return "Idle", "nothing newer than the current Bundle"
 	}
@@ -242,6 +263,28 @@ func (r *Reconciler) advance(
 	r.event(gate, corev1.EventTypeNormal, "PassageStarted",
 		fmt.Sprintf("started Passage %s to cross Bundle %s", passage.Name, next.Name))
 	return "Crossing", fmt.Sprintf("Passage %s is in progress", passage.Name)
+}
+
+// blockedNewest returns the newest eligible Bundle whose crossing of this Gate
+// already failed, or nil.
+func blockedNewest(gateName string, eligible []*v1alpha1.Bundle) *v1alpha1.Bundle {
+	for _, b := range eligible {
+		if b.WasBlockedBy(gateName) {
+			return b
+		}
+	}
+	return nil
+}
+
+// blockedReason is why the most recent crossing failed. Blocked is newest
+// first, so the first match is the one worth reporting.
+func blockedReason(gateName string, b *v1alpha1.Bundle) string {
+	for _, c := range b.Status.Blocked {
+		if c.Gate == gateName && c.Reason != "" {
+			return c.Reason
+		}
+	}
+	return "no reason recorded"
 }
 
 // startPassage creates a Passage, copying the Gate's steps into it.
@@ -373,7 +416,13 @@ func (r *Reconciler) recordOutcome(ctx context.Context, gate *v1alpha1.Gate, pas
 	if passage.Status.Phase != v1alpha1.PassageSucceeded {
 		crossing.Reason = passage.Status.Message
 		if !hasCrossing(bundle.Status.Blocked, passage.Name) {
-			bundle.Status.Blocked = append(bundle.Status.Blocked, crossing)
+			// Newest first and capped, matching the Gate's history. The oldest
+			// failure is the least useful one to keep: what an operator wants
+			// is why it failed *this* time.
+			bundle.Status.Blocked = append([]v1alpha1.GateCrossing{crossing}, bundle.Status.Blocked...)
+			if len(bundle.Status.Blocked) > BlockedLimit {
+				bundle.Status.Blocked = bundle.Status.Blocked[:BlockedLimit]
+			}
 			if err := r.Status().Update(ctx, &bundle); err != nil {
 				return fmt.Errorf("recording blocked crossing on Bundle %s: %w", bundle.Name, err)
 			}

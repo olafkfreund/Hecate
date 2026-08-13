@@ -226,6 +226,21 @@ func (b *Bundle) HasCleared(gate string) bool {
 	return false
 }
 
+// WasBlockedBy reports whether a crossing of this Gate has already failed.
+//
+// Consulted only by automatic crossing (see gate.NextAuto), never by
+// eligibility: an operator asking for a promotion is entitled to retry, and
+// answering "no" to a human because a previous attempt failed would leave them
+// with nothing to do but edit status by hand.
+func (b *Bundle) WasBlockedBy(gate string) bool {
+	for _, c := range b.Status.Blocked {
+		if c.Gate == gate {
+			return true
+		}
+	}
+	return false
+}
+
 // IsApprovedFor reports whether a human has explicitly approved this Bundle for
 // the named Gate.
 //

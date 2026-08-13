@@ -135,12 +135,29 @@ func Eligible(candidates []Candidate) []*v1alpha1.Bundle {
 // Rolling back is therefore deliberately not automatic. An older Bundle stays
 // eligible and a human can cross it by creating a Passage directly; a
 // controller that can roll back on its own is a controller that will.
-func NextAuto(candidates []Candidate, current *v1alpha1.Bundle) *v1alpha1.Bundle {
+func NextAuto(gateName string, candidates []Candidate, current *v1alpha1.Bundle) *v1alpha1.Bundle {
 	eligible := Eligible(candidates)
 	if len(eligible) == 0 {
 		return nil
 	}
 	newest := eligible[0]
+
+	// A crossing that already failed is not retried automatically.
+	//
+	// Without this an auto Gate re-crosses the same Bundle every reconcile for
+	// ever: the Passage fails on the same deterministic reason, is recorded on
+	// the Bundle, is collected, and the next reconcile starts another. Measured
+	// at one new Passage every twenty seconds, with `status.blocked` reaching
+	// 733KB in twenty minutes — the Bundle would have become unwritable inside
+	// an hour (#121).
+	//
+	// Automatic only. `hecate promote` still works and is how a failure is
+	// retried once the cause is fixed, which is the honest division: the
+	// controller cannot tell whether anything changed, and a human asking for a
+	// crossing is asserting that something did.
+	if newest.WasBlockedBy(gateName) {
+		return nil
+	}
 
 	if current != nil && !newest.CreationTimestamp.After(current.CreationTimestamp.Time) {
 		return nil
