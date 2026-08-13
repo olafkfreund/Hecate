@@ -225,12 +225,29 @@ func TestCrossingAgainstRealAPI(t *testing.T) {
 	})
 
 	// Production must refuse until staging has cleared the Bundle.
+	//
+	// Staging is crossed first, and reconciled until it does rather than once.
+	// The Gate lists Bundles, and on k3s a LIST can miss an object a GET
+	// already returns — the inconsistency documented above, and the cause of
+	// #110. That matters twice here. A Gate whose list came back empty has not
+	// refused, it was asked too early; and production refusing under an empty
+	// list would pass the assertion below while asserting nothing at all.
+	//
+	// Once staging has crossed, the Bundle is demonstrably visible to a Gate
+	// controller in this namespace, so production's refusal is a verdict rather
+	// than an absence. The deployed controller needs none of this: it is
+	// requeued and tries again, so a stale read costs it one interval. Only a
+	// test calling Reconcile by hand can mistake the gap for a decision.
+	waitFor(t, 30*time.Second, "staging to start a crossing", func() bool {
+		reconcileGate(t, gateReconciler, "staging")
+		return len(passagesFor(t, c, "staging")) > 0
+	}, func() string { return bundleForensics(t, c) })
+
 	reconcileGate(t, gateReconciler, "production")
 	if n := countPassages(t, c, "production"); n != 0 {
 		t.Fatalf("production started %d Passages before staging cleared, want 0", n)
 	}
 
-	reconcileGate(t, gateReconciler, "staging")
 	stagingPassages := passagesFor(t, c, "staging")
 	if len(stagingPassages) != 1 {
 		t.Fatalf("staging started %d Passages, want 1", len(stagingPassages))
