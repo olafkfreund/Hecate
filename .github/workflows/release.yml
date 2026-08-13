@@ -194,10 +194,15 @@ jobs:
     needs: version
     if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write       # cosign keyless, as for the image and the chart
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with: { go-version-file: go.mod }
+      - uses: sigstore/cosign-installer@v3
+      - uses: anchore/sbom-action/download-syft@v0
 
       # An evidence-verification tool nobody can download is a tool nobody runs,
       # and the whole point of #104 is that the person relying on the trail can
@@ -214,6 +219,40 @@ jobs:
               -o "dist/hecate-$os-$arch" ./cmd/hecate
           done
           cd dist && sha256sum hecate-* > checksums.txt
+
+      # The checksum file is signed rather than each binary: it already commits
+      # to every one of them by digest, so one signature covers the set and
+      # verifying a download is two commands instead of two per file.
+      #
+      # Unsigned, a checksums.txt is worth very little — whoever can replace the
+      # binaries on a release page can replace the checksums beside them.
+      - name: Sign the checksums
+        run: |
+          cd dist
+          cosign sign-blob --yes checksums.txt \
+            --output-signature checksums.txt.sig \
+            --output-certificate checksums.txt.pem
+
+      - name: Verify what we just signed
+        run: |
+          cd dist
+          cosign verify-blob checksums.txt \
+            --signature checksums.txt.sig --certificate checksums.txt.pem \
+            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+      # The image gets its SBOM from buildx. The binaries need their own: they
+      # are what most people actually download, and "which version of x/crypto
+      # is in the thing on my laptop" is the question a CVE announcement asks.
+      - name: SBOM
+        run: |
+          # The binary, not the source tree: a Go binary embeds its module graph,
+          # so this describes what is actually compiled in rather than what
+          # go.mod would permit. Any of the four would do — they are the same
+          # dependencies — so the linux/amd64 one stands for the set.
+          syft scan file:dist/hecate-linux-amd64 \
+            --source-name hecate --source-version "${{ needs.version.outputs.version }}" \
+            -o spdx-json > dist/hecate-sbom.spdx.json
 
       - uses: actions/upload-artifact@v4
         with:
@@ -278,13 +317,37 @@ jobs:
 
           Exits 3 when an attestation chain has been tampered with.
 
-          Signed with cosign (keyless). Verify:
+          ## Verifying what you downloaded
+
+          Everything here is signed with cosign, keyless: there is no public key
+          to fetch and no signing key of ours to be stolen. The certificate says
+          which workflow in which repository produced the artifact, which is the
+          claim worth checking.
+
+          The image, by digest — a tag can be moved, a digest cannot:
 
           \`\`\`console
           cosign verify ${{ env.REGISTRY }}/${{ env.IMAGE }}@${{ needs.image.outputs.digest }} \\
             --certificate-identity-regexp "^https://github.com/${{ github.repository }}/" \\
             --certificate-oidc-issuer https://token.actions.githubusercontent.com
           \`\`\`
+
+          The CLI binaries. \`checksums.txt\` commits to every binary by digest,
+          so verifying it and then checking your download against it covers the
+          lot — and unsigned it would be worth little, since whoever could
+          replace the binaries could replace the checksums beside them:
+
+          \`\`\`console
+          cosign verify-blob checksums.txt \\
+            --signature checksums.txt.sig --certificate checksums.txt.pem \\
+            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/" \\
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          sha256sum --check --ignore-missing checksums.txt
+          \`\`\`
+
+          SBOMs: the image carries one as a buildx attestation
+          (\`cosign download sbom\`), and the binaries have
+          \`hecate-sbom.spdx.json\` attached here.
           EOF
           # Listed explicitly rather than with `dist/*.tgz dist/hecate-*`, which
           # was wrong twice over: those globs both match the chart tarball, so
@@ -296,5 +359,6 @@ jobs:
             dist/hecate-*.tgz \
             dist/crds.yaml \
             dist/hecate-linux-* dist/hecate-darwin-* \
-            dist/checksums.txt \
+            dist/checksums.txt dist/checksums.txt.sig dist/checksums.txt.pem \
+            dist/hecate-sbom.spdx.json \
             --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag
