@@ -7,9 +7,17 @@ on:
   schedule:
     # Nightly, so upstream Flux releases surface here rather than in an issue.
     - cron: '0 3 * * *'
+  # So the provider job can be run on demand rather than only at 03:00.
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+env:
+  # e2e tests that need no cluster at all — they talk to a git host. At workflow
+  # level because two jobs read it: the `providers` job runs them, and the
+  # orphan check in `crossing` needs to know they are claimed by something.
+  NO_CLUSTER: 'TestGitHubPullRequestLifecycle'
 
 jobs:
   crossing:
@@ -123,7 +131,7 @@ jobs:
         run: |
           set -euo pipefail
           all=$(go test -tags e2e -list '.*' ./test/e2e/... | grep '^Test' | sort)
-          claimed=$(printf '%s\n' $BEFORE_INSTALL $AFTER_INSTALL | tr '|' '\n' | sort)
+          claimed=$(printf '%s\n' $BEFORE_INSTALL $AFTER_INSTALL $NO_CLUSTER | tr '|' '\n' | sort)
           orphans=$(comm -23 <(echo "$all") <(echo "$claimed"))
           if [ -n "$orphans" ]; then
             echo "These e2e tests are in neither phase, so they never run:"
@@ -151,3 +159,33 @@ jobs:
           kubectl -n hecate-system logs deploy/hecate --tail=100 || true
           kubectl -n flux-system get all || true
           kubectl get events -A --sort-by=.lastTimestamp | tail -50 || true
+
+  providers:
+    name: Promotion against real GitHub
+    # Nightly only. It depends on a third party over the network, so running it
+    # per-push would turn GitHub's bad afternoon into Hecate's red build — and
+    # a red build nobody trusts is one nobody reads.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Absent on a fork, and on this repo until the token is installed. Skipped
+      # rather than failed: a job that goes red for a missing credential trains
+      # people to ignore it going red for a broken adapter.
+      - name: Is there a token?
+        id: token
+        run: |
+          if [ -n "${{ secrets.E2E_GITHUB_TOKEN }}" ]; then echo "have=yes" >> "$GITHUB_OUTPUT"
+          else echo "have=no" >> "$GITHUB_OUTPUT"; echo "::warning::E2E_GITHUB_TOKEN is not set — the GitHub provider is unproven tonight"; fi
+
+      - name: E2E — GitHub pull request lifecycle
+        if: steps.token.outputs.have == 'yes'
+        env:
+          HECATE_E2E_GITHUB_TOKEN: ${{ secrets.E2E_GITHUB_TOKEN }}
+        run: go test -tags e2e -count=1 -timeout 10m -v -run "^($NO_CLUSTER)$" ./test/e2e/...
