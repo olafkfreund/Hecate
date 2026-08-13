@@ -13,12 +13,6 @@ on:
 permissions:
   contents: read
 
-env:
-  # e2e tests that need no cluster at all — they talk to a git host. At workflow
-  # level because two jobs read it: the `providers` job runs them, and the
-  # orphan check in `crossing` needs to know they are claimed by something.
-  NO_CLUSTER: 'TestGitHubPullRequestLifecycle'
-
 jobs:
   crossing:
     name: Crossing on k3d (Flux ${{ matrix.flux }}, k8s ${{ matrix.k3s }})
@@ -131,7 +125,7 @@ jobs:
         run: |
           set -euo pipefail
           all=$(go test -tags e2e -list '.*' ./test/e2e/... | grep '^Test' | sort)
-          claimed=$(printf '%s\n' $BEFORE_INSTALL $AFTER_INSTALL $NO_CLUSTER | tr '|' '\n' | sort)
+          claimed=$(printf '%s\n' $BEFORE_INSTALL $AFTER_INSTALL | tr '|' '\n' | sort)
           orphans=$(comm -23 <(echo "$all") <(echo "$claimed"))
           if [ -n "$orphans" ]; then
             echo "These e2e tests are in neither phase, so they never run:"
@@ -188,4 +182,4 @@ jobs:
         if: steps.token.outputs.have == 'yes'
         env:
           HECATE_E2E_GITHUB_TOKEN: ${{ secrets.E2E_GITHUB_TOKEN }}
-        run: go test -tags e2e -count=1 -timeout 10m -v -run "^($NO_CLUSTER)$" ./test/e2e/...
+        run: go test -tags e2e -count=1 -timeout 10m -v ./test/provider/...

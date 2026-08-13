@@ -1,6 +1,6 @@
 //go:build e2e
 
-package e2e
+package provider_test
 
 import (
 	"bytes"
