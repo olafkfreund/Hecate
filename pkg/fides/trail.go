@@ -129,12 +129,78 @@ type ChangeVerdict struct {
 	RiskScore int `json:"risk_score"`
 	// RiskLevel is "low", "medium" or "high".
 	RiskLevel string `json:"risk_level"`
+	// Passed names the controls that were satisfied, by key alone — Fides sends
+	// strings here and objects for the two below, and that asymmetry is real.
+	Passed []string `json:"passed,omitempty"`
 	// Failed and MissingEvidence name the controls that stopped it, so a held
 	// crossing can say what would unblock it.
-	Failed          []string `json:"failed,omitempty"`
-	MissingEvidence []string `json:"missing_evidence,omitempty"`
+	Failed          []Control `json:"failed,omitempty"`
+	MissingEvidence []Control `json:"missing_evidence,omitempty"`
+	// Waived are the controls a human has excused, with who excused them and
+	// until when. A waiver is a governed exception rather than a pass, so it is
+	// reported separately: an auditor's first question about a green gate is
+	// which of it was waived.
+	Waived []Control `json:"waived,omitempty"`
+	// Attestations counts the evidence on the trail.
+	Attestations struct {
+		Total        int `json:"total"`
+		NonCompliant int `json:"non_compliant"`
+	} `json:"attestations"`
+	// Approvals is who signed off, and whether that satisfied four-eyes.
+	Approvals struct {
+		Count          int      `json:"count"`
+		HumanApprovers int      `json:"human_approvers"`
+		FourEyes       bool     `json:"four_eyes"`
+		Approvers      []string `json:"approvers,omitempty"`
+		Deployers      []string `json:"deployers,omitempty"`
+	} `json:"approvals"`
+	// SoD is Fides' segregation-of-duties finding: committer, approver and
+	// deployer must be three distinct people.
+	SoD *SegregationOfDuties `json:"segregation_of_duties,omitempty"`
 	// Summary is Fides' own sentence about the verdict.
 	Summary string `json:"summary,omitempty"`
+}
+
+// Control is one control the change gate judged.
+//
+// Sent as an object rather than a bare key because the reasons are the useful
+// part: "CC7.2" is a code to look up, "CC7.2 Vulnerability scanning: failed
+// vuln-scan" is a thing to go and fix.
+type Control struct {
+	Key  string `json:"control"`
+	Name string `json:"name"`
+	// Reasons are Fides' own phrasings, e.g. "missing sbom".
+	Reasons []string `json:"reasons,omitempty"`
+	// WaivedReasons is what the waiver excused, present only on Waived.
+	WaivedReasons []string `json:"waived_reasons,omitempty"`
+	Reason        string   `json:"reason,omitempty"`
+	ApprovedBy    string   `json:"approved_by,omitempty"`
+	ExpiresAt     string   `json:"expires_at,omitempty"`
+}
+
+// Describe names the control the way a person would read it.
+func (c Control) Describe() string {
+	label := c.Key
+	if c.Name != "" {
+		label = fmt.Sprintf("%s %s", c.Key, c.Name)
+	}
+	reasons := c.Reasons
+	if len(reasons) == 0 {
+		reasons = c.WaivedReasons
+	}
+	if len(reasons) == 0 {
+		return label
+	}
+	return fmt.Sprintf("%s (%s)", label, strings.Join(reasons, ", "))
+}
+
+// SegregationOfDuties is Fides' four-eyes finding for a trail.
+type SegregationOfDuties struct {
+	Committer  string   `json:"committer,omitempty"`
+	Approvers  []string `json:"approvers,omitempty"`
+	Deployers  []string `json:"deployers,omitempty"`
+	Compliant  bool     `json:"compliant"`
+	Violations []string `json:"violations,omitempty"`
 }
 
 // Held reports whether the verdict withholds approval.
@@ -144,10 +210,10 @@ func (v ChangeVerdict) Held() bool { return v.Recommendation != "approve" }
 func (v ChangeVerdict) Blockers() []string {
 	var out []string
 	for _, f := range v.Failed {
-		out = append(out, "failing control "+f)
+		out = append(out, "failing control "+f.Describe())
 	}
 	for _, m := range v.MissingEvidence {
-		out = append(out, "missing evidence "+m)
+		out = append(out, "missing evidence for "+m.Describe())
 	}
 	if len(out) == 0 && v.Held() {
 		// Every control satisfied and still held: Fides is waiting on a human,

@@ -215,8 +215,10 @@ func TestEvidenceGateAllFourGates(t *testing.T) {
 // The heart of the issue: a HOLD is a human not having signed off yet, which is
 // the control working. Failing there would make the control unusable.
 func TestEvidenceGateWaitsOnAHold(t *testing.T) {
+	// Fides' own shape: missing_evidence is a list of objects, not of keys.
 	f := &fidesServer{change: `{"recommendation":"hold","approved":false,"risk_score":30,
-		"risk_level":"medium","missing_evidence":["sbom"]}`}
+		"risk_level":"medium","missing_evidence":[{"control":"CC6.1","name":"Change approval",
+		"reasons":["missing sbom"]}]}`}
 	step := evidenceStep(t, f.start(t), nil)
 
 	res, err := step.Run(context.Background(), evidenceCtx(t, EvidenceGateConfig{

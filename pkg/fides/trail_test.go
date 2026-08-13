@@ -179,9 +179,27 @@ func TestChangeGate(t *testing.T) {
 			false, nil,
 		},
 		{
+			// The body is Fides' own, key for key: `failed` and
+			// `missing_evidence` are arrays of objects while `passed` is an
+			// array of strings. Hecate declared all three as []string, which
+			// decodes fine against a hand-written fake and errors against the
+			// real server — and only ever on a held verdict, the one case the
+			// change gate exists for. Copied from evidance-vault's
+			// computeChangeGate rather than written from memory.
 			"held on a failing control",
-			`{"recommendation":"hold","approved":false,"risk_score":45,"risk_level":"medium","failed":["CC7.2"],"missing_evidence":["sbom"]}`,
-			true, []string{"failing control CC7.2", "missing evidence sbom"},
+			`{"trail_id":"t-1","recommendation":"hold","approved":false,"risk_score":45,` +
+				`"risk_level":"medium","passed":["CC8.1"],` +
+				`"failed":[{"control":"CC7.2","name":"Vulnerability scanning","reasons":["failed vuln-scan"]}],` +
+				`"missing_evidence":[{"control":"CC6.1","name":"Change approval","reasons":["missing sbom"]}],` +
+				`"waived":[],"attestations":{"total":3,"non_compliant":1},` +
+				`"approvals":{"count":1,"human_approvers":1,"four_eyes":false,"approvers":["a@x"],"deployers":[]},` +
+				`"segregation_of_duties":{"committer":"a@x","approvers":["a@x"],"deployers":[],` +
+				`"compliant":false,"violations":["committer and approver are the same person"]},` +
+				`"summary":"Controls failed."}`,
+			true, []string{
+				"failing control CC7.2 Vulnerability scanning (failed vuln-scan)",
+				"missing evidence for CC6.1 Change approval (missing sbom)",
+			},
 		},
 		{
 			// Every control satisfied and still held: segregation of duties
