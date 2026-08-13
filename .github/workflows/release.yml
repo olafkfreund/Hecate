@@ -192,7 +192,12 @@ jobs:
   cli:
     name: CLI binaries
     needs: version
-    if: needs.version.outputs.publish == 'true'
+    # Not gated on publish, unlike the release job below. A dry run exists to
+    # exercise the pipeline before a tag commits us to a version that cannot be
+    # unpublished, and skipping this job skipped the cross-compile for four
+    # platforms and every signing step — the two things most likely to fail on
+    # a first release and least likely to be noticed beforehand. Nothing here
+    # leaves the runner; only the release job publishes.
     runs-on: ubuntu-latest
     permissions:
       contents: read
