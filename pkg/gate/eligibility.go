@@ -99,6 +99,10 @@ func judge(
 			CodeUpstreamNotCleared
 	}
 
+	// After upstream, deliberately: an approval adds a requirement, it does not
+	// remove one (D51). Checking it first would turn every approval into a
+	// break-glass past the whole pipeline, which is a large hole to leave
+	// implicit.
 	if admission.RequireApproval && !bundle.IsApprovedFor(gate.Name) {
 		return false, "awaiting approval", CodeAwaitingApproval
 	}

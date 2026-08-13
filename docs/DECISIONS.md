@@ -1585,3 +1585,30 @@ everything else.
 a name and an expiry attached, and an auditor's first question about a green
 gate is which part of it was waived. Counting one as the other is how a control
 becomes decorative.
+
+## D51 — An approval adds a requirement; it never removes one
+
+*2026-08-13 — #119*
+
+`BundleStatus.ApprovedFor` documented itself as letting a Bundle "skip the
+normal upstream ordering". `gate.judge` does the opposite: it checks upstream
+clearance first and returns before approval is ever considered. Neither
+behaviour had a test, which is why the two could disagree for as long as they
+did.
+
+**The code was right and the comment was wrong.** An approval that bypasses the
+pipeline is a break-glass path, and a break-glass path nobody declared is not a
+control — it is a hole with a friendly name. Approving for production is a thing
+an operator does routinely; a routine action that can also skip staging will
+eventually skip staging by accident, and the audit trail will show a perfectly
+ordinary approval.
+
+**A real break-glass path is not ruled out, but it has to be asked for.** If
+"ship to production without staging, and record who said so" is wanted, it
+should be its own field with its own name, its own permission and its own
+appearance in the UI — visible as an exception rather than available as a side
+effect of the normal one. Nobody has asked for it, so it is not built.
+
+**Both sides now have the test that was missing.** `TestApprovalIsRequiredWhenAsked`
+says an approval is needed; `TestApprovalDoesNotSkipUpstreamOrdering` says it is
+not sufficient. The second one fails if anyone reorders those two checks.

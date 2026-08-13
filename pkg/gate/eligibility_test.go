@@ -123,6 +123,33 @@ func TestApprovalIsRequiredWhenAsked(t *testing.T) {
 	}
 }
 
+// An approval adds a requirement; it does not remove one (D51).
+//
+// Neither this nor its opposite was tested, which is how the field's own doc
+// comment came to claim approval "skips the normal upstream ordering" while the
+// code checked upstream first and returned before approval was considered. One
+// of the two was a security hole and nothing would have noticed either way.
+func TestApprovalDoesNotSkipUpstreamOrdering(t *testing.T) {
+	a := admits("podinfo", "staging")
+	a.RequireApproval = true
+	g := gateAdmitting("production", a)
+
+	// Approved for production by a human, but it never went through staging.
+	b := bundle("unstaged", "podinfo", 0)
+	b.Status.ApprovedFor = []v1alpha1.BundleApproval{{Gate: "production", Actor: "olaf@acme.example"}}
+
+	c := find(t, Evaluate(g, []v1alpha1.Bundle{b}), "unstaged")
+	if c.Eligible {
+		t.Fatal("an approval let a Bundle into production without clearing staging — " +
+			"that is a break-glass path, and a silent one is not a control")
+	}
+	// The reason has to name the real obstacle. "awaiting approval" on a
+	// Bundle that is already approved sends an operator to approve it again.
+	if c.Code != CodeUpstreamNotCleared {
+		t.Errorf("code = %q, want %q", c.Code, CodeUpstreamNotCleared)
+	}
+}
+
 func TestBundlesFromOtherBeaconsAreIgnored(t *testing.T) {
 	g := gateAdmitting("production", admits("podinfo"))
 	cs := Evaluate(g, []v1alpha1.Bundle{

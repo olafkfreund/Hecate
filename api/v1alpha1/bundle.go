@@ -128,7 +128,13 @@ type BundleStatus struct {
 	// +optional
 	Blocked []GateCrossing `json:"blocked,omitempty"`
 	// ApprovedFor lists the Gates a human has explicitly approved this Bundle
-	// for, letting it skip the normal upstream ordering.
+	// for.
+	//
+	// An approval is an *additional* requirement, never an override: upstream
+	// ordering is checked first, and a Bundle that has not cleared staging
+	// stays ineligible for production no matter who approves it (D51). This
+	// comment used to claim the opposite, which would have made an approval a
+	// silent way past the whole pipeline.
 	//
 	// Each entry names its approver. An approval that does not say who gave it
 	// cannot satisfy four-eyes anywhere downstream — Fides evaluates
@@ -221,7 +227,10 @@ func (b *Bundle) HasCleared(gate string) bool {
 }
 
 // IsApprovedFor reports whether a human has explicitly approved this Bundle for
-// the named Gate, bypassing upstream ordering.
+// the named Gate.
+//
+// Being approved does not make a Bundle eligible on its own: upstream ordering
+// is checked first and independently (D51).
 func (b *Bundle) IsApprovedFor(gate string) bool {
 	return b.ApprovalFor(gate) != nil
 }
