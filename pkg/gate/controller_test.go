@@ -16,6 +16,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -872,5 +873,42 @@ func TestAGateSaysWhenItStoppedBecauseACrossingFailed(t *testing.T) {
 		if !strings.Contains(cond.Message, want) {
 			t.Errorf("message does not say %q: %s", want, cond.Message)
 		}
+	}
+}
+
+// A Gate must not be woken by its own status write.
+//
+// Every reconcile stamps status.health.observedAt with the current time, so
+// the write always differs and triggers the watch. Hidden by metav1.Time's
+// one-second resolution — a Gate reconciles in well under a second, so two
+// reconciles share a timestamp and the loop dies. A health check is a network
+// call, and the day one takes longer than a second is the day this becomes a
+// hot loop against whatever is already slow.
+func TestAGateIsNotWokenByItsOwnStatusWrite(t *testing.T) {
+	p := ownStatusWrites()
+
+	old := &v1alpha1.Gate{ObjectMeta: metav1.ObjectMeta{Name: "staging", Generation: 1}}
+	updated := old.DeepCopy()
+	updated.Status.Health = &v1alpha1.HealthReport{
+		Status:     v1alpha1.HealthHealthy,
+		ObservedAt: &metav1.Time{Time: base},
+	}
+	updated.ResourceVersion = "2"
+
+	if p.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: updated}) {
+		t.Error("a status-only change woke the Gate, which is how a slow health check " +
+			"becomes a hot loop")
+	}
+
+	edited := old.DeepCopy()
+	edited.Generation = 2
+	if !p.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: edited}) {
+		t.Error("editing a Gate's spec did not wake it")
+	}
+
+	poked := old.DeepCopy()
+	poked.Annotations = map[string]string{v1alpha1.AnnotationReconcile: "1786620716793895315"}
+	if !p.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: poked}) {
+		t.Error("a reconcile request did not wake the Gate")
 	}
 }

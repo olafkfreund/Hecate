@@ -12,9 +12,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/olafkfreund/hecate/api/v1alpha1"
 	"github.com/olafkfreund/hecate/pkg/health"
@@ -606,6 +609,33 @@ func names(bundles []*v1alpha1.Bundle) []string {
 	return out
 }
 
+// ownStatusWrites keeps a Gate from being woken by its own status write.
+//
+// Every reconcile stamps status.health.observedAt with the current time, so the
+// write always differs, so it triggers the watch, so the Gate reconciles again.
+// The same shape as the Beacon's lastPolled, and hidden by the same accident:
+// metav1.Time has one-second resolution, so two reconciles inside one second
+// write an identical value and the loop stops. A Gate reconciles in well under
+// a second today — but a health check is a network call, and the day one takes
+// longer than a second is the day this becomes a hot loop against whatever is
+// already slow.
+//
+// Fixed before it bites rather than after, because the Passage controller and
+// the Beacon both reached this state on their own and neither was visible to
+// the unit suite.
+//
+// Spec changes and reconcile requests still wake it; the interval requeue is
+// what makes a Gate notice the world otherwise.
+func ownStatusWrites() predicate.Predicate {
+	return predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			return e.ObjectOld.GetGeneration() != e.ObjectNew.GetGeneration() ||
+				v1alpha1.ReconcileRequestedAt(e.ObjectOld.GetAnnotations()) !=
+					v1alpha1.ReconcileRequestedAt(e.ObjectNew.GetAnnotations())
+		},
+	}
+}
+
 func (r *Reconciler) setReady(gate *v1alpha1.Gate, status metav1.ConditionStatus, reason, message string) {
 	meta.SetStatusCondition(&gate.Status.Conditions, metav1.Condition{
 		Type:               v1alpha1.ConditionReady,
@@ -639,7 +669,13 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// without that cost — otherwise a finished crossing would sit unrecorded
 	// until the next flat-interval reconcile.
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&v1alpha1.Gate{}).
+		// The predicate is on this watch alone, not WithEventFilter.
+		//
+		// A Gate learns that a crossing finished from the *status* of a
+		// Passage, so filtering status changes globally would leave every
+		// crossing hanging until the next interval — which is the mistake the
+		// convenient spelling invites.
+		For(&v1alpha1.Gate{}, builder.WithPredicates(ownStatusWrites())).
 		Watches(&v1alpha1.Passage{}, handler.EnqueueRequestsFromMapFunc(
 			func(_ context.Context, obj client.Object) []ctrl.Request {
 				passage, ok := obj.(*v1alpha1.Passage)
