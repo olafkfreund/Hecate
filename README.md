@@ -15,6 +15,7 @@
 [Steps](docs/STEPS.md) ·
 [Product plan](docs/PRODUCT-PLAN.md) ·
 [Development plan](docs/DEVELOPMENT-PLAN.md) ·
+[Permissions](docs/RBAC.md) ·
 [Observability](docs/OBSERVABILITY.md) ·
 [Decisions](docs/DECISIONS.md) ·
 [Onboarding](docs/ONBOARDING.md) ·

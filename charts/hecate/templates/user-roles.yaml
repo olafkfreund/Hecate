@@ -67,4 +67,23 @@ rules:
   - apiGroups: ["hecate.dev"]
     resources: ["bundles/status"]
     verbs: ["update", "patch"]
+---
+{{/*
+  A poker can tell a Beacon to look now, and nothing else — not even read.
+
+  This is the grant a CI job needs after a push (#102), and it is deliberately
+  the narrowest role here: a webhook credential that could also read every Gate
+  in the namespace is a credential worth stealing. It carries no read rules for
+  the same reason, since the endpoint answers with the request token and needs
+  no listing to work.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "hecate.fullname" . }}-poker
+  labels: {{- include "hecate.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["hecate.dev"]
+    resources: ["beacons"]
+    verbs: ["update"]
 {{- end }}
