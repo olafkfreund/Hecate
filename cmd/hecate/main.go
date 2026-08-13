@@ -124,7 +124,7 @@ Usage:
 
 Common flags:
   -namespace      namespace to work in  (default: the kubeconfig's)
-  -output, -o     table, json or yaml   (status, explain, verify)
+  -output, -o     table, json or yaml   (every command)
   -watch          follow the crossing to its end  (promote)
   -timeout        give up watching after this     (promote -watch)
   -ai             add a model's summary (explain)

@@ -105,3 +105,43 @@ func TestAnUnknownFormatIsRefused(t *testing.T) {
 		t.Errorf("exit = %d, want %d", code, exitUsage)
 	}
 }
+
+// The Passage name is why a script calls promote: it has to watch or verify
+// the crossing afterwards. Parsing it back out of "crossing X through Y as Z"
+// is the failure the CLI principle names — if it cannot be scripted, it is not
+// done — so the write commands emit it too.
+func TestWriteCommandsEmitSomethingAScriptCanRead(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		result actionResult
+		want   string
+	}{
+		{"promote", actionResult{Action: "promote", Namespace: "acme", Gate: "staging",
+			Bundle: "b1", Passage: "staging-b1-abc123", Actor: "olaf@acme.example"}, "staging-b1-abc123"},
+		{"approve", actionResult{Action: "approve", Namespace: "acme", Gate: "production",
+			Bundle: "b1", Actor: "olaf@acme.example"}, "production"},
+		{"abort", actionResult{Action: "abort", Namespace: "acme",
+			Passage: "staging-b1-abc123", Actor: "olaf@acme.example"}, "staging-b1-abc123"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out := capture(t, func() {
+				render(formatJSON, tc.result, func() int { return exitOK })
+			})
+			var got actionResult
+			if err := json.Unmarshal([]byte(out), &got); err != nil {
+				t.Fatalf("not JSON: %v\n%s", err, out)
+			}
+			if got != tc.result {
+				t.Errorf("round trip lost something:\n got %+v\nwant %+v", got, tc.result)
+			}
+			if !strings.Contains(out, tc.want) {
+				t.Errorf("output does not carry %q:\n%s", tc.want, out)
+			}
+			// Who did it is the half an audit cares about, and it is the field
+			// most easily dropped since the prose already reads fine without it.
+			if got.Actor == "" {
+				t.Error("no actor recorded")
+			}
+		})
+	}
+}
