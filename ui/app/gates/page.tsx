@@ -60,6 +60,18 @@ export default function GateDetail() {
                   Running now: <span className="font-medium">{ex.current}</span>
                 </p>
               )}
+              {/* Shown for an approved verdict too, not only a held one: a held
+                  crossing already appears under "In the way", and an operator
+                  who only ever sees the score when something is wrong learns
+                  the score means trouble rather than what it measures. */}
+              {ex.evidence?.verdict && (
+                <p className="mt-2 text-sm">
+                  Change gate: <span className="font-medium">{ex.evidence.verdict}</span>
+                  {ex.evidence.risk !== undefined && (
+                    <span className="text-[var(--muted-foreground)]"> — risk {ex.evidence.risk}/100</span>
+                  )}
+                </p>
+              )}
             </header>
 
             {ex.blockers && ex.blockers.length > 0 && (

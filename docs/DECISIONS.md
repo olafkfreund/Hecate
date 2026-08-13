@@ -1512,3 +1512,38 @@ row — the gate then holds on "no deployer recorded" rather than naming the
 collision. It still fails closed, so the control holds and only the message is
 poor. Not worked around here: a pre-check would be a second copy of Fides' own
 rule, and the fix belongs in the upsert.
+
+## D49 — The Gate mirrors the change-gate verdict, and never keeps a copy
+
+*2026-08-13 — #30*
+
+The change gate's verdict and its 0-100 risk score live on the Passage that
+asked for them. The Gate shows them too, because "why is nothing crossing?" is a
+question asked of the Gate, and an operator who has to find the active Passage
+first has already been told to go read the logs.
+
+**Mirrored on every reconcile, cleared when the crossing ends.**
+`GateStatus.Evidence` is assigned from the active Passage each time round, and
+set to nil the moment there is no active Passage. It is never written once and
+left.
+
+The alternative — snapshot the verdict when the crossing starts — is how a Gate
+ends up displaying "hold, risk 62" for a promotion that succeeded an hour ago.
+A stale verdict is worse than no verdict, because it reads as the current one
+and nothing about it says when it was taken. Mirroring costs one field
+assignment per reconcile and cannot go stale by construction: the Gate is
+reconciled whenever its Passage changes, so the copy is never more than one
+reconcile behind, and the only state it can hold is the current one or none.
+
+**An approved verdict is displayed too, not only a held one.** The held case is
+the one that needed the feature, but a score that only ever appears when
+something is wrong teaches people that the score *means* trouble rather than
+what it measures. `crossingMessage` says "in progress" for an approve, the CLI
+raises no blocker for it, and the UI shows the verdict and the number without
+alarm — so when the number is 62 the reader already knows what scale it is on.
+
+**The blockers travel with the verdict.** "hold, risk 62" is a number to
+escalate; "hold, risk 62: no approver recorded" is a thing to fix. The reasons
+existed only inside a step's message, which is exactly the burial this issue was
+opened about, so `EvidenceRef.Blockers` carries them onto the Gate, into
+`hecate explain` as a `ChangeHeld` blocker with a fix, and into the UI.

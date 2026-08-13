@@ -775,3 +775,31 @@ func TestTheGatesVerdictIsClearedWhenTheCrossingEnds(t *testing.T) {
 			"as the current one", ev)
 	}
 }
+
+// The verdict most crossings carry is "approve", so this is the message an
+// operator sees on an ordinary day — and a passing change gate reported as a
+// held one teaches people to ignore the message on the held ones too.
+func TestAnApprovedVerdictDoesNotReadAsHeld(t *testing.T) {
+	g := autoGate("staging", admits("podinfo"))
+	b := bundle("b1", "podinfo", 0)
+	r, c, _ := newReconciler(t, g, &b)
+
+	reconcileGate(t, r, "staging")
+	p := listPassages(t, c)[0]
+
+	risk := int32(5)
+	p.Status.Phase = v1alpha1.PassageRunning
+	p.Status.Evidence = &v1alpha1.EvidenceRef{Verdict: "approve", Risk: &risk}
+	if err := c.Status().Update(context.Background(), &p); err != nil {
+		t.Fatal(err)
+	}
+	reconcileGate(t, r, "staging")
+
+	cond := ready(t, getGate(t, c, "staging"))
+	if strings.Contains(cond.Message, "held") {
+		t.Errorf("the change gate approved and the Gate reports: %s", cond.Message)
+	}
+	if !strings.Contains(cond.Message, "in progress") {
+		t.Errorf("condition does not say the crossing is running: %s", cond.Message)
+	}
+}

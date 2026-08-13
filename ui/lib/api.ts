@@ -216,6 +216,17 @@ export interface Waiting {
   kind?: WaitingKind;
 }
 
+/** The change gate's verdict for a crossing. Mirrors v1alpha1.EvidenceRef. */
+export interface EvidenceRef {
+  trail?: string;
+  /** "approve" or "hold". */
+  verdict?: string;
+  /** 0-100, higher being worse. */
+  risk?: number;
+  blockers?: string[];
+  url?: string;
+}
+
 export interface Explanation {
   gate: string;
   namespace: string;
@@ -226,6 +237,8 @@ export interface Explanation {
   eligible?: string[];
   waiting?: Waiting[];
   health?: Health;
+  /** The change gate's verdict for the crossing in progress, if any. */
+  evidence?: EvidenceRef;
 }
 
 /**

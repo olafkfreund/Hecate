@@ -107,6 +107,22 @@ Cluster $CLUSTER is ready.
 EOF
 }
 
+# gitea_seeded reports whether the git server is not merely present but usable:
+# the repository exists and the credentials e2e uses can reach it.
+#
+# The obvious check — does the hecate-git namespace exist — calls a half-built
+# git server "installed" forever. A run that died between `kubectl apply` and
+# `admin user create` leaves exactly that, and every later run skips the repair:
+# Gitea with zero users, and Flux failing every clone with `authentication
+# required` against a server that looks healthy. Asked from inside the pod, so
+# it needs no port-forward.
+gitea_seeded() {
+  kubectl -n hecate-git get deploy gitea >/dev/null 2>&1 || return 1
+  kubectl -n hecate-git exec deploy/gitea -- curl -sf -o /dev/null \
+    -u "${GIT_USER}:${GIT_PASSWORD}" \
+    "http://127.0.0.1:3000/api/v1/repos/${GIT_USER}/${GIT_REPO}" >/dev/null 2>&1
+}
+
 # git_server installs Gitea and seeds the repository the e2e promotion writes to.
 #
 # It exists because a promotion is a git write, and until there was a git host
@@ -118,7 +134,7 @@ git_server() {
   # a missing tool should say which step wanted it.
   require curl base64
 
-  if kubectl get namespace hecate-git >/dev/null 2>&1; then
+  if gitea_seeded; then
     log "git server already installed"
     return
   fi
@@ -130,9 +146,13 @@ git_server() {
   local pod
   pod=$(kubectl -n hecate-git get pod -l app=gitea -o jsonpath='{.items[0].metadata.name}')
   # Gitea refuses to run its CLI as root, and kubectl exec lands there.
+  #
+  # Tolerating "user already exists" is what makes this a repair and not just an
+  # install: it runs when the server is present but unseeded, and aborting on
+  # the one step that had succeeded would leave it unseeded forever.
   kubectl -n hecate-git exec "$pod" -- su git -c \
     "gitea admin user create --username ${GIT_USER} --password ${GIT_PASSWORD} \
-       --email ${GIT_USER}@hecate.test --admin --must-change-password=false" >/dev/null
+       --email ${GIT_USER}@hecate.test --admin --must-change-password=false" >/dev/null 2>&1 || true
 
   seed_repo
   log "git server ready at ${GIT_URL}"
@@ -157,9 +177,11 @@ seed_repo() {
     [ "$waited" -lt 60 ] || die "the git server did not become reachable"
   done
 
+  # Same reason as the user above: a 409 here means the repo survived a failed
+  # run, which is a reason to carry on seeding rather than to stop.
   curl -sf -u "${GIT_USER}:${GIT_PASSWORD}" -X POST "${api}/user/repos" \
     -H "Content-Type: application/json" \
-    -d "{\"name\":\"${GIT_REPO}\",\"auto_init\":true,\"default_branch\":\"main\"}" >/dev/null
+    -d "{\"name\":\"${GIT_REPO}\",\"auto_init\":true,\"default_branch\":\"main\"}" >/dev/null || true
 
   put_file "$api" "apps/staging/configmap.yaml" "$(cat <<'YAML'
 apiVersion: v1

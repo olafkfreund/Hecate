@@ -85,6 +85,23 @@ describe("pages render the data the API actually returns", () => {
     // A diagnosis nobody can act on is just a status.
     expect(screen.getByText(/hecate promote staging/)).toBeDefined();
   });
+
+  it("shows the change gate's verdict and risk score even when it approved", async () => {
+    atNamespace("/gates/?name=staging&namespace=uidemo");
+    vi.spyOn(api, "explain").mockResolvedValue({
+      ...fixtures.explanation,
+      state: "Crossing",
+      evidence: { trail: "t-1", verdict: "approve", risk: 12 },
+    });
+
+    const { container } = render(<GateDetail />);
+
+    await waitFor(() => expect(screen.getByText("staging")).toBeDefined());
+    // An approved verdict produces no blocker, so without this the score is
+    // visible only when something is already wrong.
+    expect(container.textContent).toContain("approve");
+    expect(container.textContent).toContain("risk 12/100");
+  });
 });
 
 describe("the states that are not data", () => {
