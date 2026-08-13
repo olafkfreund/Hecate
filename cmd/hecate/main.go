@@ -59,6 +59,18 @@ func main() {
 		os.Exit(abort(ctx, os.Args[2:]))
 	case "verify":
 		os.Exit(verify(ctx, os.Args[2:]))
+	case "completion":
+		if len(os.Args) != 3 {
+			os.Exit(fail(exitUsage, "completion needs a shell: bash, zsh or fish"))
+		}
+		os.Exit(completionScript(os.Args[2]))
+	case "man":
+		os.Exit(manPage())
+	// Undocumented on purpose: the shells call it, people do not. Listing it in
+	// the help would invite someone to script against a format that exists to
+	// serve `complete` and may change with it.
+	case "__complete":
+		os.Exit(complete(ctx, os.Args[2:]))
 	case "version", "--version", "-v":
 		fmt.Println(version)
 	case "help", "--help", "-h":
@@ -70,8 +82,12 @@ func main() {
 	}
 }
 
-func usage() {
-	fmt.Println(`hecate — the promotion layer for FluxCD
+func usage() { fmt.Println(usageText()) }
+
+// usageText is the help, kept as a value so `hecate man` can render the same
+// words rather than a second description that drifts from this one.
+func usageText() string {
+	return `hecate — the promotion layer for FluxCD
 
 Usage:
   hecate status                     what every Gate is doing
@@ -81,6 +97,8 @@ Usage:
   hecate abort <passage>            stop a crossing that is under way
   hecate verify <bundle>            verify the evidence for every crossing of it
   hecate verify --trail <id>        verify one Fides trail directly
+  hecate completion <shell>         bash, zsh or fish completion
+  hecate man                        the man page, for a packager to install
   hecate version
 
 Common flags:
@@ -106,7 +124,7 @@ Exit codes:
   2  could not check
   3  a chain is broken — the evidence has been tampered with
   4  nothing to verify: no trail has been recorded
-  5  refused: the rules do not allow it`)
+  5  refused: the rules do not allow it`
 }
 
 // parseArgs parses flags that appear before *or* after positional arguments,

@@ -131,6 +131,15 @@ $ hecate status -o json | jq -r '.[] | select(.state == "Blocked") | .gate'
 production
 ```
 
+Completion knows your cluster, not just the verbs — `hecate explain <TAB>`
+offers the Gates that exist, `hecate abort <TAB>` only the crossings still
+running:
+
+```console
+$ source <(hecate completion bash)     # or zsh, or fish
+$ hecate man > /usr/share/man/man1/hecate.1
+```
+
 ### Promoting, and waiting for it
 
 ```console
