@@ -143,8 +143,8 @@ func TestResolveImage(t *testing.T) {
 func TestResolveUnsupportedKinds(t *testing.T) {
 	r := &Resolver{}
 	for name, w := range map[string]v1alpha1.WatchSource{
-		"chart": {Chart: &v1alpha1.ChartWatch{Repo: "https://charts.example.com", Name: "podinfo"}},
-		"git":   {Git: &v1alpha1.GitWatch{Repo: "https://github.com/acme/app", Branch: "main"}},
+		// Chart watches used to be here and are implemented now (#105).
+		"git": {Git: &v1alpha1.GitWatch{Repo: "https://github.com/acme/app", Branch: "main"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := r.Resolve(context.Background(), "acme", w)

@@ -38,7 +38,7 @@ func (r *Resolver) Resolve(ctx context.Context, namespace string, w v1alpha1.Wat
 	case w.Image != nil:
 		return r.resolveImage(ctx, namespace, *w.Image)
 	case w.Chart != nil:
-		return v1alpha1.Artifact{}, &ErrUnsupported{What: "chart watches"}
+		return r.resolveChart(ctx, namespace, *w.Chart)
 	case w.Git != nil:
 		return v1alpha1.Artifact{}, &ErrUnsupported{What: "git watches"}
 	default:
