@@ -46,6 +46,31 @@ func fluxVersions(t *testing.T) []string {
 	return versions
 }
 
+// transitionedAt is when the fixture's Ready condition last changed, which is
+// the only instant these fixtures can be judged from. Anything else makes the
+// elapsed time depend on the day the test runs.
+func transitionedAt(t *testing.T, obj *unstructured.Unstructured) time.Time {
+	t.Helper()
+	conditions, _, err := unstructured.NestedSlice(obj.Object, "status", "conditions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range conditions {
+		cond, ok := c.(map[string]any)
+		if !ok || cond["type"] != "Ready" {
+			continue
+		}
+		stamp, _ := cond["lastTransitionTime"].(string)
+		at, err := time.Parse(time.RFC3339, stamp)
+		if err != nil {
+			t.Fatalf("fixture has an unparseable lastTransitionTime %q: %v", stamp, err)
+		}
+		return at
+	}
+	t.Fatal("fixture has no Ready condition, so there is no instant to judge it from")
+	return time.Time{}
+}
+
 func loadFixture(t *testing.T, version, name string) *unstructured.Unstructured {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(fixtureRoot, version, name+".json"))
@@ -231,8 +256,17 @@ func TestFailingSourcesAreProgressingUntilTheDeadline(t *testing.T) {
 			t.Run(version+"/"+fixture, func(t *testing.T) {
 				obj := loadFixture(t, version, fixture)
 
+				// The clock is pinned to the fixture's own transition time.
+				//
+				// Without this the test asks how long ago a recorded timestamp
+				// was, and answers differently every day: these fixtures were
+				// captured 24 hours before this test started failing, which it
+				// did on its own, mid-afternoon, on a commit that touched only
+				// documentation. Re-capturing them would only reset the fuse.
+				now := transitionedAt(t, obj)
+
 				// Within the deadline: still trying.
-				got := Evaluate(obj, Options{FailAfter: 24 * time.Hour})
+				got := Evaluate(obj, Options{FailAfter: 24 * time.Hour, Now: now.Add(time.Hour)})
 				if got.Health != v1alpha1.HealthProgressing {
 					t.Errorf("health = %s, want Progressing while Flux is still retrying (%v)",
 						got.Health, got.Issues)
@@ -242,7 +276,7 @@ func TestFailingSourcesAreProgressingUntilTheDeadline(t *testing.T) {
 				}
 
 				// Past it: give up and say so.
-				got = Evaluate(obj, Options{FailAfter: time.Nanosecond})
+				got = Evaluate(obj, Options{FailAfter: time.Nanosecond, Now: now.Add(time.Hour)})
 				if got.Health != v1alpha1.HealthDegraded {
 					t.Errorf("health = %s, want Degraded once the failure outlives the deadline",
 						got.Health)
