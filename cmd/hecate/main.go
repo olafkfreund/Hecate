@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -84,10 +86,29 @@ func main() {
 
 func usage() { fmt.Println(usageText()) }
 
+// invokedAs is how the user typed this binary.
+//
+// Installed as a Flux CLI plugin it is reached as `flux hecate`, and telling
+// that user to run `hecate promote ...` names a binary that is very likely not
+// on their PATH at all — the plugin lives in ~/.fluxcd/plugins and nothing puts
+// it there.
+//
+// Only this command's own text is adjusted. The fixes in pkg/ops still say
+// `hecate`, deliberately: the UI renders those same strings, and there is no
+// `flux hecate` in a browser.
+func invokedAs() string {
+	if filepath.Base(os.Args[0]) == "flux-hecate" {
+		return "flux hecate"
+	}
+	return "hecate"
+}
+
 // usageText is the help, kept as a value so `hecate man` can render the same
 // words rather than a second description that drifts from this one.
 func usageText() string {
-	return `hecate — the promotion layer for FluxCD
+	// Only the indented command lines are rewritten. The title is the product's
+	// name and stays as it is.
+	return strings.ReplaceAll(`hecate — the promotion layer for FluxCD
 
 Usage:
   hecate status                     what every Gate is doing
@@ -124,7 +145,7 @@ Exit codes:
   2  could not check
   3  a chain is broken — the evidence has been tampered with
   4  nothing to verify: no trail has been recorded
-  5  refused: the rules do not allow it`
+  5  refused: the rules do not allow it`, "\n  hecate ", "\n  "+invokedAs()+" ")
 }
 
 // parseArgs parses flags that appear before *or* after positional arguments,

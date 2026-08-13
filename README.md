@@ -131,6 +131,25 @@ $ hecate status -o json | jq -r '.[] | select(.state == "Blocked") | .gate'
 production
 ```
 
+### As a Flux CLI plugin
+
+The same binary, reached through the CLI you already have. Flux discovers
+plugins in `~/.fluxcd/plugins`, so installing it is a copy:
+
+```console
+$ mkdir -p ~/.fluxcd/plugins
+$ cp hecate ~/.fluxcd/plugins/flux-hecate
+$ flux plugin list
+NAME    VERSION  PATH
+hecate  manual   /home/you/.fluxcd/plugins/flux-hecate
+
+$ flux hecate status
+```
+
+It knows how it was reached: `flux hecate help` offers `flux hecate promote`,
+not `hecate promote` — a binary that is not on your PATH when it lives in the
+plugin directory.
+
 Completion knows your cluster, not just the verbs — `hecate explain <TAB>`
 offers the Gates that exist, `hecate abort <TAB>` only the crossings still
 running:

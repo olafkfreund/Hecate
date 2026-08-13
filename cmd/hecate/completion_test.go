@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 )
@@ -142,5 +143,47 @@ func TestManPageIsValidAsciiRoff(t *testing.T) {
 	}
 	if !strings.Contains(out, `\(em`) {
 		t.Error("the em dash was not escaped")
+	}
+}
+
+// Installed as a Flux CLI plugin the binary is reached as `flux hecate`, and
+// telling that user to run `hecate promote ...` names something very likely not
+// on their PATH — the plugin lives in ~/.fluxcd/plugins and nothing puts it
+// there.
+func TestUsageNamesTheBinaryTheWayItWasInvoked(t *testing.T) {
+	for _, tc := range []struct{ argv0, want string }{
+		{"hecate", "hecate"},
+		{"/usr/local/bin/hecate", "hecate"},
+		{"flux-hecate", "flux hecate"},
+		{"/home/olaf/.fluxcd/plugins/flux-hecate", "flux hecate"},
+	} {
+		t.Run(tc.argv0, func(t *testing.T) {
+			old := os.Args
+			os.Args = []string{tc.argv0}
+			defer func() { os.Args = old }()
+
+			if got := invokedAs(); got != tc.want {
+				t.Fatalf("invokedAs() = %q, want %q", got, tc.want)
+			}
+			text := usageText()
+			if !strings.Contains(text, "\n  "+tc.want+" status") {
+				t.Errorf("usage does not offer %q:\n%s", tc.want+" status", text)
+			}
+			if tc.want == "flux hecate" && strings.Contains(text, "\n  hecate status") {
+				t.Error("usage still tells a plugin user to run the bare binary")
+			}
+		})
+	}
+}
+
+// The product's own name, not an invocation. Rewriting it would produce
+// "flux hecate — the promotion layer for FluxCD".
+func TestTheTitleIsNotRewritten(t *testing.T) {
+	old := os.Args
+	os.Args = []string{"flux-hecate"}
+	defer func() { os.Args = old }()
+
+	if !strings.HasPrefix(usageText(), "hecate ") {
+		t.Errorf("title was rewritten:\n%s", strings.SplitN(usageText(), "\n", 2)[0])
 	}
 }

@@ -67,7 +67,7 @@ func status(ctx context.Context, args []string) int {
 		return exitUsage
 	}
 	if len(rest) > 0 {
-		return fail(exitUsage, "status takes no arguments — did you mean `hecate explain %s`?", rest[0])
+		return fail(exitUsage, "status takes no arguments — did you mean `%s explain %s`?", invokedAs(), rest[0])
 	}
 
 	o, err := operations()
