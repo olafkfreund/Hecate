@@ -482,4 +482,3 @@ func (g *GitPush) Run(ctx context.Context, sc *passage.StepContext) (passage.Ste
 		Output:  map[string]any{"branch": target, "sha": head.Hash().String(), "pushed": true},
 	}, nil
 }
-

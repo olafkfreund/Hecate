@@ -40,6 +40,9 @@ fmt: ## Format Go and Nix
 	nixfmt *.nix
 
 lint: ## Lint Go and Nix
+	@# golangci-lint's defaults do not include gofmt, and CI checks it in a
+	@# separate step — so `make lint` passed while CI failed on formatting.
+	@test -z "$$(gofmt -l .)" || { echo "gofmt needed:"; gofmt -l .; exit 1; }
 	golangci-lint run
 	statix check .
 	deadnix --fail .
