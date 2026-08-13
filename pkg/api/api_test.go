@@ -518,3 +518,53 @@ func TestListEndpointsNeverAnswerNull(t *testing.T) {
 		})
 	}
 }
+
+func beacon(name string) *v1alpha1.Beacon {
+	return &v1alpha1.Beacon{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "acme"},
+		Spec: v1alpha1.BeaconSpec{
+			Watch: []v1alpha1.WatchSource{{Image: &v1alpha1.ImageWatch{Repo: "ghcr.io/acme/app"}}},
+		},
+	}
+}
+
+// The inbound webhook (#102). No shared secret and no HMAC: the caller presents
+// a bearer token and Kubernetes says whether it is anybody, which is the
+// posture Flux v2.9 moved to with OIDC-secured Receivers.
+func TestPollingABeaconNeedsWritePermissionOnBeacons(t *testing.T) {
+	s, log := newServer(t,
+		map[string]string{"ci-token": "ci@acme.example", "reader-token": "reader@acme.example"},
+		grants{
+			"ci@acme.example":     {"update beacons": true},
+			"reader@acme.example": {"list gates": true},
+		},
+		beacon("app"))
+
+	rec := call(t, s, "ci-token", "POST", "/api/v1alpha1/namespaces/acme/beacons/app/poll", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code = %d: %s", rec.Code, rec.Body.String())
+	}
+	// The question asked matters as much as the answer: authorising the wrong
+	// verb would pass an allow test and still hand out the wrong permission.
+	if got := log.last().ResourceAttributes; got.Verb != "update" || got.Resource != "beacons" {
+		t.Errorf("asked %s %s, want update beacons", got.Verb, got.Resource)
+	}
+
+	// Reading is a different grant. A CI job that may poke a Beacon must not
+	// thereby be able to read every Gate in the namespace, and vice versa.
+	rec = call(t, s, "reader-token", "POST", "/api/v1alpha1/namespaces/acme/beacons/app/poll", "")
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("a caller with only read access polled a Beacon: %d", rec.Code)
+	}
+}
+
+func TestPollingIsRefusedWithoutCredentials(t *testing.T) {
+	s, _ := newServer(t, map[string]string{}, grants{}, beacon("app"))
+
+	rec := call(t, s, "", "POST", "/api/v1alpha1/namespaces/acme/beacons/app/poll", "")
+	// A webhook endpoint that answered an unauthenticated caller would be an
+	// open door to every Beacon in the cluster.
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("code = %d, want 401", rec.Code)
+	}
+}

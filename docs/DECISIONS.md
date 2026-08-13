@@ -1654,3 +1654,40 @@ tag object at `ed8c5f2c` pointing at commit `889be9d6`.
 a `git-clone` step are handed the same `credentialsRef` for the same
 repository. Two implementations of "what does this Secret mean?" is how a Beacon
 ends up unable to see a repository its own step writes to daily.
+
+## D53 — The webhook is a door onto a mechanism that already existed
+
+*2026-08-13 — #102*
+
+A Beacon polls on an interval, and waiting out that interval is most of the
+perceived speed difference against a CI script that pushes. The fix is for a git
+host or registry to say "look now".
+
+**Almost none of that needed building.** A Beacon already polls immediately when
+Flux's `reconcile.fluxcd.io/requestedAt` annotation changes (D44), and that path
+has an end-to-end test. The one thing a git host cannot do is set a Kubernetes
+annotation. So the whole feature is an HTTP door onto the existing mechanism —
+one route, one ops method, one permission — rather than a receiver subsystem
+with its own event parsing.
+
+**No shared secret, and nothing to verify.** The endpoint authenticates the way
+every other call to the API does: it asks Kubernetes to review the bearer token.
+A cluster configured to trust a CI provider's OIDC issuer therefore accepts that
+provider's workload token here with nothing added, which is the posture Flux
+v2.9 moved to with OIDC-secured Receivers. Hand-rolled HMAC over a shared secret
+would be more code, a secret to distribute, rotate and leak, and a second
+authentication path to get wrong.
+
+**A distinct permission from reading.** `update beacons`, not `list gates`, so a
+CI job that may poke a Beacon cannot thereby read every Gate in the namespace.
+Proven against a real cluster with a ServiceAccount holding exactly that one
+grant: the poll succeeded, the controller acknowledged the token the API
+returned, and a Bundle appeared.
+
+**It does not parse webhook payloads, and should not.** Every host has its own
+body format and its own set of event types, and none of that changes the answer:
+look at the sources now. Parsing them would mean tracking five vendors' schemas
+to decide something the Beacon re-derives anyway.
+
+**A suspended Beacon is refused rather than accepted.** It would acknowledge the
+request and poll nothing, which reads to the caller as success.

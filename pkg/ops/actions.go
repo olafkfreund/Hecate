@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
@@ -231,4 +232,50 @@ func (o *Ops) Abort(ctx context.Context, namespace, passageName, actor string) e
 		return fmt.Errorf("aborting Passage: %w", err)
 	}
 	return nil
+}
+
+// Poll asks a Beacon to look at its sources now, rather than at its next
+// interval.
+//
+// **This is the whole of the webhook receiver (#102).** A Beacon already polls
+// immediately when Flux's `reconcile.fluxcd.io/requestedAt` annotation changes,
+// and that path is proven end to end. What a git host could not do was set a
+// Kubernetes annotation — so the missing piece was an HTTP door onto the
+// mechanism, not a mechanism.
+//
+// It needs no shared secret and no HMAC verification, which is the posture Flux
+// v2.9 moved to with OIDC-secured Receivers. The API server authenticates this
+// call the same way it authenticates every other one, by asking Kubernetes to
+// review the bearer token; a cluster configured to trust a CI provider's OIDC
+// issuer therefore accepts that provider's workload token here with nothing
+// added. A secret nobody stores is a secret nobody leaks.
+//
+// The token returned is echoed back in `status.lastHandledReconcileAt`, so a
+// caller can tell its own request apart from someone else's.
+func (o *Ops) Poll(ctx context.Context, namespace, beaconName string) (string, error) {
+	b, err := o.Beacon(ctx, namespace, beaconName)
+	if err != nil {
+		return "", err
+	}
+	if b.Spec.Suspend {
+		// The Beacon would acknowledge the request and poll nothing, which
+		// reads as success. A suspended Beacon is a deliberate state and
+		// saying so beats a 200 that changed nothing.
+		return "", &RefusedError{Action: "poll", Reason: fmt.Sprintf(
+			"Beacon %s is suspended, so it would acknowledge this and look at nothing", beaconName)}
+	}
+
+	// Nanoseconds, because a Beacon poked twice within the same second must see
+	// two distinct values or the second request looks like the first one
+	// arriving again and no reconcile is triggered.
+	token := strconv.FormatInt(o.now().UnixNano(), 10)
+
+	// A merge patch on annotations, not read-modify-write: this is one
+	// idempotent field on an object a controller is updating, and the abort
+	// path already learnt that Update loses that race often enough to matter.
+	patch := fmt.Sprintf(`{"metadata":{"annotations":{%q:%q}}}`, v1alpha1.AnnotationReconcile, token)
+	if err := o.Client.Patch(ctx, b, client.RawPatch(types.MergePatchType, []byte(patch))); err != nil {
+		return "", fmt.Errorf("asking Beacon %s to poll: %w", beaconName, err)
+	}
+	return token, nil
 }

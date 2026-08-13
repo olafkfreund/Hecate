@@ -54,6 +54,11 @@ var (
 	ActionApprove = Action{Verb: "update", Resource: "bundles/status"}
 	// ActionAbort stops a running Passage.
 	ActionAbort = Action{Verb: "update", Resource: "passages"}
+	// ActionPoll asks a Beacon to look at its sources now. A separate verb
+	// from reading, so a CI job's identity can be allowed to poke a Beacon
+	// without being able to read every Gate in the namespace — which is the
+	// whole grant a webhook needs.
+	ActionPoll = Action{Verb: "update", Resource: "beacons"}
 )
 
 // ErrUnauthenticated means no usable credential was presented.

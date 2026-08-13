@@ -68,6 +68,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/passages/{name}",
 		s.guard(ActionRead, s.getPassage))
 
+	mux.Handle("POST /api/v1alpha1/namespaces/{namespace}/beacons/{name}/poll",
+		s.guard(ActionPoll, s.pollBeacon))
 	mux.Handle("POST /api/v1alpha1/namespaces/{namespace}/gates/{name}/promote",
 		s.guard(ActionPromote, s.promote))
 	mux.Handle("POST /api/v1alpha1/namespaces/{namespace}/bundles/{name}/approve",
@@ -162,6 +164,23 @@ func (s *Server) listBundles(ctx context.Context, _ Subject, r *http.Request) (a
 
 func (s *Server) getBundle(ctx context.Context, _ Subject, r *http.Request) (any, error) {
 	return s.Ops.Bundle(ctx, r.PathValue("namespace"), r.PathValue("name"))
+}
+
+// pollBeacon asks a Beacon to look at its sources now.
+//
+// The inbound webhook endpoint (#102): a git host or registry calls this after
+// a push, and discovery drops from the poll interval to seconds. Authenticated
+// like everything else here, by asking Kubernetes to review the bearer token,
+// so a cluster that trusts a CI provider's OIDC issuer accepts that provider's
+// workload token with nothing added and no shared secret to leak.
+func (s *Server) pollBeacon(ctx context.Context, _ Subject, r *http.Request) (any, error) {
+	token, err := s.Ops.Poll(ctx, r.PathValue("namespace"), r.PathValue("name"))
+	if err != nil {
+		return nil, err
+	}
+	// Echoed back so a caller can match it against status.lastHandledReconcileAt
+	// and know its own request was the one that landed.
+	return map[string]string{"requestedAt": token}, nil
 }
 
 // bundleEvidence answers "why was this allowed into production, and who

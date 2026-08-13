@@ -81,6 +81,27 @@ spec:
           expectedRevision: ${{ steps.commit.sha }}
 ```
 
+### Discovery without waiting for the interval
+
+A Beacon polls on its own schedule. To make a push land in seconds instead,
+have CI tell it to look now:
+
+```yaml
+# .github/workflows/release.yml
+- name: Tell Hecate to look
+  run: |
+    curl -fsS -X POST \
+      -H "Authorization: Bearer $(cat $ACTIONS_ID_TOKEN_FILE)" \
+      https://hecate.acme.example/api/v1alpha1/namespaces/acme/beacons/podinfo/poll
+```
+
+No shared secret and no HMAC to verify: the call is authenticated the way every
+other call to the API is, by asking Kubernetes to review the bearer token. A
+cluster configured to trust your CI provider's OIDC issuer accepts its workload
+token here with nothing added — the same posture Flux v2.9 moved to with
+OIDC-secured Receivers. The identity needs `update` on `beacons` and nothing
+else, so a CI job that may poke a Beacon still cannot read your Gates.
+
 ### Asking what is going on
 
 ```console
