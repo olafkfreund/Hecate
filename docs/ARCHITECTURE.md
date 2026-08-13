@@ -219,6 +219,65 @@ when a served version differs from our default, and status fixtures captured per
 supported Flux minor so a contract change fails a unit test in milliseconds. See
 [D4](DECISIONS.md), amended.
 
+## Upgrading the control plane
+
+What the API promises, and what happens to work already under way.
+
+**`v1alpha1` promises nothing, and that is what alpha means.** Any field may
+change or be removed in the next alpha, per the lifecycle policy in the
+development plan. A stable field list is a `v1` deliverable, not something to
+assert early — declaring stability we have not earned is worse than declaring
+none, because the second is checkable.
+
+**CRDs go first, and Hecate enforces it.** Helm installs a chart's `crds/` once
+and never touches them on upgrade, so a chart upgrade alone ships a new
+controller against the old API — and the API server prunes unknown fields
+silently rather than rejecting them. A controller would then write
+`status.evidence` and read back nothing, for ever, with no error anywhere.
+
+So the controller checks at startup and refuses to run against CRDs older than
+itself, naming the fields that are missing:
+
+```
+the cluster's CRDs are older than this build of Hecate.
+  gates.hecate.dev
+    status.evidence
+    status.evidence.risk
+    ...
+Helm does not upgrade CRDs. Apply them, then restart:
+  kubectl apply --server-side -f <release>/crds.yaml
+```
+
+A missed upgrade is therefore a failed rollout — loud, immediate, and holding
+the previous version — rather than a behaviour change nobody can see. Measured:
+removing one field from the Gate CRD put the new pod into CrashLoopBackOff with
+the message above, while the old replica kept reconciling throughout, and
+applying the CRDs let the rollout complete.
+
+**An in-flight crossing survives the upgrade.** A Passage is the record of what
+happened, held in its own status, so a controller that restarts picks up where
+the object says it is:
+
+- **Finished steps are not re-run.** Their phase, attempt count and
+  `finishedAt` are already written down. Measured across a rolling restart: a
+  succeeded `http` step kept `attempts: 1` and its original timestamp.
+- **The running step is re-entered, not restarted.** D5 requires steps to be
+  re-entrant precisely so this is safe; the step's attempt count continues
+  upward and its work resumes.
+- **The scratch directory is lost**, and that is designed for (D19). A
+  `git-clone` clones again. Making it durable would mean a PersistentVolume per
+  Passage to avoid re-running a clone.
+- **The crossing does not restart from the beginning**, and `status.startedAt`
+  does not move — which matters, because it is what the lead-time metric is
+  measured from.
+
+**What an upgrade does not do** is change what an in-flight Passage is running.
+`spec.steps` is copied from the Gate at creation — see the field's own
+documentation in `api/v1alpha1/passage.go` — so a Gate edited during
+the upgrade — or a step whose behaviour changed between versions — cannot
+retroactively alter a crossing that is already under way. The crossing finishes
+under the rules it started with.
+
 ## The step engine
 
 Steps are **invoked repeatedly rather than blocking**. A step that is waiting returns

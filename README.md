@@ -342,6 +342,33 @@ charts/hecate/        Helm chart. CRDs and RBAC are generated, never hand-edited
 charts/hecate/crds/   Generated CRDs.
 ```
 
+## Upgrading
+
+CRDs first, then the chart. Helm installs a chart's `crds/` once and never
+touches them again, so upgrading the chart alone runs a new controller against
+the old API — and the API server prunes unknown fields silently rather than
+rejecting them.
+
+```console
+$ kubectl apply --server-side -f \
+    https://github.com/olafkfreund/Hecate/releases/download/v0.1.0/crds.yaml
+$ helm upgrade hecate oci://ghcr.io/olafkfreund/charts/hecate --version 0.1.0 \
+    --namespace hecate-system
+```
+
+Skipping the first step is a failed rollout rather than a silent behaviour
+change: the controller refuses to start against CRDs older than itself and
+names the fields that are missing, while the previous version keeps running.
+
+**A crossing already under way survives.** Finished steps are not re-run, the
+running one is re-entered where it was, and the crossing finishes under the
+rules it started with — an upgrade cannot retroactively change what an
+in-flight Passage is doing. [The details, and how they were
+measured](docs/ARCHITECTURE.md#upgrading-the-control-plane).
+
+`v1alpha1` promises no field stability; that is what alpha means. A stable
+field list is a v1 deliverable.
+
 ## Compatibility
 
 | | Supported | Proved by |
