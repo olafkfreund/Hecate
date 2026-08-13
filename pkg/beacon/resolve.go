@@ -40,7 +40,7 @@ func (r *Resolver) Resolve(ctx context.Context, namespace string, w v1alpha1.Wat
 	case w.Chart != nil:
 		return r.resolveChart(ctx, namespace, *w.Chart)
 	case w.Git != nil:
-		return v1alpha1.Artifact{}, &ErrUnsupported{What: "git watches"}
+		return r.resolveGit(ctx, namespace, *w.Git)
 	default:
 		return v1alpha1.Artifact{}, fmt.Errorf("watch source has no image, chart or git set")
 	}

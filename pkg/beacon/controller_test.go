@@ -196,9 +196,13 @@ func TestDiscoveredIsRecordedWithoutEmitting(t *testing.T) {
 // A Bundle missing one of its artifacts would promote an incomplete set.
 func TestPartialResolutionEmitsNothing(t *testing.T) {
 	repo, _ := pushTags(t, "acme/podinfo", "6.1.0")
+	// Platform digest resolution is the remaining declared-but-unimplemented
+	// option; git watches used to stand in here and resolve now (#106).
 	b := beaconWith(
 		imageWatch(repo),
-		v1alpha1.WatchSource{Git: &v1alpha1.GitWatch{Repo: "https://github.com/acme/app", Branch: "main"}},
+		v1alpha1.WatchSource{Image: &v1alpha1.ImageWatch{
+			Repo: repo, Platform: "linux/arm64",
+		}},
 	)
 	r, c, _ := newReconciler(t, b)
 

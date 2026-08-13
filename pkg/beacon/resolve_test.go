@@ -140,20 +140,11 @@ func TestResolveImage(t *testing.T) {
 	})
 }
 
+// Chart (#105) and git (#106) watches used to be listed here as unsupported and
+// both resolve now. ErrUnsupported still guards platform digest resolution, in
+// TestPlatformIsRefusedNotIgnored.
 func TestResolveUnsupportedKinds(t *testing.T) {
 	r := &Resolver{}
-	for name, w := range map[string]v1alpha1.WatchSource{
-		// Chart watches used to be here and are implemented now (#105).
-		"git": {Git: &v1alpha1.GitWatch{Repo: "https://github.com/acme/app", Branch: "main"}},
-	} {
-		t.Run(name, func(t *testing.T) {
-			_, err := r.Resolve(context.Background(), "acme", w)
-			var unsupported *ErrUnsupported
-			if !errors.As(err, &unsupported) {
-				t.Errorf("want ErrUnsupported, got %T: %v", err, err)
-			}
-		})
-	}
 
 	t.Run("empty watch source", func(t *testing.T) {
 		if _, err := r.Resolve(context.Background(), "acme", v1alpha1.WatchSource{}); err == nil {

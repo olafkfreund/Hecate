@@ -1612,3 +1612,45 @@ effect of the normal one. Nobody has asked for it, so it is not built.
 **Both sides now have the test that was missing.** `TestApprovalIsRequiredWhenAsked`
 says an approval is needed; `TestApprovalDoesNotSkipUpstreamOrdering` says it is
 not sufficient. The second one fails if anyone reorders those two checks.
+
+## D52 — A path filter walks back; it does not refuse
+
+*2026-08-13 — #106*
+
+`GitWatch.Paths` exists so a monorepo does not promote every service on every
+commit. The field promises that "a commit touching nothing in these paths
+produces no Bundle", and there are two ways to keep that promise.
+
+**Refusing** — resolve to nothing when the branch head does not touch the paths
+— keeps it and is simpler. It also means a Beacon pointed at a repository whose
+head happens to be unrelated resolves to nothing at all, and stays that way
+until somebody commits in those paths. A watch has to be able to say what is
+there now, not only what has changed since it was created; the first thing a new
+Beacon does is describe the current state, and "nothing" is a wrong answer to
+that.
+
+**Walking back** — resolve to the newest commit that did touch them — keeps the
+promise the same way, because the resolved SHA does not move when an unrelated
+commit lands, so no new Bundle is emitted. It also answers the bootstrap case.
+That is what is implemented.
+
+**Bounded at 200 commits.** A path nobody has touched in that many commits
+resolves to `ErrNoMatch` naming the window, rather than the Beacon fetching an
+entire history on every poll. The upgrade path is a deeper clone, not an
+unbounded one.
+
+**No clone at all when there is no path filter.** A branch head and a tag list
+both come from `ls-remote`, which is one round trip. Fetching a repository to
+learn something the ref advertisement already said would make every Beacon poll
+clone a monorepo.
+
+**Peeled refs are requested explicitly.** go-git's default is `IgnorePeeled`, so
+an annotated tag resolves to the tag object rather than the commit — a SHA no
+checkout of the working tree ever produces, which every downstream comparison
+would miss. Real repositories use annotated tags: fluxcd/flux2's `v2.9.4` is a
+tag object at `ed8c5f2c` pointing at commit `889be9d6`.
+
+**Credentials come from pkg/git, shared with the promotion steps.** A Beacon and
+a `git-clone` step are handed the same `credentialsRef` for the same
+repository. Two implementations of "what does this Secret mean?" is how a Beacon
+ends up unable to see a repository its own step writes to daily.

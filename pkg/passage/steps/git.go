@@ -14,14 +14,10 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport"
-	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
-	gitssh "github.com/go-git/go-git/v5/plumbing/transport/ssh"
-	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/knownhosts"
-	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/olafkfreund/hecate/api/v1alpha1"
+	hgit "github.com/olafkfreund/hecate/pkg/git"
 	"github.com/olafkfreund/hecate/pkg/passage"
 )
 
@@ -56,58 +52,16 @@ const (
 const defaultCheckout = "repo"
 
 // gitAuth resolves credentials for a repository.
+//
+// A thin wrapper over pkg/git, which a Beacon watching the same repository
+// uses too. Two answers to "what does this Secret mean?" is how a Beacon ends
+// up unable to see a repository its own promotion step writes to daily.
 type gitAuth struct{ client client.Client }
 
-// resolve builds a transport auth method from a Secret, or nil for public
-// repositories and ambient credentials.
 func (g gitAuth) resolve(
 	ctx context.Context, namespace string, ref *v1alpha1.LocalSecretRef,
 ) (transport.AuthMethod, error) {
-	if ref == nil {
-		return nil, nil
-	}
-	if g.client == nil {
-		return nil, fmt.Errorf("credentialsRef %q set but the step has no client", ref.Name)
-	}
-
-	var secret corev1.Secret
-	if err := g.client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: ref.Name}, &secret); err != nil {
-		return nil, fmt.Errorf("reading credentials Secret %s/%s: %w", namespace, ref.Name, err)
-	}
-
-	// An SSH key wins when present: a Secret carrying both is almost certainly
-	// an SSH secret with a username left over from a template.
-	if key, ok := secret.Data["identity"]; ok {
-		user := string(secret.Data["username"])
-		if user == "" {
-			user = "git"
-		}
-		auth, err := gitssh.NewPublicKeys(user, key, string(secret.Data["password"]))
-		if err != nil {
-			return nil, fmt.Errorf("secret %s: unusable SSH key: %w", secret.Name, err)
-		}
-		if hosts, ok := secret.Data["known_hosts"]; ok {
-			cb, err := knownHostsCallback(hosts)
-			if err != nil {
-				return nil, fmt.Errorf("secret %s: %w", secret.Name, err)
-			}
-			auth.HostKeyCallback = cb
-		}
-		return auth, nil
-	}
-
-	username, password := string(secret.Data["username"]), string(secret.Data["password"])
-	if password == "" {
-		return nil, fmt.Errorf(
-			"no usable credentials in Secret %s: expected identity, or username and password",
-			secret.Name)
-	}
-	if username == "" {
-		// Most hosts accept any username with a token; GitHub wants a literal
-		// placeholder rather than an empty string.
-		username = "git"
-	}
-	return &githttp.BasicAuth{Username: username, Password: password}, nil
+	return hgit.Auth(ctx, g.client, namespace, ref)
 }
 
 // classify maps a git error to a stable reason code.
@@ -529,28 +483,3 @@ func (g *GitPush) Run(ctx context.Context, sc *passage.StepContext) (passage.Ste
 	}, nil
 }
 
-// knownHostsCallback builds a host-key checker from a known_hosts file.
-//
-// Written to a temp file because golang.org/x/crypto/ssh's parser takes a path.
-// Verification is not optional: skipping it would accept any host key and make
-// the SSH transport trivially interceptable.
-func knownHostsCallback(hosts []byte) (ssh.HostKeyCallback, error) {
-	f, err := os.CreateTemp("", "hecate-known-hosts-*")
-	if err != nil {
-		return nil, fmt.Errorf("known_hosts: %w", err)
-	}
-	defer func() { _ = os.Remove(f.Name()) }()
-
-	if _, err := f.Write(hosts); err != nil {
-		_ = f.Close()
-		return nil, fmt.Errorf("known_hosts: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return nil, fmt.Errorf("known_hosts: %w", err)
-	}
-	cb, err := knownhosts.New(f.Name())
-	if err != nil {
-		return nil, fmt.Errorf("known_hosts is unusable: %w", err)
-	}
-	return cb, nil
-}
