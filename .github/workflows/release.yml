@@ -168,6 +168,19 @@ jobs:
           fi
           echo "crds.yaml: $got CRDs, $(wc -c < dist/crds.yaml) bytes"
 
+      # Two logins, one per tool, and they are not interchangeable: `helm
+      # registry login` writes helm's own credential store, while cosign reads
+      # Docker's. With only the first, the chart pushes and then the signature
+      # fails with UNAUTHORIZED — which is how the first tag ever pushed died,
+      # after publishing an unsigned chart.
+      - name: Log in to ${{ env.REGISTRY }}
+        if: needs.version.outputs.publish == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Push as an OCI artifact
         if: needs.version.outputs.publish == 'true'
         run: |
