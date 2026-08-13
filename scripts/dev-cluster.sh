@@ -37,6 +37,7 @@ up() {
 
   if k3d cluster list "$CLUSTER" >/dev/null 2>&1; then
     log "cluster $CLUSTER already exists"
+    repair_dns
   else
     log "creating k3d cluster $CLUSTER with a local registry on :$REGISTRY_PORT"
     # A local registry means the dev image never leaves the machine, so the
@@ -121,6 +122,35 @@ gitea_seeded() {
   kubectl -n hecate-git exec deploy/gitea -- curl -sf -o /dev/null \
     -u "${GIT_USER}:${GIT_PASSWORD}" \
     "http://127.0.0.1:3000/api/v1/repos/${GIT_USER}/${GIT_REPO}" >/dev/null 2>&1
+}
+
+# repair_dns restarts the cluster when its nodes cannot resolve a name.
+#
+# Docker gives each container a resolver reached through NAT rules that dockerd
+# owns. Restarting dockerd — or reloading the firewall, which on NixOS a rebuild
+# does — drops those rules under containers that are already running, and they
+# lose DNS until they are recreated. Nothing in the cluster reports this as a
+# DNS problem: containerd fails to pull the pause image, so pods sit in
+# ContainerCreating and every symptom points somewhere else. That cost half an
+# hour once.
+#
+# The repair is a stop/start, which makes Docker rebuild the plumbing. Editing
+# resolv.conf inside the node looks like it works and is worse: Docker rewrites
+# it on the next start, and dropping the embedded resolver also breaks the
+# container-name lookup the local registry needs.
+repair_dns() {
+  local node="k3d-${CLUSTER}-server-0"
+  docker ps --format '{{.Names}}' | grep -qx "$node" || return 0
+  if docker exec "$node" nslookup registry-1.docker.io >/dev/null 2>&1; then
+    return 0
+  fi
+  log "the cluster cannot resolve names — restarting it to rebuild Docker's DNS"
+  k3d cluster stop "$CLUSTER" >/dev/null
+  k3d cluster start "$CLUSTER" >/dev/null
+  if ! docker exec "$node" nslookup registry-1.docker.io >/dev/null 2>&1; then
+    die "the cluster still cannot resolve names after a restart — check the host's own DNS"
+  fi
+  log "DNS restored"
 }
 
 # git_server installs Gitea and seeds the repository the e2e promotion writes to.
