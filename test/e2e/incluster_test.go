@@ -446,3 +446,98 @@ func TestAWaitingPassageDoesNotSpin(t *testing.T) {
 			got, window, int(float64(got)/window.Seconds()))
 	}
 }
+
+// changesIn counts how many times an observable changes during a window.
+//
+// The universal symptom of a controller waking itself: a field that moves when
+// nothing in the world has. Counting changes rather than reconciles because
+// two of the three controllers record a timestamp rather than a counter, and a
+// timestamp is what a reconcile leaves behind.
+func changesIn(t *testing.T, window time.Duration, read func() string) int {
+	t.Helper()
+	last := read()
+	changes := 0
+	deadline := time.Now().Add(window)
+	for time.Now().Before(deadline) {
+		time.Sleep(2 * time.Second)
+		if now := read(); now != last {
+			changes++
+			last = now
+		}
+	}
+	return changes
+}
+
+// TestABeaconHonoursItsInterval is the guard for #122.
+//
+// There is no Gate equivalent, and that is a finding rather than an omission.
+// The Gate has the same shape — status.health.observedAt is stamped every
+// reconcile — but its reconcile is sub-second, so two of them share a
+// timestamp, the write no-ops and the loop cannot start. Measured with the
+// Gate's predicate removed: one change in ninety seconds, which is exactly the
+// fixed behaviour. A test that passes either way asserts nothing, so the
+// Gate's protection is a unit test on the predicate and this comment.
+//
+// Every Beacon reconcile stamps status.lastPolled with the current time, so
+// the write differs from what was there, triggers the Beacon's own watch, and
+// it polls again — going back to the registry continuously while ignoring the
+// interval it was configured with.
+//
+// **The source has to be slow, or this test cannot fail.** metav1.Time has
+// one-second resolution, so two reconciles inside one second write an
+// identical value, the write is a no-op and the loop stops on its own. That is
+// a coincidence rather than a safeguard, and it expires exactly when a poll is
+// slow — which is when hammering the thing being polled is worst. An
+// unroutable address takes tens of seconds to time out, which is what makes
+// the bug observable.
+func TestABeaconHonoursItsInterval(t *testing.T) {
+	ctx := context.Background()
+	c := newClient(t)
+	requireHecateInstalled(t, c)
+	freshNamespace(t, c)
+
+	beacon := &v1alpha1.Beacon{
+		ObjectMeta: metav1.ObjectMeta{Name: "slow", Namespace: namespace},
+		Spec: v1alpha1.BeaconSpec{
+			// An hour, so any movement at all is the Beacon waking itself.
+			Interval: metav1.Duration{Duration: time.Hour},
+			Watch: []v1alpha1.WatchSource{{Image: &v1alpha1.ImageWatch{
+				// Non-routable by RFC 5735. Resolving it takes tens of seconds
+				// to fail, so no two reconciles share a timestamp.
+				Repo: "10.255.255.1:5000/acme/app", Insecure: true,
+			}}},
+		},
+	}
+	mustCreate(t, c, beacon)
+
+	// The first poll has to finish before the measurement means anything: it
+	// is a legitimate change, and it takes as long as the timeout.
+	waitFor(t, 3*time.Minute, "the Beacon's first poll to finish", func() bool {
+		var b v1alpha1.Beacon
+		if err := c.Get(ctx, key(beacon), &b); err != nil {
+			return false
+		}
+		return b.Status.LastPolled != nil
+	})
+
+	const window = 150 * time.Second
+	changes := changesIn(t, window, func() string {
+		var b v1alpha1.Beacon
+		if err := c.Get(ctx, key(beacon), &b); err != nil {
+			return ""
+		}
+		if b.Status.LastPolled == nil {
+			return ""
+		}
+		return b.Status.LastPolled.String()
+	})
+
+	// One allows for a poll that was already in flight when the window opened.
+	// Unfixed, this is two or three: each poll takes about as long as it takes
+	// the address to time out, and the next starts immediately.
+	if changes > 1 {
+		t.Errorf("the Beacon polled %d more times in %s despite a one-hour interval — "+
+			"its own status write is waking it, and every one of those is a request "+
+			"to a registry that is already slow", changes, window)
+	}
+}
