@@ -242,6 +242,16 @@ spec:
                       required:
                       - repo
                       type: object
+                    provider:
+                      description: Provider reads an existing Flux Operator ResourceSetInputProvider.
+                      properties:
+                        name:
+                          description: Name is the ResourceSetInputProvider, in the
+                            Beacon's namespace.
+                          type: string
+                      required:
+                      - name
+                      type: object
                   type: object
                 minItems: 1
                 type: array

@@ -45,7 +45,7 @@ Four resources. That is the whole API.
 
 | | |
 |---|---|
-| **Beacon** | Watches registries, charts and repos. Emits a Bundle when something new appears. |
+| **Beacon** | Watches registries, charts, repos — or a Flux Operator `ResourceSetInputProvider`. Emits a Bundle when something new appears. |
 | **Bundle** | An immutable, content-addressed set of artifact versions. The unit that moves. |
 | **Gate** | An environment, and the threshold a Bundle must cross to enter it. |
 | **Passage** | One attempt to move one Bundle through one Gate. |
@@ -82,6 +82,21 @@ spec:
             - { kind: Kustomization, name: podinfo, namespace: flux-system }
           expectedRevision: ${{ steps.commit.sha }}
 ```
+
+### Reusing Flux Operator's discovery
+
+Flux Operator's `ResourceSetInputProvider` already discovers from GitHub, GitLab,
+Azure DevOps, AWS CodeCommit, Gitea, OCI, ACR, ECR and GAR. A Beacon can read one
+instead of doing it again:
+
+```yaml
+watch:
+  - provider: { name: podinfo-releases }
+```
+
+It names the provider and nothing else. The filter, the semver range and the
+limit live there, and the provider **already sorts what it exports** — so Hecate
+takes the newest and does not apply a second opinion about what "newest" means.
 
 ### Discovery without waiting for the interval
 

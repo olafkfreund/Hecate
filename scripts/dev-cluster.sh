@@ -83,6 +83,17 @@ up() {
     flux install ${FLUX_VERSION:+--version="$FLUX_VERSION"} --components-extra=image-reflector-controller,image-automation-controller
   fi
 
+  # Flux Operator, for the ResourceSetInputProvider a Beacon can watch (#23).
+  # Its CRDs are not part of core Flux, so without this a provider watch cannot
+  # be exercised locally at all.
+  if kubectl get crd resourcesetinputproviders.fluxcd.controlplane.io >/dev/null 2>&1; then
+    log "Flux Operator already installed"
+  else
+    log "installing Flux Operator"
+    helm install flux-operator oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator \
+      --namespace flux-system --wait --timeout 4m >/dev/null
+  fi
+
   git_server
 
   if [ -n "${HECATE_OIDC:-}" ]; then

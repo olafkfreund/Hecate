@@ -39,6 +39,14 @@ rules:
   verbs:
   - create
 - apiGroups:
+  - fluxcd.controlplane.io
+  resources:
+  - resourcesetinputproviders
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - hecate.dev
   resources:
   - beacons

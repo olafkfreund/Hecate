@@ -53,6 +53,10 @@ func (r *Reconciler) now() time.Time {
 // +kubebuilder:rbac:groups=hecate.dev,resources=bundles,verbs=get;list;watch;create;delete
 // +kubebuilder:rbac:groups=hecate.dev,resources=gates;passages,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// Flux Operator's, read only, and optional: the CRD need not exist. Without
+// this grant a provider watch fails with a forbidden that mentions a group
+// most operators have never configured.
+// +kubebuilder:rbac:groups=fluxcd.controlplane.io,resources=resourcesetinputproviders,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // Reconcile polls one Beacon.

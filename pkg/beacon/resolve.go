@@ -41,8 +41,10 @@ func (r *Resolver) Resolve(ctx context.Context, namespace string, w v1alpha1.Wat
 		return r.resolveChart(ctx, namespace, *w.Chart)
 	case w.Git != nil:
 		return r.resolveGit(ctx, namespace, *w.Git)
+	case w.Provider != nil:
+		return r.resolveProvider(ctx, namespace, *w.Provider)
 	default:
-		return v1alpha1.Artifact{}, fmt.Errorf("watch source has no image, chart or git set")
+		return v1alpha1.Artifact{}, fmt.Errorf("watch source has no image, chart, git or provider set")
 	}
 }
 

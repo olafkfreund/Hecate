@@ -90,6 +90,25 @@ type WatchSource struct {
 	Chart *ChartWatch `json:"chart,omitempty"`
 	// +optional
 	Git *GitWatch `json:"git,omitempty"`
+	// Provider reads an existing Flux Operator ResourceSetInputProvider.
+	//
+	// +optional
+	Provider *ProviderWatch `json:"provider,omitempty"`
+}
+
+// ProviderWatch consumes a Flux Operator ResourceSetInputProvider.
+//
+// **It names one and nothing else, deliberately.** The provider already carries
+// the filter, the semver range and the limit, and it already sorts what it
+// exports — newest first, by semver when a range is given and reverse
+// alphabetically otherwise. Mirroring any of that here would mean two
+// components deciding what "newest" means from different rules, which is the
+// duplication this exists to avoid (D15): Flux Operator already discovers from
+// GitHub, GitLab, Azure DevOps, AWS CodeCommit, Gitea, OCI, ACR, ECR and GAR,
+// and Hecate reads its answer rather than computing a second one.
+type ProviderWatch struct {
+	// Name is the ResourceSetInputProvider, in the Beacon's namespace.
+	Name string `json:"name"`
 }
 
 // ImageWatch watches a container image repository.
