@@ -94,6 +94,25 @@ up() {
       --namespace flux-system --wait --timeout 4m >/dev/null
   fi
 
+  # Flagger, for the Canary a Gate can verify against (#21). Not part of core
+  # Flux either, so without it a canary verification cannot be exercised.
+  #
+  # metricsServer must be a syntactically valid URL even when nothing queries
+  # it: an empty one crash-loops the controller with "prometheus address is not
+  # a valid URL", which took a while to read as a configuration problem rather
+  # than a missing dependency. meshProvider=kubernetes keeps it to plain
+  # Services, with no service mesh to install.
+  if kubectl get crd canaries.flagger.app >/dev/null 2>&1; then
+    log "Flagger already installed"
+  else
+    log "installing Flagger"
+    helm repo add flagger https://flagger.app >/dev/null 2>&1 || true
+    helm upgrade --install flagger flagger/flagger --namespace flux-system \
+      --set meshProvider=kubernetes \
+      --set metricsServer=http://prometheus.flux-system:9090 \
+      --wait --timeout 5m >/dev/null
+  fi
+
   git_server
 
   if [ -n "${HECATE_OIDC:-}" ]; then
