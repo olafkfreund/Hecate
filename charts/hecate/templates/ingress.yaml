@@ -1,0 +1,55 @@
+{{- if .Values.ingress.enabled }}
+{{- if not .Values.api.enabled }}
+{{- fail "ingress.enabled without api.enabled routes to nothing — the ingress fronts the API Deployment, which is what serves the UI." }}
+{{- end }}
+{{- if not .Values.ingress.host }}
+{{- fail "ingress.enabled requires ingress.host. A host-less rule matches every request reaching the controller, which on a shared ingress means catching traffic meant for other applications." }}
+{{- end }}
+{{/*
+  Browser access to the API, which is also the UI — the app is a static export
+  embedded in the same binary and served from the same origin (pkg/api/ui.go).
+  One route covers both, and there is no second Service to keep in step.
+
+  Note what this does NOT do: it does not make the UI usable on its own. The UI
+  redirects to /auth/login on a 401, so a reachable ingress without
+  api.oidc.enabled gives a page that loads and immediately bounces. Both are
+  needed, and neither implies the other, so neither defaults the other on.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "hecate.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "hecate.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+  {{- with .Values.ingress.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host | quote }}
+      {{- with .Values.ingress.tls.secretName }}
+      secretName: {{ . }}
+      {{- end }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          # Prefix on "/" rather than a list of routes: the UI is a static
+          # export whose paths are its directory layout, so enumerating them
+          # here would mean editing the chart every time a page is added.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "hecate.fullname" . }}-api
+                port:
+                  number: {{ .Values.api.service.port }}
+{{- end }}

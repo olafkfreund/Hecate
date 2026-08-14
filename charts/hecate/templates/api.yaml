@@ -57,6 +57,27 @@ spec:
             - --tls-cert-file=/etc/hecate/tls/tls.crt
             - --tls-private-key-file=/etc/hecate/tls/tls.key
             {{- end }}
+            {{- if .Values.api.oidc.enabled }}
+            - --oidc-issuer={{ required "api.oidc.issuer is required when api.oidc.enabled" .Values.api.oidc.issuer }}
+            - --oidc-client-id={{ required "api.oidc.clientID is required when api.oidc.enabled" .Values.api.oidc.clientID }}
+            - --oidc-redirect-url={{ required "api.oidc.redirectURL is required when api.oidc.enabled — the provider rejects a mismatch before Hecate sees the request" .Values.api.oidc.redirectURL }}
+            - --oidc-scopes={{ .Values.api.oidc.scopes }}
+            {{- if .Values.api.oidc.insecureCookie }}
+            - --oidc-insecure-cookie
+            {{- end }}
+            {{- end }}
+          {{- if .Values.api.oidc.enabled }}
+          env:
+            # From a Secret rather than an argument: a client secret on a
+            # command line is visible in `ps` and in every process listing,
+            # which is why hecate-api reads this one from the environment and
+            # takes no flag for it.
+            - name: HECATE_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "api.oidc.clientSecretRef.name is required when api.oidc.enabled" .Values.api.oidc.clientSecretRef.name }}
+                  key: {{ .Values.api.oidc.clientSecretRef.key }}
+          {{- end }}
           ports:
             - name: {{ if .Values.api.tls.secretName }}https{{ else }}http{{ end }}
               containerPort: {{ .Values.api.port }}
