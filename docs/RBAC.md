@@ -91,6 +91,38 @@ An automatic crossing records no deployer at all. Hecate is not a person, and
 naming it would let a change pass four-eyes with two humans and a robot — the
 change gate then holds on "no deployer recorded", which is correct.
 
+## Credentials to git hosts
+
+Separate from the permissions above, which are Kubernetes'. These are what
+Hecate presents to GitHub or GitLab, and they live in a Secret named by a
+`credentialsRef`.
+
+**Prefer a GitHub App.** A Secret carrying `clientID`, `installationID` and
+`privateKey` mints an installation token that expires in an hour and is scoped
+to the installation. A personal access token in a Secret is long-lived, broadly
+scoped, and rotated by whoever remembers — for a tool whose pitch is that
+promotion should be evidence-gated rather than merge-rights-gated, a permanent
+write credential to every fleet repository is the weakest part of the threat
+model.
+
+```yaml
+stringData:
+  clientID: Iv1.abc123           # or appID
+  installationID: "42"
+  privateKey: |
+    -----BEGIN RSA PRIVATE KEY-----
+    ...
+  baseURL: https://ghe.acme.example/api/v3   # Enterprise Server only
+```
+
+One Secret serves both halves of a promotion. The installation token works as a
+git password as well as an API token, so the same credential pushes the commit
+and opens the pull request — two credential paths, one short-lived and one not,
+would leave the permanent one in place and change nothing.
+
+A Secret with `token`, or `username` and `password`, still works and is
+unchanged. The App path is an addition.
+
 ## The controller's own permissions
 
 Separate from all of the above, in `charts/hecate/rbac/`. It is generated from

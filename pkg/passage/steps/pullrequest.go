@@ -11,6 +11,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/olafkfreund/hecate/api/v1alpha1"
+	"github.com/olafkfreund/hecate/pkg/githubapp"
 	"github.com/olafkfreund/hecate/pkg/passage"
 	"github.com/olafkfreund/hecate/pkg/provider"
 )
@@ -260,13 +261,53 @@ func apiToken(
 		return "", passage.FailTerminal(ReasonInvalidConfig,
 			"%s: reading Secret %s/%s: %s", step, namespace, ref.Name, err)
 	}
+	// A GitHub App credential first, because it is the better one and because a
+	// Secret carrying both is carrying a fallback nobody meant to rely on.
+	//
+	// The token it mints works as an API token *and* as a git password, so the
+	// git steps that push resolve the same Secret to the same credential —
+	// which is the point. Two credential paths, one short-lived and one not,
+	// would leave the permanent one in place and change nothing (#118).
+	if githubapp.HasAppKeys(secret.Data) {
+		token, err := appToken(ctx, secret.Data, step)
+		if err != nil {
+			return "", err
+		}
+		return token, nil
+	}
+
 	for _, key := range []string{"token", "password"} {
 		if v := string(secret.Data[key]); v != "" {
 			return v, nil
 		}
 	}
 	return "", passage.FailTerminal(ReasonInvalidConfig,
-		"%s: Secret %s has no token or password", step, ref.Name)
+		"%s: Secret %s has no token, password or GitHub App key", step, ref.Name)
+}
+
+// appToken mints an installation token from a GitHub App Secret.
+//
+// Sources are cached per Secret content: a Passage's steps each resolve
+// credentials independently, and minting a token per step would turn one
+// promotion into several API calls against a rate limit that is shared with
+// everything else the App does.
+func appToken(ctx context.Context, data map[string][]byte, step string) (string, error) {
+	creds, err := githubapp.FromSecret(data, string(data["baseURL"]))
+	if err != nil {
+		return "", passage.FailTerminal(ReasonInvalidConfig, "%s: %s", step, err)
+	}
+	src, err := githubapp.SourceFor(creds)
+	if err != nil {
+		return "", passage.FailTerminal(ReasonInvalidConfig, "%s: %s", step, err)
+	}
+	token, err := src.Token(ctx)
+	if err != nil {
+		// Not terminal: an installation token is minted over the network, and a
+		// GitHub that is briefly unavailable is worth retrying rather than
+		// failing the crossing over.
+		return "", fmt.Errorf("%s: %w", step, err)
+	}
+	return token, nil
 }
 
 // providerError classifies a host's refusal. A bad token will not become good
