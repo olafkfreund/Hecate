@@ -20,6 +20,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	corev1 "k8s.io/api/core/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/clientcmd"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -116,8 +117,15 @@ func run(namespace string, allowWrites bool, actor string) error {
 	if err != nil {
 		return fmt.Errorf("no Kubernetes configuration: %w", err)
 	}
+	// corev1 as well as v1alpha1: recording an approval reads the Fides
+	// credentials from a Secret, and a scheme without it fails at that point
+	// with "no kind is registered for the type v1.Secret" rather than at
+	// startup. The CLI had the same gap (cmd/hecate/status.go).
 	scheme := k8sruntime.NewScheme()
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
+		return err
+	}
+	if err := corev1.AddToScheme(scheme); err != nil {
 		return err
 	}
 	c, err := client.New(cfg, client.Options{Scheme: scheme})
