@@ -4,8 +4,8 @@ description: Promotion and release orchestration for FluxCD
 type: application
 # Chart version and appVersion move together; there is no independent chart
 # lifecycle to track and two numbers would only drift.
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.2.0
+appVersion: "0.2.0"
 home: https://olafkfreund.github.io/Hecate
 sources:
   - https://github.com/olafkfreund/Hecate
