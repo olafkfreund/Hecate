@@ -23,6 +23,7 @@ import (
 	"github.com/olafkfreund/hecate/pkg/health"
 	"github.com/olafkfreund/hecate/pkg/metrics"
 	"github.com/olafkfreund/hecate/pkg/passage"
+	"github.com/olafkfreund/hecate/pkg/verify"
 )
 
 const (
@@ -68,6 +69,9 @@ type Reconciler struct {
 	// controller that refuses to start because nobody wired a registry.
 	Steps    *passage.Registry
 	Recorder record.EventRecorder
+	// Verifiers is the verifier registry, injectable for tests. Nil uses the
+	// built-in set.
+	Verifiers map[string]Verifier
 	// Now is the clock, injectable for tests.
 	Now func() time.Time
 }
@@ -84,6 +88,9 @@ func (r *Reconciler) now() time.Time {
 // +kubebuilder:rbac:groups=hecate.dev,resources=bundles,verbs=get;list;watch
 // +kubebuilder:rbac:groups=hecate.dev,resources=bundles/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=hecate.dev,resources=passages,verbs=get;list;watch;create;delete
+// Flagger's, read only and optional: the CRD need not exist unless a Gate
+// declares a canary verification.
+// +kubebuilder:rbac:groups=flagger.app,resources=canaries,verbs=get;list;watch
 
 // Reconcile brings one Gate up to date.
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -123,7 +130,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// Record finished crossings before judging eligibility, so a Passage that
 	// just succeeded is reflected in `current` rather than leaving its Bundle
 	// looking eligible for a Gate it is already in.
-	active, latest, err := r.observePassages(ctx, &gate)
+	active, latest, unverified, err := r.observePassages(ctx, &gate)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -144,7 +151,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	gate.Status.Eligible = names(eligible)
 
 	reason, message := r.advance(ctx, &gate, candidates, bundles.Items, active)
-	r.setReady(&gate, metav1.ConditionTrue, reason, message)
+	status := metav1.ConditionTrue
+	// A crossing that has not verified outranks whatever advance found to say.
+	// Without this the Gate reports "Idle: already in this Gate" — true, and
+	// useless, on a Gate whose canary has just rolled back.
+	if unverified != "" {
+		status, reason, message = metav1.ConditionFalse, "Verifying", unverified
+	}
+	r.setReady(&gate, status, reason, message)
 
 	// After advance, so a Passage it has just opened is already named in
 	// status and protected, and after observePassages, so `current` names the
@@ -290,6 +304,45 @@ func blockedReason(gateName string, b *v1alpha1.Bundle) string {
 	return "no reason recorded"
 }
 
+// verify runs the Gate's verifiers and reports whether the crossing is proven.
+//
+// All of them must pass, and the first that has not is what the Gate reports:
+// a Gate that verified against three things and mentioned one is a Gate whose
+// operator fixes one problem at a time and is surprised twice.
+func (r *Reconciler) verify(ctx context.Context, gate *v1alpha1.Gate) (bool, string, error) {
+	for _, v := range gate.Spec.Verify {
+		verifier, ok := r.verifiers()[v.Uses]
+		if !ok {
+			// Named but unknown is a refusal, not a pass. Skipping it would
+			// clear the Bundle on the strength of a verifier nobody ran.
+			return false, "", fmt.Errorf("no verifier named %q", v.Uses)
+		}
+		var raw []byte
+		if v.With != nil {
+			raw = v.With.Raw
+		}
+		res, err := verifier.Verify(ctx, gate.Namespace, raw)
+		if err != nil {
+			return false, "", err
+		}
+		if !res.Verified {
+			return false, res.Reason, nil
+		}
+	}
+	return true, "", nil
+}
+
+// verifiers is the registry, defaulted so a Reconciler built without one still
+// verifies rather than silently clearing everything.
+func (r *Reconciler) verifiers() map[string]Verifier {
+	if r.Verifiers != nil {
+		return r.Verifiers
+	}
+	return map[string]Verifier{
+		verify.VerifierFlagger: &verify.Flagger{Client: r.Client},
+	}
+}
+
 // startPassage creates a Passage, copying the Gate's steps into it.
 //
 // Copied rather than referenced: editing a Gate must not retroactively change
@@ -350,13 +403,13 @@ func NewPassage(gate *v1alpha1.Gate, bundle *v1alpha1.Bundle, actor string) *v1a
 // together with the most recent finished one.
 func (r *Reconciler) observePassages(
 	ctx context.Context, gate *v1alpha1.Gate,
-) (active, latest *v1alpha1.Passage, err error) {
+) (active, latest *v1alpha1.Passage, unverified string, err error) {
 	var passages v1alpha1.PassageList
 	if err := r.List(ctx, &passages,
 		client.InNamespace(gate.Namespace),
 		client.MatchingLabels{LabelGate: gate.Name},
 	); err != nil {
-		return nil, nil, fmt.Errorf("listing Passages: %w", err)
+		return nil, nil, "", fmt.Errorf("listing Passages: %w", err)
 	}
 
 	var newest *v1alpha1.Passage
@@ -373,11 +426,13 @@ func (r *Reconciler) observePassages(
 	}
 
 	if newest != nil {
-		if err := r.recordOutcome(ctx, gate, newest); err != nil {
-			return nil, nil, err
+		reason, err := r.recordOutcome(ctx, gate, newest)
+		if err != nil {
+			return nil, nil, "", err
 		}
+		unverified = reason
 	}
-	return active, newest, nil
+	return active, newest, unverified, nil
 }
 
 // adopted returns the health checks a finished Passage asked the Gate to keep
@@ -399,14 +454,23 @@ func adopted(latest *v1alpha1.Passage) []v1alpha1.HealthCheck {
 // The Gate controller owns this write rather than the Passage controller: it is
 // the component that knows whether verification passed, and one writer per
 // field avoids two controllers racing over the same status.
-func (r *Reconciler) recordOutcome(ctx context.Context, gate *v1alpha1.Gate, passage *v1alpha1.Passage) error {
-	if gate.Status.Current != nil && gate.Status.Current.Passage == passage.Name {
-		return nil // already recorded
+func (r *Reconciler) recordOutcome(ctx context.Context, gate *v1alpha1.Gate, passage *v1alpha1.Passage) (unverified string, err error) {
+	// `current` alone is not "already recorded" once verification exists.
+	//
+	// Current and history are written as soon as the crossing succeeds — that
+	// is what is deployed, verified or not — but `cleared` waits for the
+	// verdict. Returning here on current alone meant a canary that passed
+	// after the first look never cleared the Bundle, because the second
+	// reconcile short-circuited before the verifier ran. Caught against a real
+	// Canary; every unit test passed.
+	recorded := gate.Status.Current != nil && gate.Status.Current.Passage == passage.Name
+	if recorded && passage.Status.Phase != v1alpha1.PassageSucceeded {
+		return "", nil
 	}
 
 	var bundle v1alpha1.Bundle
 	if err := r.Get(ctx, client.ObjectKey{Namespace: gate.Namespace, Name: passage.Spec.Bundle}, &bundle); err != nil {
-		return client.IgnoreNotFound(err)
+		return "", client.IgnoreNotFound(err)
 	}
 
 	crossing := v1alpha1.GateCrossing{
@@ -427,12 +491,12 @@ func (r *Reconciler) recordOutcome(ctx context.Context, gate *v1alpha1.Gate, pas
 				bundle.Status.Blocked = bundle.Status.Blocked[:BlockedLimit]
 			}
 			if err := r.Status().Update(ctx, &bundle); err != nil {
-				return fmt.Errorf("recording blocked crossing on Bundle %s: %w", bundle.Name, err)
+				return "", fmt.Errorf("recording blocked crossing on Bundle %s: %w", bundle.Name, err)
 			}
 		}
 		r.event(gate, corev1.EventTypeWarning, "CrossingFailed",
 			fmt.Sprintf("Bundle %s did not cross: %s", bundle.Name, passage.Status.Message))
-		return nil
+		return "", nil
 	}
 
 	occupant := v1alpha1.GateOccupant{
@@ -442,16 +506,40 @@ func (r *Reconciler) recordOutcome(ctx context.Context, gate *v1alpha1.Gate, pas
 		EnteredAt: metav1.Time{Time: r.now()},
 		Actor:     passage.Spec.Actor,
 	}
-	gate.Status.Current = &occupant
-	gate.Status.History = append([]v1alpha1.GateOccupant{occupant}, gate.Status.History...)
-	if len(gate.Status.History) > HistoryLimit {
-		gate.Status.History = gate.Status.History[:HistoryLimit]
+	// Only on the first pass. A succeeded crossing is reconsidered on later
+	// reconciles so a verdict that arrives late still clears the Bundle, and
+	// re-appending here would grow the history once per reconcile — the
+	// unbounded-list shape of #121, in the one list that was already capped.
+	if !recorded {
+		gate.Status.Current = &occupant
+		gate.Status.History = append([]v1alpha1.GateOccupant{occupant}, gate.Status.History...)
+		if len(gate.Status.History) > HistoryLimit {
+			gate.Status.History = gate.Status.History[:HistoryLimit]
+		}
 	}
 
-	// `cleared` means crossed *and* verified. Verification is not implemented
-	// yet (#21); when it is, this write is the single place it gates. Until
-	// then a successful crossing is treated as cleared, which is correct for a
-	// Gate that declares no verification.
+	// `cleared` means crossed *and* verified, and this write is the single
+	// place verification gates (#21). A Gate that declares no verification
+	// clears on a successful crossing, which is what it is asking for.
+	//
+	// A crossing that has not verified yet is not recorded as cleared and not
+	// recorded as blocked either: it is still being judged, and the Gate says
+	// so. Downstream Gates read `cleared`, so nothing is admitted on the
+	// strength of a canary that is still running — or one that rolled back,
+	// which leaves a perfectly healthy Deployment serving the previous
+	// version. That divergence is the whole reason verification is not health.
+	verified, unverified, err := r.verify(ctx, gate)
+	if err != nil {
+		return "", fmt.Errorf("verifying the crossing of %s: %w", bundle.Name, err)
+	}
+	if !verified {
+		// Returned rather than written as a condition here: advance sets the
+		// Ready condition after this runs and would overwrite it, leaving
+		// "Idle: already in this Gate" on a Gate whose canary just rolled
+		// back — true, useless, and the same shape of misleading status as
+		// #121.
+		return unverified, nil
+	}
 	//
 	// **Not capped, unlike Blocked above, and the asymmetry is deliberate.**
 	// This list is load-bearing: HasCleared is the upstream-ordering check, so
@@ -468,13 +556,13 @@ func (r *Reconciler) recordOutcome(ctx context.Context, gate *v1alpha1.Gate, pas
 	if !hasCrossing(bundle.Status.Cleared, passage.Name) {
 		bundle.Status.Cleared = append(bundle.Status.Cleared, crossing)
 		if err := r.Status().Update(ctx, &bundle); err != nil {
-			return fmt.Errorf("recording crossing on Bundle %s: %w", bundle.Name, err)
+			return "", fmt.Errorf("recording crossing on Bundle %s: %w", bundle.Name, err)
 		}
 	}
 
 	r.event(gate, corev1.EventTypeNormal, "BundleCrossed",
 		fmt.Sprintf("Bundle %s crossed via Passage %s", bundle.Name, passage.Name))
-	return nil
+	return "", nil
 }
 
 // assess reports the Gate's health, over both what the operator declared and
@@ -688,4 +776,11 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 			})).
 		Named("gate").
 		Complete(r)
+}
+
+// Verifier answers whether a crossing actually worked, as opposed to whether
+// what it deployed is running. See pkg/verify.
+type Verifier interface {
+	Name() string
+	Verify(ctx context.Context, namespace string, config []byte) (verify.Result, error)
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/olafkfreund/hecate/api/v1alpha1"
 	"github.com/olafkfreund/hecate/pkg/health"
 	"github.com/olafkfreund/hecate/pkg/metrics"
+	"github.com/olafkfreund/hecate/pkg/verify"
 )
 
 func scheme(t *testing.T) *runtime.Scheme {
@@ -910,5 +911,201 @@ func TestAGateIsNotWokenByItsOwnStatusWrite(t *testing.T) {
 	poked.Annotations = map[string]string{v1alpha1.AnnotationReconcile: "1786620716793895315"}
 	if !p.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: poked}) {
 		t.Error("a reconcile request did not wake the Gate")
+	}
+}
+
+// stubVerifier answers whatever the test says, so the Gate's behaviour is
+// tested rather than Flagger's.
+type stubVerifier struct {
+	result verify.Result
+	err    error
+}
+
+func (s stubVerifier) Name() string { return "flagger" }
+func (s stubVerifier) Verify(context.Context, string, []byte) (verify.Result, error) {
+	return s.result, s.err
+}
+
+func verifyingGate(name string, admissions ...v1alpha1.Admission) *v1alpha1.Gate {
+	g := autoGate(name, admissions...)
+	g.Spec.Verify = []v1alpha1.Verification{{Uses: "flagger"}}
+	return g
+}
+
+// #21's done-when, end to end: a failed canary in staging stops production
+// from admitting the Bundle.
+//
+// A rolled-back canary leaves a healthy Deployment serving the previous
+// version, so the crossing succeeded and every health check passes while
+// nothing was delivered. `cleared` is what downstream Gates read, so gating
+// that write is what makes the difference visible.
+func TestAFailedCanaryStopsTheBundleReachingProduction(t *testing.T) {
+	staging := verifyingGate("staging", admits("podinfo"))
+	production := autoGate("production", admits("podinfo", "staging"))
+	b := bundle("b1", "podinfo", 0)
+
+	r, c, _ := newReconciler(t, staging, production, &b)
+	r.Verifiers = map[string]Verifier{"flagger": stubVerifier{
+		result: verify.Result{Done: true, Reason: "Canary podinfo Failed after 3 failed check(s)"},
+	}}
+
+	// Staging crosses, and the crossing itself succeeds.
+	reconcileGate(t, r, "staging")
+	p := listPassages(t, c)[0]
+	p.Status.Phase = v1alpha1.PassageSucceeded
+	if err := c.Status().Update(context.Background(), &p); err != nil {
+		t.Fatal(err)
+	}
+	reconcileGate(t, r, "staging")
+
+	var updated v1alpha1.Bundle
+	if err := c.Get(context.Background(),
+		types.NamespacedName{Name: "b1", Namespace: "acme"}, &updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.HasCleared("staging") {
+		t.Fatal("a Bundle whose canary rolled back was recorded as having cleared staging")
+	}
+	// Not blocked either: the crossing did not fail, the verification did, and
+	// calling it blocked would report the wrong thing to whoever looks.
+	if len(updated.Status.Blocked) != 0 {
+		t.Errorf("blocked = %+v, want the crossing recorded as neither cleared nor blocked",
+			updated.Status.Blocked)
+	}
+	if cond := ready(t, getGate(t, c, "staging")); cond.Reason != "Verifying" ||
+		!strings.Contains(cond.Message, "3 failed check") {
+		t.Errorf("staging says %q: %s", cond.Reason, cond.Message)
+	}
+
+	// And the point of the whole thing: production must not admit it.
+	reconcileGate(t, r, "production")
+	for _, p := range listPassages(t, c) {
+		if p.Spec.Gate == "production" {
+			t.Errorf("production started Passage %s for a Bundle whose canary failed", p.Name)
+		}
+	}
+}
+
+// The same Gate with a canary that succeeded must clear, or verification is
+// just a way to stop everything.
+func TestAPassingCanaryClearsTheBundle(t *testing.T) {
+	g := verifyingGate("staging", admits("podinfo"))
+	b := bundle("b1", "podinfo", 0)
+	r, c, _ := newReconciler(t, g, &b)
+	r.Verifiers = map[string]Verifier{"flagger": stubVerifier{
+		result: verify.Result{Verified: true, Done: true, Reason: "Canary podinfo succeeded"},
+	}}
+
+	reconcileGate(t, r, "staging")
+	p := listPassages(t, c)[0]
+	p.Status.Phase = v1alpha1.PassageSucceeded
+	if err := c.Status().Update(context.Background(), &p); err != nil {
+		t.Fatal(err)
+	}
+	reconcileGate(t, r, "staging")
+
+	var updated v1alpha1.Bundle
+	if err := c.Get(context.Background(),
+		types.NamespacedName{Name: "b1", Namespace: "acme"}, &updated); err != nil {
+		t.Fatal(err)
+	}
+	if !updated.HasCleared("staging") {
+		t.Error("a verified crossing did not clear the Bundle")
+	}
+}
+
+// A verifier named but not registered is a refusal, not a pass: skipping it
+// would clear the Bundle on the strength of a verifier nobody ran.
+func TestAnUnknownVerifierRefuses(t *testing.T) {
+	g := autoGate("staging", admits("podinfo"))
+	g.Spec.Verify = []v1alpha1.Verification{{Uses: "nonesuch"}}
+	b := bundle("b1", "podinfo", 0)
+	r, c, _ := newReconciler(t, g, &b)
+	r.Verifiers = map[string]Verifier{}
+
+	reconcileGate(t, r, "staging")
+	p := listPassages(t, c)[0]
+	p.Status.Phase = v1alpha1.PassageSucceeded
+	if err := c.Status().Update(context.Background(), &p); err != nil {
+		t.Fatal(err)
+	}
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "staging", Namespace: "acme"},
+	})
+	if err == nil {
+		t.Fatal("an unknown verifier was treated as a pass")
+	}
+
+	var updated v1alpha1.Bundle
+	if err := c.Get(context.Background(),
+		types.NamespacedName{Name: "b1", Namespace: "acme"}, &updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.HasCleared("staging") {
+		t.Error("the Bundle cleared despite no verifier having run")
+	}
+}
+
+// A verdict that arrives after the first look must still clear the Bundle.
+//
+// Found against a real Canary, not here: `current` is written as soon as the
+// crossing succeeds, and the "already recorded" guard then short-circuited
+// every later reconcile before the verifier ran. A canary that passed a minute
+// after the crossing left the Bundle permanently unclear, and every unit test
+// passed throughout.
+func TestAVerdictThatArrivesLateStillClears(t *testing.T) {
+	g := verifyingGate("staging", admits("podinfo"))
+	b := bundle("b1", "podinfo", 0)
+	r, c, _ := newReconciler(t, g, &b)
+
+	pending := stubVerifier{result: verify.Result{Reason: "Canary podinfo is Progressing"}}
+	r.Verifiers = map[string]Verifier{"flagger": pending}
+
+	reconcileGate(t, r, "staging")
+	p := listPassages(t, c)[0]
+	p.Status.Phase = v1alpha1.PassageSucceeded
+	if err := c.Status().Update(context.Background(), &p); err != nil {
+		t.Fatal(err)
+	}
+	reconcileGate(t, r, "staging")
+
+	var mid v1alpha1.Bundle
+	if err := c.Get(context.Background(),
+		types.NamespacedName{Name: "b1", Namespace: "acme"}, &mid); err != nil {
+		t.Fatal(err)
+	}
+	if mid.HasCleared("staging") {
+		t.Fatal("cleared while the canary was still progressing")
+	}
+
+	// The canary finishes, and the Gate looks again.
+	r.Verifiers = map[string]Verifier{"flagger": stubVerifier{
+		result: verify.Result{Verified: true, Done: true, Reason: "Canary podinfo succeeded"},
+	}}
+	reconcileGate(t, r, "staging")
+
+	var after v1alpha1.Bundle
+	if err := c.Get(context.Background(),
+		types.NamespacedName{Name: "b1", Namespace: "acme"}, &after); err != nil {
+		t.Fatal(err)
+	}
+	if !after.HasCleared("staging") {
+		t.Error("a canary that passed after the first look never cleared the Bundle")
+	}
+
+	// And reconsidering must not re-append: the history is capped, and growing
+	// it once per reconcile is the #121 shape in a list that was already fixed.
+	reconcileGate(t, r, "staging")
+	reconcileGate(t, r, "staging")
+	if n := len(getGate(t, c, "staging").Status.History); n != 1 {
+		t.Errorf("history = %d entries after four reconciles, want 1", n)
+	}
+	var final v1alpha1.Bundle
+	if err := c.Get(context.Background(),
+		types.NamespacedName{Name: "b1", Namespace: "acme"}, &final); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(final.Status.Cleared); n != 1 {
+		t.Errorf("cleared = %d entries, want 1", n)
 	}
 }

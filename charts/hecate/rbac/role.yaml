@@ -39,6 +39,14 @@ rules:
   verbs:
   - create
 - apiGroups:
+  - flagger.app
+  resources:
+  - canaries
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - fluxcd.controlplane.io
   resources:
   - resourcesetinputproviders
