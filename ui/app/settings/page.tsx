@@ -108,14 +108,41 @@ export default function SettingsPage() {
         {settings?.identity.groups?.length ? (
           <Row label="Groups" value={settings.identity.groups.join(", ")} />
         ) : null}
+      </Section>
+
+      <Section title="Logs and traces">
+        {/*
+          Where to look, not a viewer.
+
+          Hecate stores neither. Logs go to stdout and are collected by whatever
+          the cluster runs; traces go to the collector named below and are read
+          in its own UI. Building either here would mean the API reading pod
+          logs — a permission expansion for the privilege of duplicating a tool
+          you already have, and a worse version of it.
+
+          What the portal can usefully add is the part people actually get
+          wrong: the namespace and label selectors.
+        */}
+        <p className="pb-2 text-sm text-[var(--muted-foreground)]">
+          Hecate stores neither. Logs are written to stdout and collected by your
+          cluster; traces go to the collector below.
+        </p>
+        <Command>kubectl -n hecate-system logs -l app.kubernetes.io/name=hecate -f</Command>
+        <Command>
+          kubectl -n hecate-system logs -l app.kubernetes.io/component=api -f
+        </Command>
         <Row
-          label="Traces"
+          label="Trace endpoint"
           value={
             settings?.telemetry.configured
               ? settings.telemetry.endpoint ?? "configured"
               : "not configured"
           }
-          hint="Hecate exports spans and stores none — open your collector to read them."
+          hint={
+            settings?.telemetry.configured
+              ? "Open your collector's own interface to read them."
+              : "Set otel.endpoint in the chart to export spans."
+          }
         />
       </Section>
 
@@ -248,6 +275,15 @@ function Row({ label, value, hint }: { label: string; value: string; hint?: stri
       <span className="text-sm">{value}</span>
       {hint && <span className="w-full text-xs text-[var(--muted-foreground)]">{hint}</span>}
     </div>
+  );
+}
+
+/** Command is a copyable shell line. */
+function Command({ children }: { children: React.ReactNode }) {
+  return (
+    <pre className="my-1 overflow-x-auto rounded-md border border-[var(--border)] bg-[var(--secondary)] p-2 text-xs">
+      <code>{children}</code>
+    </pre>
   );
 }
 
