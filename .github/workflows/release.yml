@@ -293,6 +293,27 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { name: cli, path: dist }
 
+      # Dogfood (#57). Recording only, never gating: Fides refusing a Hecate
+      # release would let the evidence system stop the tool that reads it from
+      # shipping a fix, including a fix to the integration between them.
+      #
+      # continue-on-error is deliberately ABSENT. The equivalent job elsewhere
+      # had it, and that is precisely how five weeks of releases posted evidence
+      # to a placeholder token while reporting success. If this is configured
+      # and broken, the release should say so.
+      - name: Record the release in Fides
+        id: fides
+        env:
+          FIDES_SERVER_URL: ${{ vars.FIDES_SERVER_URL }}
+          FIDES_API_TOKEN: ${{ secrets.FIDES_API_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+          IMAGE_DIGEST: ${{ needs.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          outcome=$(scripts/release-attest.sh)
+          echo "$outcome"
+          echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
+
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -300,6 +321,14 @@ jobs:
           set -euo pipefail
           v="${{ needs.version.outputs.version }}"
           cat > notes.md <<EOF
+          ## Evidence
+
+          \`${{ steps.fides.outputs.outcome }}\`
+
+          Recorded, not gated — see \`scripts/release-attest.sh\` for why. A
+          release that recorded nothing says so here rather than looking
+          identical to one that recorded a clean bill of health.
+
           ## Install
 
           \`\`\`console
