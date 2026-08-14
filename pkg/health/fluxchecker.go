@@ -44,6 +44,16 @@ type FluxConfig struct {
 	// FailAfter is a Go duration bounding how long a resource may be un-Ready
 	// before it is reported Degraded rather than Progressing. Default 10m.
 	FailAfter string `json:"failAfter,omitempty"`
+	// ClusterRef names a Secret holding a kubeconfig for the cluster these
+	// resources live in. Empty is the cluster Hecate runs in.
+	//
+	// The namespace rule is unchanged by this: a Gate in `team-a` watching a
+	// remote cluster is still restricted to `team-a` there. Otherwise a
+	// cluster reference becomes the way around the tenant boundary (#85, D11)
+	// — add a kubeconfig, watch everything everywhere.
+	//
+	// +optional
+	ClusterRef *v1alpha1.LocalSecretRef `json:"clusterRef,omitempty"`
 }
 
 // FluxResource identifies one Flux object.
@@ -125,6 +135,9 @@ func (c FluxConfig) failAfter() (time.Duration, error) {
 // FluxChecker assesses Flux resources.
 type FluxChecker struct {
 	client client.Client
+	// clusters resolves remote clusters named by a Gate. Nil means only the
+	// local one, which is what a Gate with no clusterRef needs.
+	clusters *Clusters
 	// AllowCrossNamespace permits a Gate to watch resources outside its own
 	// namespace. False by default, matching the posture Flux ships on five of
 	// its own controllers and asks integrating controllers to adopt.
@@ -136,7 +149,9 @@ type FluxChecker struct {
 
 // NewFluxChecker returns a Checker backed by the given cluster client, refusing
 // cross-namespace references.
-func NewFluxChecker(c client.Client) *FluxChecker { return &FluxChecker{client: c} }
+func NewFluxChecker(c client.Client) *FluxChecker {
+	return &FluxChecker{client: c, clusters: &Clusters{Local: c}}
+}
 
 // AllowingCrossNamespace returns a checker that permits references outside the
 // Gate's namespace. For single-tenant clusters that genuinely want it.
@@ -179,6 +194,28 @@ func (f *FluxChecker) Evaluate(
 	var issues []string
 	details := make(map[string]any, len(cfg.Resources))
 
+	// Resolved once for the whole check rather than per resource: they are all
+	// in the same cluster by construction, and a kubeconfig that has just been
+	// rotated should not produce two different clients inside one assessment.
+	reader := f.client
+	if cfg.ClusterRef != nil {
+		if f.clusters == nil {
+			return v1alpha1.HealthUnknown, []string{fmt.Sprintf(
+				"clusterRef %q is set but this checker has no cluster resolver",
+				cfg.ClusterRef.Name)}, details
+		}
+		remote, err := f.clusters.For(ctx, f.client, defaultNamespace, cfg.ClusterRef)
+		if err != nil {
+			// Reported as Unknown rather than returned as an error: an
+			// unreachable remote cluster is a fact about the environment, and
+			// failing the whole assessment would take the Gate's other checks
+			// down with it.
+			return v1alpha1.HealthUnknown, []string{fmt.Sprintf(
+				"cannot reach the cluster in %s: %s", cfg.ClusterRef.Name, err)}, details
+		}
+		reader = remote
+	}
+
 	for _, ref := range cfg.Resources {
 		ns := ref.Namespace
 		if ns == "" {
@@ -190,7 +227,7 @@ func (f *FluxChecker) Evaluate(
 		obj.SetGroupVersionKind(gvk)
 
 		var res flux.Result
-		if err := f.client.Get(ctx, client.ObjectKey{Namespace: ns, Name: ref.Name}, obj); err != nil {
+		if err := reader.Get(ctx, client.ObjectKey{Namespace: ns, Name: ref.Name}, obj); err != nil {
 			// A resource we cannot read is reported, never skipped. Silently
 			// ignoring a missing Kustomization would make the Gate look
 			// healthier than it is.
