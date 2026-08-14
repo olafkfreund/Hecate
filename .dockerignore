@@ -1,0 +1,26 @@
+# Keep the build context to sources.
+#
+# This is not only about size. `COPY ui/ ./` would otherwise copy the
+# developer's node_modules over the result of `npm ci`, replacing a clean
+# lockfile-exact tree with whatever happens to be on the host, and hand Next a
+# local .next cache from a different checkout.
+ui/node_modules/
+ui/.next/
+ui/out/
+
+# The built UI must come from the UI stage and nowhere else.
+#
+# `make ui` leaves a build here, and `COPY . .` in the Go stage would copy it
+# in — so an image built on a developer's machine embeds whatever they last
+# built rather than the current source, and one built in CI (where the
+# directory holds only a placeholder) does not. That is a difference between
+# environments that produces a UI missing a page nobody can reproduce locally,
+# which is precisely what it did.
+pkg/api/ui/*
+!pkg/api/ui/.gitkeep
+
+.git/
+.dev/
+bin/
+dist/
+*.tfstate

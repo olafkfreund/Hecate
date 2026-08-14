@@ -51,6 +51,28 @@ func (s *Server) Handler() http.Handler {
 		s.guard(ActionRead, s.listBeacons))
 	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/beacons/{name}",
 		s.guard(ActionRead, s.getBeacon))
+	// Which namespaces this caller can see anything in. Deliberately not behind
+	// guard(): guard authorises against the namespace in the path, and this
+	// route has none, so it would ask "may you read gates cluster-wide?" — a
+	// right a team-scoped operator has no reason to hold, and refusing them the
+	// list of their own namespaces is precisely backwards.
+	mux.Handle("GET /api/v1alpha1/namespaces", s.authenticated(s.listNamespaces))
+
+	// Settings reads across namespaces and filters per namespace, same as the
+	// namespace list, so it is authenticated here and authorised in the handler.
+	mux.Handle("GET /api/v1alpha1/settings", s.authenticated(s.settings))
+
+	// Settings writes. Each authorises the CALLER against the exact resource it
+	// touches, inside the handler, because guard() checks hecate.dev resources
+	// in a path namespace and these are RBAC bindings, core Secrets and a
+	// cluster-scoped grant. The server writes with its own ServiceAccount, so
+	// skipping that check would make every one of these a way to borrow the
+	// server's permissions.
+	mux.Handle("GET /api/v1alpha1/rbac/grants", s.authenticated(s.listBindings))
+	mux.Handle("POST /api/v1alpha1/rbac/grants", s.authenticated(s.bindRole))
+	mux.Handle("POST /api/v1alpha1/namespaces/{namespace}/clusters", s.authenticated(s.connectCluster))
+	mux.Handle("PUT /api/v1alpha1/namespaces/{namespace}/gates/{name}/evidence", s.authenticated(s.setEvidence))
+
 	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/gates",
 		s.guard(ActionRead, s.listGates))
 	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/gates/{name}",
@@ -136,7 +158,71 @@ func (s *Server) guard(action Action, h handler) http.Handler {
 	})
 }
 
+// authenticated runs a handler for any authenticated caller, leaving
+// authorisation to the handler.
+//
+// Exists for exactly one route. A handler reached this way is responsible for
+// deciding what the subject may see, which is why it takes the Subject and why
+// there is a comment on the only user of it rather than a general invitation to
+// skip authorisation.
+func (s *Server) authenticated(h handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+
+		subject, err := s.Auth.Authenticate(ctx, r)
+		if err != nil {
+			if errors.Is(err, ErrUnauthenticated) {
+				w.Header().Set("WWW-Authenticate", `Bearer realm="hecate"`)
+				writeError(w, http.StatusUnauthorized, "authentication required")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		result, err := h(ctx, subject, r)
+		if err != nil {
+			writeOpsError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	})
+}
+
 // ---------------------------------------------------------------- reads ----
+
+// listNamespaces answers "where can I look?", which is what a namespace picker
+// needs and what a text box cannot tell anyone.
+//
+// Discovery runs with the server's credentials, so every candidate is then
+// checked against the caller's. Returning a namespace someone cannot read would
+// be a directory of other teams' namespaces, which is a small information leak
+// and a guaranteed support question when clicking it 403s.
+func (s *Server) listNamespaces(ctx context.Context, subject Subject, _ *http.Request) (any, error) {
+	all, err := s.Ops.Namespaces(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	visible := make([]string, 0, len(all))
+	for _, ns := range all {
+		if err := s.Auth.Authorize(ctx, subject, ActionRead, ns); err != nil {
+			var forbidden *Forbidden
+			if errors.As(err, &forbidden) {
+				continue
+			}
+			// A broken authorisation check is not the same as a refusal, and
+			// silently dropping namespaces because the API server is unwell
+			// would present as "my namespace vanished".
+			return nil, err
+		}
+		visible = append(visible, ns)
+	}
+	// Never null: the UI renders this straight into a list, and a null there is
+	// a crash rather than an empty picker.
+	return map[string]any{"namespaces": visible}, nil
+}
 
 func (s *Server) listBeacons(ctx context.Context, _ Subject, r *http.Request) (any, error) {
 	return s.Ops.Beacons(ctx, r.PathValue("namespace"))
@@ -263,8 +349,28 @@ func decode(r *http.Request, into any) error {
 //
 // A refusal is not a malfunction: "this Bundle has not cleared staging" is an
 // answer, and a client should be able to tell it from a server that broke.
+// BadRequest is a request the caller can fix by sending different input.
+//
+// Distinct from ops.IsRefused, which means the request was fine and the state
+// of the system said no. Conflating them tells someone to change their input
+// when the input was never the problem.
+type BadRequest struct{ Reason string }
+
+func (e *BadRequest) Error() string { return e.Reason }
+
 func writeOpsError(w http.ResponseWriter, err error) {
+	var badRequest *BadRequest
+	var forbidden *Forbidden
 	switch {
+	case errors.As(err, &badRequest):
+		writeError(w, http.StatusBadRequest, badRequest.Error())
+	case errors.As(err, &forbidden):
+		// Handlers that authorise for themselves — the settings writes, which
+		// check a resource guard() knows nothing about — return this rather
+		// than writing a response, so it has to be translated here. Without
+		// this case a refusal is reported as a server fault, which sends
+		// someone debugging Hecate when the answer is "you may not do that".
+		writeError(w, http.StatusForbidden, forbidden.Error())
 	case ops.IsNotFound(err):
 		writeError(w, http.StatusNotFound, err.Error())
 	case ops.IsRefused(err):

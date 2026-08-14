@@ -42,6 +42,16 @@ func (s Subject) String() string { return s.Name }
 type Action struct {
 	Verb     string
 	Resource string
+	// Group is the API group the resource lives in. Empty means hecate.dev,
+	// which is every Action that existed before settings could write anything —
+	// so the default keeps those unchanged rather than making each restate the
+	// group it always had.
+	//
+	// The core group is spelled coreGroup rather than "", because "" here would
+	// be indistinguishable from "unset" and would silently authorise against
+	// hecate.dev instead. Getting that wrong means checking the wrong resource
+	// and allowing a write nobody was granted.
+	Group string
 }
 
 var (
@@ -54,6 +64,24 @@ var (
 	ActionApprove = Action{Verb: "update", Resource: "bundles/status"}
 	// ActionAbort stops a running Passage.
 	ActionAbort = Action{Verb: "update", Resource: "passages"}
+	// coreGroup names the core API group, whose real name is the empty string.
+	// Spelled out so an Action can ask for it without being mistaken for one
+	// that never set a group at all.
+	coreGroup = "core"
+
+	// ActionBindRole grants someone a Hecate role. Checked against the caller
+	// because hecate-api writes with its own ServiceAccount: Kubernetes'
+	// built-in escalation prevention compares the *writer's* rights, and the
+	// writer here is the server, not the person clicking. Without this check
+	// anyone who could reach the API could grant themselves anything the server
+	// can grant.
+	ActionBindRole = Action{Verb: "create", Resource: "clusterrolebindings", Group: "rbac.authorization.k8s.io"}
+	// ActionManageSecrets covers cluster credentials, which are kubeconfigs and
+	// therefore the keys to another cluster.
+	ActionManageSecrets = Action{Verb: "create", Resource: "secrets", Group: coreGroup}
+	// ActionEditGate is changing a Gate's own configuration — the evidence
+	// server it trusts, most of all.
+	ActionEditGate = Action{Verb: "update", Resource: "gates"}
 	// ActionPoll asks a Beacon to look at its sources now. A separate verb
 	// from reading, so a CI job's identity can be allowed to poke a Beacon
 	// without being able to read every Gate in the namespace — which is the
@@ -130,13 +158,21 @@ func (a *Authenticator) Authenticate(ctx context.Context, r *http.Request) (Subj
 func (a *Authenticator) Authorize(ctx context.Context, s Subject, act Action, namespace string) error {
 	resource, subresource, _ := strings.Cut(act.Resource, "/")
 
+	group := act.Group
+	switch group {
+	case "":
+		group = "hecate.dev"
+	case coreGroup:
+		group = ""
+	}
+
 	review := &authorizationv1.SubjectAccessReview{
 		Spec: authorizationv1.SubjectAccessReviewSpec{
 			User:   s.Name,
 			Groups: s.Groups,
 			ResourceAttributes: &authorizationv1.ResourceAttributes{
 				Namespace:   namespace,
-				Group:       "hecate.dev",
+				Group:       group,
 				Resource:    resource,
 				Subresource: subresource,
 				Verb:        act.Verb,

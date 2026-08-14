@@ -154,9 +154,104 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return (await res.json()) as T;
 }
 
+/**
+ * put is post with a different verb.
+ *
+ * Written out rather than folded into post with a parameter: the two differ only in
+ * one word, and a shared helper taking a method reads worse at every call site
+ * than two named ones.
+ */
+async function put<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify(body),
+  });
+
+  if (res.status === 401) throw new Unauthenticated();
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const parsed = (await res.json()) as { error?: string };
+      if (parsed.error) detail = parsed.error;
+    } catch {
+      /* not JSON; the status text stands */
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return (await res.json()) as T;
+}
+
 const base = (ns: string) => `/api/v1alpha1/namespaces/${encodeURIComponent(ns)}`;
 
+
+/** Settings is what the settings screen shows, derived from cluster state. */
+export type Settings = {
+  version: string;
+  identity: { name: string; groups?: string[] };
+  fides: {
+    serverURL: string;
+    gates: string[];
+    environments?: string[];
+    reachable: boolean;
+    detail?: string;
+  }[];
+  clusters: { secret: string; gates: string[]; reachable: boolean; detail?: string }[];
+  telemetry: { endpoint?: string; configured: boolean };
+};
+
+/** Grant is one person (or group) holding one Hecate role. */
+export type Grant = {
+  binding: string;
+  role: string;
+  kind: string;
+  subject: string;
+  grantedBy?: string;
+};
+
 export const api = {
+  /**
+   * namespaces is where this user can look.
+   *
+   * Server-side discovery rather than a list the UI keeps: only the API knows
+   * which namespaces hold Gates or Beacons, and only it can check which of
+   * those this caller may read. A picker built from anything else either offers
+   * namespaces that 403 on click or misses the one you wanted.
+   */
+  namespaces: () => get<{ namespaces: string[] }>("/api/v1alpha1/namespaces"),
+
+  settings: () => get<Settings>("/api/v1alpha1/settings"),
+  grants: () => get<{ grants: Grant[] }>("/api/v1alpha1/rbac/grants"),
+
+  /**
+   * grant gives someone a Hecate role by creating a ClusterRoleBinding.
+   *
+   * Hecate has no user store, so this is what "add a user" means here: the
+   * permission model stays Kubernetes RBAC and the result is visible to
+   * `kubectl get clusterrolebinding`, rather than living in a second place that
+   * eventually disagrees with the first.
+   */
+  grant: (subject: string, kind: string, role: string) =>
+    post<{ binding: string; created: boolean }>("/api/v1alpha1/rbac/grants", {
+      subject,
+      kind,
+      role,
+    }),
+
+  connectCluster: (ns: string, name: string, kubeconfig: string) =>
+    post<{ secret: string; created: boolean }>(`${base(ns)}/clusters`, { name, kubeconfig }),
+
+  /**
+   * setEvidence points a Gate at an evidence server.
+   *
+   * Writes to the cluster. A Gate reconciled from git will be restored to its
+   * committed value on the next Flux sync — the screen says so, because
+   * otherwise this looks like the change being lost.
+   */
+  setEvidence: (ns: string, gate: string, body: { serverURL: string; fidesEnvironment: string; credentialsRef?: string }) =>
+    put<{ gate: string; note: string }>(`${base(ns)}/gates/${encodeURIComponent(gate)}/evidence`, body),
+
   gates: (ns: string) => get<Gate[]>(`${base(ns)}/gates`),
   gate: (ns: string, name: string) => get<Gate>(`${base(ns)}/gates/${encodeURIComponent(name)}`),
   explain: (ns: string, name: string) =>
