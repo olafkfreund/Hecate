@@ -6,6 +6,7 @@ import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 import { Activity, DoorOpen, Package, Route, ShieldCheck, Moon, Sun, Monitor } from "lucide-react";
 import { useHydrated, useQueryParam } from "@/lib/browser";
+import { api } from "@/lib/api";
 
 const nav = [
   { href: "/", label: "Gates", icon: DoorOpen },
@@ -75,31 +76,55 @@ export function Shell({ children }: { children: React.ReactNode }) {
  */
 function Namespace() {
   const current = useQueryParam("namespace", "default");
-  // `edited` is null until the field is touched, so the box follows the URL —
-  // it used to seed useState from the *hydration-time* snapshot, which is
-  // always the fallback, so it read "default" while the page was showing
-  // another namespace entirely.
-  const [edited, setEdited] = useState<string | null>(null);
-  const ns = edited ?? current;
+  const [known, setKnown] = useState<string[] | null>(null);
+
+  // Discovered from the API rather than typed from memory. The old control was
+  // a text box, which meant the only way to find the namespace your Gates were
+  // in was to already know it — and the default landing namespace is `default`,
+  // which almost never holds any.
+  useEffect(() => {
+    let live = true;
+    api
+      .namespaces()
+      .then((r) => live && setKnown(r.namespaces ?? []))
+      // Deliberately quiet. A failed lookup leaves the select holding just the
+      // current namespace, which is exactly as usable as the text box this
+      // replaced — degrading to the old behaviour beats an error banner over a
+      // page that otherwise works.
+      .catch(() => live && setKnown([]));
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  // The current namespace is always an option even when discovery has not
+  // returned or does not include it: a select whose value is absent from its
+  // options renders blank, and someone following a shared link would see the
+  // page describing one namespace and the picker naming none.
+  const options = Array.from(new Set([current, ...(known ?? [])])).sort();
+
+  function go(next: string) {
+    if (next === current) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("namespace", next);
+    window.location.href = url.toString();
+  }
 
   return (
     <label className="flex items-center gap-2 text-sm text-[var(--muted-foreground)]">
       <span className="sr-only">Namespace</span>
-      <input
-        value={ns}
-        onChange={(e) => setEdited(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") e.currentTarget.blur();
-        }}
-        onBlur={() => {
-          if (edited === null || edited === current) return;
-          const url = new URL(window.location.href);
-          url.searchParams.set("namespace", edited);
-          window.location.href = url.toString();
-        }}
-        className="w-32 rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-[var(--foreground)]"
+      <select
+        value={current}
+        onChange={(e) => go(e.target.value)}
+        className="w-40 rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-[var(--foreground)]"
         aria-label="Namespace"
-      />
+      >
+        {options.map((ns) => (
+          <option key={ns} value={ns} className="bg-[var(--background)]">
+            {ns}
+          </option>
+        ))}
+      </select>
     </label>
   );
 }

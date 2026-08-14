@@ -204,3 +204,46 @@ func (o *Ops) Passages(ctx context.Context, namespace, gate, bundle string) ([]v
 	})
 	return out, nil
 }
+
+// Namespaces lists the namespaces that hold something Hecate manages.
+//
+// Not "every namespace in the cluster". A picker offering three hundred
+// namespaces of which two are relevant is a worse answer than a text box, and
+// listing all of them needs a cluster-wide read on core Namespaces that a Gate
+// operator has no other reason to hold.
+//
+// Gates and Beacons are enough to find them all: a Bundle is created in its
+// Beacon's namespace and a Passage in its Gate's, so a namespace holding either
+// of those holds one of these too.
+//
+// The caller is responsible for removing namespaces the user may not see. This
+// runs with the server's own credentials, so filtering is not optional — it is
+// done in the API layer, where the subject is known (pkg/api).
+func (o *Ops) Namespaces(ctx context.Context) ([]string, error) {
+	seen := map[string]struct{}{}
+
+	var gates v1alpha1.GateList
+	if err := o.Client.List(ctx, &gates); err != nil {
+		return nil, fmt.Errorf("listing Gates: %w", err)
+	}
+	for i := range gates.Items {
+		seen[gates.Items[i].Namespace] = struct{}{}
+	}
+
+	var beacons v1alpha1.BeaconList
+	if err := o.Client.List(ctx, &beacons); err != nil {
+		return nil, fmt.Errorf("listing Beacons: %w", err)
+	}
+	for i := range beacons.Items {
+		seen[beacons.Items[i].Namespace] = struct{}{}
+	}
+
+	out := make([]string, 0, len(seen))
+	for ns := range seen {
+		out = append(out, ns)
+	}
+	// Sorted because a picker that reorders itself between page loads is one
+	// people mis-click.
+	sort.Strings(out)
+	return out, nil
+}

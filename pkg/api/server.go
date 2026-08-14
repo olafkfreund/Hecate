@@ -51,6 +51,13 @@ func (s *Server) Handler() http.Handler {
 		s.guard(ActionRead, s.listBeacons))
 	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/beacons/{name}",
 		s.guard(ActionRead, s.getBeacon))
+	// Which namespaces this caller can see anything in. Deliberately not behind
+	// guard(): guard authorises against the namespace in the path, and this
+	// route has none, so it would ask "may you read gates cluster-wide?" — a
+	// right a team-scoped operator has no reason to hold, and refusing them the
+	// list of their own namespaces is precisely backwards.
+	mux.Handle("GET /api/v1alpha1/namespaces", s.authenticated(s.listNamespaces))
+
 	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/gates",
 		s.guard(ActionRead, s.listGates))
 	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/gates/{name}",
@@ -136,7 +143,71 @@ func (s *Server) guard(action Action, h handler) http.Handler {
 	})
 }
 
+// authenticated runs a handler for any authenticated caller, leaving
+// authorisation to the handler.
+//
+// Exists for exactly one route. A handler reached this way is responsible for
+// deciding what the subject may see, which is why it takes the Subject and why
+// there is a comment on the only user of it rather than a general invitation to
+// skip authorisation.
+func (s *Server) authenticated(h handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+
+		subject, err := s.Auth.Authenticate(ctx, r)
+		if err != nil {
+			if errors.Is(err, ErrUnauthenticated) {
+				w.Header().Set("WWW-Authenticate", `Bearer realm="hecate"`)
+				writeError(w, http.StatusUnauthorized, "authentication required")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		result, err := h(ctx, subject, r)
+		if err != nil {
+			writeOpsError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	})
+}
+
 // ---------------------------------------------------------------- reads ----
+
+// listNamespaces answers "where can I look?", which is what a namespace picker
+// needs and what a text box cannot tell anyone.
+//
+// Discovery runs with the server's credentials, so every candidate is then
+// checked against the caller's. Returning a namespace someone cannot read would
+// be a directory of other teams' namespaces, which is a small information leak
+// and a guaranteed support question when clicking it 403s.
+func (s *Server) listNamespaces(ctx context.Context, subject Subject, _ *http.Request) (any, error) {
+	all, err := s.Ops.Namespaces(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	visible := make([]string, 0, len(all))
+	for _, ns := range all {
+		if err := s.Auth.Authorize(ctx, subject, ActionRead, ns); err != nil {
+			var forbidden *Forbidden
+			if errors.As(err, &forbidden) {
+				continue
+			}
+			// A broken authorisation check is not the same as a refusal, and
+			// silently dropping namespaces because the API server is unwell
+			// would present as "my namespace vanished".
+			return nil, err
+		}
+		visible = append(visible, ns)
+	}
+	// Never null: the UI renders this straight into a list, and a null there is
+	// a crash rather than an empty picker.
+	return map[string]any{"namespaces": visible}, nil
+}
 
 func (s *Server) listBeacons(ctx context.Context, _ Subject, r *http.Request) (any, error) {
 	return s.Ops.Beacons(ctx, r.PathValue("namespace"))

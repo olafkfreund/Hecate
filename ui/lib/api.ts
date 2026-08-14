@@ -157,6 +157,16 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 const base = (ns: string) => `/api/v1alpha1/namespaces/${encodeURIComponent(ns)}`;
 
 export const api = {
+  /**
+   * namespaces is where this user can look.
+   *
+   * Server-side discovery rather than a list the UI keeps: only the API knows
+   * which namespaces hold Gates or Beacons, and only it can check which of
+   * those this caller may read. A picker built from anything else either offers
+   * namespaces that 403 on click or misses the one you wanted.
+   */
+  namespaces: () => get<{ namespaces: string[] }>("/api/v1alpha1/namespaces"),
+
   gates: (ns: string) => get<Gate[]>(`${base(ns)}/gates`),
   gate: (ns: string, name: string) => get<Gate>(`${base(ns)}/gates/${encodeURIComponent(name)}`),
   explain: (ns: string, name: string) =>
