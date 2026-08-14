@@ -197,7 +197,7 @@ export type Settings = {
     reachable: boolean;
     detail?: string;
   }[];
-  clusters: { secret: string; gates: string[] }[];
+  clusters: { secret: string; gates: string[]; reachable: boolean; detail?: string }[];
   telemetry: { endpoint?: string; configured: boolean };
 };
 

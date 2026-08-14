@@ -125,10 +125,35 @@ export default function SettingsPage() {
       <Section title="Connected clusters">
         {settings?.clusters.length ? (
           settings.clusters.map((c) => (
-            <Row key={c.secret} label={c.secret} value={`watched by ${c.gates.join(", ")}`} />
+            <div key={c.secret} className="space-y-1 border-b border-[var(--border)] py-3 last:border-0">
+              <div className="flex items-center gap-2">
+                {c.reachable ? (
+                  <CheckCircle2 className="size-4 text-green-500" aria-label="reachable" />
+                ) : (
+                  <XCircle className="size-4 text-red-500" aria-label="unreachable" />
+                )}
+                <code className="text-sm">{c.secret}</code>
+              </div>
+              {!c.reachable && c.detail && <p className="text-sm text-red-400">{c.detail}</p>}
+              <p className="text-sm text-[var(--muted-foreground)]">
+                {c.gates.length ? (
+                  `watched by ${c.gates.join(", ")}`
+                ) : (
+                  // Connected but unused is a normal state, not an error — and
+                  // saying so is the difference between this screen and the one
+                  // that listed only Gate-referenced clusters, where a freshly
+                  // stored kubeconfig simply never appeared.
+                  <>
+                    connected, not yet used. Add{" "}
+                    <code>clusterRef: {`{name: ${c.secret.split("/")[1]}}`}</code> to a Gate&apos;s
+                    watch or flux-wait step.
+                  </>
+                )}
+              </p>
+            </div>
           ))
         ) : (
-          <Empty>No Gate watches a remote cluster.</Empty>
+          <Empty>No clusters connected, and no Gate watches a remote one.</Empty>
         )}
         <ClusterForm
           namespace={namespace}

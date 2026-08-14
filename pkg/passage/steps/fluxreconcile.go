@@ -33,6 +33,20 @@ type FluxReconcileConfig struct {
 	// Resources are the Flux objects to nudge — usually the GitRepository the
 	// commit went to, and sometimes the Kustomization that consumes it.
 	Resources []health.FluxResource `json:"resources"`
+	// ClusterRef names a Secret holding a kubeconfig for the cluster these
+	// resources live in. Empty is the cluster Hecate runs in.
+	//
+	// The same field flux-wait and the Flux health check take, and it is here
+	// so a Gate can nudge the cluster it then waits on. Without it a remote
+	// promotion could be waited for but not prompted, so it moved at the remote
+	// Flux's own interval while the local one was nudged — the asymmetry showed
+	// up as remote environments simply being slower, for no reason anyone could
+	// see in the Gate.
+	//
+	// The namespace rule is not relaxed by crossing a cluster boundary: a step
+	// that can annotate any namespace's Kustomization can trigger any tenant's
+	// deployment, and that is as true remotely as locally.
+	ClusterRef *v1alpha1.LocalSecretRef `json:"clusterRef,omitempty"`
 }
 
 // The only write Hecate performs against Flux, and the narrowest one that can
@@ -52,12 +66,20 @@ type FluxReconcileConfig struct {
 // hour in plenty of real fleets.
 type FluxReconcile struct {
 	client              client.Client
+	clusters            *health.Clusters
 	allowCrossNamespace bool
 }
 
 // NewFluxReconcile returns a flux-reconcile step.
+// The resolver is built here rather than taken as an argument, matching
+// health.NewFluxChecker: every caller wants the same one, and a constructor
+// that can be handed a nil resolver is one that will be.
 func NewFluxReconcile(c client.Client, allowCrossNamespace bool) *FluxReconcile {
-	return &FluxReconcile{client: c, allowCrossNamespace: allowCrossNamespace}
+	return &FluxReconcile{
+		client:              c,
+		clusters:            &health.Clusters{Local: c},
+		allowCrossNamespace: allowCrossNamespace,
+	}
 }
 
 // Name implements passage.Runner.
@@ -74,6 +96,28 @@ func (f *FluxReconcile) Run(ctx context.Context, sc *passage.StepContext) (passa
 	// that can trigger any tenant's deployment.
 	if err := (health.FluxConfig{Resources: cfg.Resources}).Validate(sc.Namespace, f.allowCrossNamespace); err != nil {
 		return passage.StepResult{}, passage.FailTerminal(ReasonInvalidConfig, "%s: %s", StepFluxReconcile, err)
+	}
+
+	// Resolved once for every resource: they are in the same cluster by
+	// construction, and a kubeconfig rotated mid-step should not produce two
+	// clients inside one nudge.
+	writer := f.client
+	if cfg.ClusterRef != nil {
+		if f.clusters == nil {
+			return passage.StepResult{}, passage.FailTerminal(ReasonInvalidConfig,
+				"%s: clusterRef %q is set but this step has no cluster resolver",
+				StepFluxReconcile, cfg.ClusterRef.Name)
+		}
+		remote, err := f.clusters.For(ctx, f.client, sc.Namespace, cfg.ClusterRef)
+		if err != nil {
+			// Retryable rather than terminal: an unreachable cluster is usually
+			// a network or credential problem that outlives neither the
+			// Passage nor the operator's patience, and failing the crossing
+			// outright would discard work already done by earlier steps.
+			return passage.StepResult{}, fmt.Errorf(
+				"%s: cannot reach the cluster in %s: %w", StepFluxReconcile, cfg.ClusterRef.Name, err)
+		}
+		writer = remote
 	}
 
 	// Stamped from the Passage, not the clock, so re-running a crossing does
@@ -105,7 +149,7 @@ func (f *FluxReconcile) Run(ctx context.Context, sc *passage.StepContext) (passa
 
 		// A merge patch rather than read-modify-write: there is nothing to read,
 		// and nothing here can conflict with Flux's own writes to the object.
-		err = f.client.Patch(ctx, obj, client.RawPatch(types.MergePatchType, patch))
+		err = writer.Patch(ctx, obj, client.RawPatch(types.MergePatchType, patch))
 		switch {
 		case apierrors.IsNotFound(err):
 			return passage.StepResult{}, passage.FailTerminal(ReasonInvalidConfig,

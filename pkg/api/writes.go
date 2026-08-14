@@ -16,6 +16,14 @@ import (
 	"github.com/olafkfreund/hecate/api/v1alpha1"
 )
 
+// ClusterLabel marks a Secret as holding a remote cluster's kubeconfig.
+//
+// A label rather than a naming convention: names are chosen by whoever created
+// the Secret and cannot be queried, while a label selector is an indexed server-
+// side filter. It also means an operator can adopt a kubeconfig Secret they
+// created by hand simply by labelling it.
+const ClusterLabel = "hecate.dev/cluster"
+
 // bindableRoles are the only ClusterRoles this API will bind a subject to.
 //
 // An allowlist rather than "whatever the caller names", and it is the most
@@ -188,7 +196,18 @@ func (s *Server) connectCluster(ctx context.Context, subject Subject, r *http.Re
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      req.Name,
 			Namespace: namespace,
-			Labels:    map[string]string{"app.kubernetes.io/managed-by": "hecate"},
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "hecate",
+				// The marker that makes this Secret findable.
+				//
+				// Without it a stored cluster is invisible until some Gate
+				// happens to name it, because the only other way to know a
+				// Secret is a kubeconfig is to read it — and listing every
+				// Secret in the cluster to look inside them is not something a
+				// settings screen should do. Storing a cluster and then not
+				// seeing it is what this label exists to prevent.
+				ClusterLabel: "true",
+			},
 			Annotations: map[string]string{
 				"hecate.dev/created-by": subject.Name,
 			},

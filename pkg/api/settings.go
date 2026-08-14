@@ -6,9 +6,14 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/tools/clientcmd"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/olafkfreund/hecate/api/v1alpha1"
 )
@@ -60,12 +65,25 @@ type FidesTarget struct {
 	Detail string `json:"detail,omitempty"`
 }
 
-// ClusterTarget is a remote cluster some Gate watches.
+// ClusterTarget is a remote cluster this installation knows about.
 type ClusterTarget struct {
 	// Secret holding the kubeconfig, as "namespace/name".
 	Secret string `json:"secret"`
-	// Gates using it.
+	// Gates using it. Empty is not an error — a cluster can be connected before
+	// any Gate references it, and saying so is more useful than hiding it,
+	// which is what listing only Gate-referenced clusters used to do: you could
+	// store a kubeconfig and watch nothing appear.
 	Gates []string `json:"gates"`
+	// Reachable is whether the credentials in the Secret actually answer.
+	//
+	// Checked here rather than left until a promotion needs it. A kubeconfig
+	// that has expired, or names an endpoint this cluster cannot route to,
+	// looks identical to a working one right up to the moment a Gate is waiting
+	// on it — and that is the moment when nobody wants to be debugging
+	// credentials.
+	Reachable bool `json:"reachable"`
+	// Detail says why when Reachable is false.
+	Detail string `json:"detail,omitempty"`
 }
 
 // Telemetry is the OpenTelemetry export configuration.
@@ -162,8 +180,31 @@ func (s *Server) settings(ctx context.Context, subject Subject, _ *http.Request)
 	}
 	sort.Slice(out.Fides, func(i, j int) bool { return out.Fides[i].ServerURL < out.Fides[j].ServerURL })
 
+	// Every labelled cluster Secret, not only the ones a Gate names. Merged
+	// into whatever the Gate walk found so a connected-but-unused cluster
+	// appears with no Gates rather than not at all.
+	for _, ns := range namespaces {
+		if err := s.Auth.Authorize(ctx, subject, ActionRead, ns); err != nil {
+			continue
+		}
+		var secrets corev1.SecretList
+		if err := s.Ops.Client.List(ctx, &secrets,
+			client.InNamespace(ns), client.MatchingLabels{ClusterLabel: "true"}); err != nil {
+			// A caller who may read Gates but not Secrets is ordinary, and the
+			// rest of the screen is still worth showing.
+			continue
+		}
+		for i := range secrets.Items {
+			key := ns + "/" + secrets.Items[i].Name
+			if _, ok := byCluster[key]; !ok {
+				byCluster[key] = &ClusterTarget{Secret: key, Gates: []string{}}
+			}
+		}
+	}
+
 	for _, c := range byCluster {
 		sort.Strings(c.Gates)
+		c.Reachable, c.Detail = s.probeCluster(ctx, c.Secret)
 		out.Clusters = append(out.Clusters, *c)
 	}
 	sort.Slice(out.Clusters, func(i, j int) bool { return out.Clusters[i].Secret < out.Clusters[j].Secret })
@@ -195,6 +236,50 @@ func probe(ctx context.Context, url string) (bool, string) {
 	// 5xx is the server failing; anything else means it answered.
 	if resp.StatusCode >= 500 {
 		return false, resp.Status
+	}
+	return true, ""
+}
+
+// probeCluster asks whether the stored credentials still work.
+//
+// Deliberately the cheapest possible question — a version read, which every
+// apiserver answers and which needs no permissions worth having. The point is
+// "do these credentials reach a Kubernetes API", not "what may they do there";
+// that second question is answered by the Gate's own checks, against the
+// namespace the Gate is allowed to look at.
+func (s *Server) probeCluster(ctx context.Context, secret string) (bool, string) {
+	namespace, name, ok := strings.Cut(secret, "/")
+	if !ok {
+		return false, "malformed secret reference"
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+
+	var sec corev1.Secret
+	if err := s.Ops.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &sec); err != nil {
+		return false, "cannot read the Secret: " + err.Error()
+	}
+	raw := sec.Data["value"]
+	if len(raw) == 0 {
+		return false, `the Secret has no "value" key — a kubeconfig lives there, the same key Flux uses`
+	}
+
+	cfg, err := clientcmd.RESTConfigFromKubeConfig(raw)
+	if err != nil {
+		return false, "the kubeconfig is unusable: " + err.Error()
+	}
+	// Bounded here as well as by the context: a kubeconfig naming an address
+	// that blackholes would otherwise hold the request open for the whole
+	// settings call, and one unreachable cluster should not stall the screen.
+	cfg.Timeout = 5 * time.Second
+
+	dc, err := discovery.NewDiscoveryClientForConfig(cfg)
+	if err != nil {
+		return false, err.Error()
+	}
+	if _, err := dc.ServerVersion(); err != nil {
+		return false, err.Error()
 	}
 	return true, ""
 }
