@@ -186,6 +186,20 @@ async function put<T>(path: string, body: unknown): Promise<T> {
 const base = (ns: string) => `/api/v1alpha1/namespaces/${encodeURIComponent(ns)}`;
 
 
+/** AuditEntry is one thing that happened, in terms an auditor asks about. */
+export type AuditEntry = {
+  at: string;
+  kind: "crossed" | "refused" | "running" | "approved";
+  gate: string;
+  bundle?: string;
+  digest?: string;
+  actor?: string;
+  passage?: string;
+  detail?: string;
+  verified?: boolean;
+  evidence?: { trail?: string; verdict?: string; risk?: number; blockers?: string[]; url?: string };
+};
+
 /** Settings is what the settings screen shows, derived from cluster state. */
 export type Settings = {
   version: string;
@@ -222,6 +236,16 @@ export const api = {
   namespaces: () => get<{ namespaces: string[] }>("/api/v1alpha1/namespaces"),
 
   settings: () => get<Settings>("/api/v1alpha1/settings"),
+
+  /**
+   * audit is what happened, newest first.
+   *
+   * Assembled server-side from Gate history, Passages and approvals, because
+   * those three age out differently and reconciling them in the browser would
+   * mean the page quietly disagreeing with itself depending on what was still
+   * in the cluster when it loaded.
+   */
+  audit: (ns: string) => get<AuditEntry[]>(`${base(ns)}/audit`),
   grants: () => get<{ grants: Grant[] }>("/api/v1alpha1/rbac/grants"),
 
   /**

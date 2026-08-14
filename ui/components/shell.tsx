@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
-import { Activity, DoorOpen, Package, Route, ShieldCheck, Moon, Sun, Monitor, Cog } from "lucide-react";
+import { Activity, DoorOpen, Package, Route, ShieldCheck, Moon, Sun, Monitor, Cog, ScrollText } from "lucide-react";
 import { useHydrated, useQueryParam } from "@/lib/browser";
 import { api } from "@/lib/api";
 
@@ -13,6 +13,7 @@ const nav = [
   { href: "/bundles/", label: "Bundles", icon: Package },
   { href: "/passages/", label: "Passages", icon: Route },
   { href: "/approvals/", label: "Approvals", icon: ShieldCheck },
+  { href: "/audit/", label: "Audit", icon: ScrollText },
   { href: "/settings/", label: "Settings", icon: Cog },
 ];
 
