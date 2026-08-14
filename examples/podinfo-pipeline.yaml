@@ -44,15 +44,26 @@ spec:
         with:
           repo: https://github.com/acme/deploy.git
           branch: main
+          # A Secret with `username`+`password` (a token), or `identity` for
+          # SSH. Every git step resolves credentials independently, so this is
+          # named again on git-push below rather than inherited.
+          credentialsRef:
+            name: deploy-repo
       - uses: set-image
         with:
-          path: envs/dev
+          path: repo/envs/dev/kustomization.yaml
           image: ghcr.io/stefanprodan/podinfo
       - uses: git-commit
         as: commit
         with:
           message: "dev: podinfo ${{ bundle.image('ghcr.io/stefanprodan/podinfo').tag }}"
       - uses: git-push
+        with:
+          # Each git step resolves its own credentials — git-push does not
+          # inherit git-clone's. Omitting this pushes anonymously and fails
+          # after the commit is already made.
+          credentialsRef:
+            name: deploy-repo
       - uses: flux-wait
         with:
           resources:
@@ -78,15 +89,26 @@ spec:
         with:
           repo: https://github.com/acme/deploy.git
           branch: main
+          # A Secret with `username`+`password` (a token), or `identity` for
+          # SSH. Every git step resolves credentials independently, so this is
+          # named again on git-push below rather than inherited.
+          credentialsRef:
+            name: deploy-repo
       - uses: set-image
         with:
-          path: envs/staging
+          path: repo/envs/staging/kustomization.yaml
           image: ghcr.io/stefanprodan/podinfo
       - uses: git-commit
         as: commit
         with:
           message: "staging: podinfo ${{ bundle.image('ghcr.io/stefanprodan/podinfo').tag }}"
       - uses: git-push
+        with:
+          # Each git step resolves its own credentials — git-push does not
+          # inherit git-clone's. Omitting this pushes anonymously and fails
+          # after the commit is already made.
+          credentialsRef:
+            name: deploy-repo
       - uses: flux-wait
         with:
           resources:
@@ -129,9 +151,14 @@ spec:
         with:
           repo: https://github.com/acme/deploy.git
           branch: main
+          # A Secret with `username`+`password` (a token), or `identity` for
+          # SSH. Every git step resolves credentials independently, so this is
+          # named again on git-push below rather than inherited.
+          credentialsRef:
+            name: deploy-repo
       - uses: set-image
         with:
-          path: envs/prod
+          path: repo/envs/prod/kustomization.yaml
           image: ghcr.io/stefanprodan/podinfo
       - uses: git-commit
         as: commit
@@ -142,6 +169,8 @@ spec:
         as: push
         with:
           toNewBranch: true
+          credentialsRef:
+            name: deploy-repo
       - uses: git-pull-request
         with:
           repo: https://github.com/acme/deploy.git
