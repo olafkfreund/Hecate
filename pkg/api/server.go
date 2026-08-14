@@ -85,6 +85,12 @@ func (s *Server) Handler() http.Handler {
 		s.guard(ActionRead, s.getBundle))
 	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/bundles/{name}/evidence",
 		s.guard(ActionRead, s.bundleEvidence))
+	// The audit trail. Guarded as an ordinary namespace read: it is assembled
+	// from Gates, Passages and Bundles, and someone who may read those three
+	// may read a summary of them.
+	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/audit",
+		s.guard(ActionRead, s.auditTrail))
+
 	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/passages",
 		s.guard(ActionRead, s.listPassages))
 	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/passages/{name}",
@@ -273,6 +279,10 @@ func (s *Server) pollBeacon(ctx context.Context, _ Subject, r *http.Request) (an
 // allowed it?" — read-only, because it only reports what Fides already holds.
 func (s *Server) bundleEvidence(ctx context.Context, _ Subject, r *http.Request) (any, error) {
 	return s.Ops.Evidence(ctx, r.PathValue("namespace"), r.PathValue("name"))
+}
+
+func (s *Server) auditTrail(ctx context.Context, _ Subject, r *http.Request) (any, error) {
+	return s.Ops.Audit(ctx, r.PathValue("namespace"))
 }
 
 func (s *Server) listPassages(ctx context.Context, _ Subject, r *http.Request) (any, error) {
