@@ -1,0 +1,87 @@
+# Keep the Synechron mirror in step with this repository.
+#
+# **This workflow runs in the MIRROR, not here.** It lives in the public
+# repository because that is the only way it reaches the mirror at all — the
+# mirror is a fast-forward copy, so anything added only there would make it
+# diverge and break the very sync this performs. The `if` on the job is what
+# keeps it dormant upstream.
+#
+# The direction is deliberate: the mirror PULLS rather than the source PUSHING.
+#
+# Pushing from here would need a credential with write access to
+# `synechron/Hecate` stored in the secrets of a PUBLIC repository. There is no
+# safe version of that — GitHub declines to issue a fine-grained token across
+# an enterprise boundary for this case, so it would mean a classic PAT, which
+# cannot be scoped to one repository and would carry every scope its owner has.
+#
+# Pulling needs no credential at all. This repository is public, so fetching it
+# requires no authentication, and the push is to the mirror's own repository,
+# which the built-in GITHUB_TOKEN can already do. Zero secrets, nothing to
+# rotate, nothing to leak.
+#
+# Fast-forward only. If someone commits directly to the mirror it will refuse
+# rather than discard their work, and the run fails loudly so a human decides.
+
+name: mirror-sync
+
+on:
+  schedule:
+    # Hourly. The mirror is a convenience copy, not a release channel — a
+    # shorter interval would burn minutes to shorten a delay nobody is waiting
+    # on. Use the manual trigger when a sync is actually urgent.
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    # Dormant in the source repository. Without this the workflow would try to
+    # sync this repo to itself on every schedule tick.
+    if: ${{ github.repository == 'synechron/Hecate' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: fast-forward main from the public upstream
+        env:
+          UPSTREAM: https://github.com/olafkfreund/Hecate.git
+        run: |
+          set -euo pipefail
+          git fetch --no-tags "$UPSTREAM" main
+
+          local_sha=$(git rev-parse HEAD)
+          upstream_sha=$(git rev-parse FETCH_HEAD)
+
+          if [ "$local_sha" = "$upstream_sha" ]; then
+            echo "Already in sync at ${upstream_sha:0:12}."
+            exit 0
+          fi
+
+          # Refuse anything that is not a fast-forward. `--is-ancestor` asks
+          # exactly the right question: is what we have already contained in
+          # what we are moving to? If not, the mirror carries commits the
+          # upstream does not, and resolving that is a decision rather than an
+          # automation.
+          if ! git merge-base --is-ancestor "$local_sha" "$upstream_sha"; then
+            echo "::error::the mirror has diverged from upstream and cannot be fast-forwarded."
+            echo "Commits on the mirror that upstream does not have:"
+            git log --oneline "$upstream_sha..$local_sha"
+            echo "Resolve by hand — this workflow will not discard them."
+            exit 1
+          fi
+
+          git push origin "${upstream_sha}:refs/heads/main"
+          echo "Fast-forwarded ${local_sha:0:12} -> ${upstream_sha:0:12}."
+
+      - name: mirror tags
+        # Releases are cut upstream; without this the mirror has the code but
+        # none of the version history, which makes it useless for checking out
+        # a released version.
+        run: |
+          set -euo pipefail
+          git fetch --tags https://github.com/olafkfreund/Hecate.git
+          git push --tags origin 2>&1 | tail -5 || true
