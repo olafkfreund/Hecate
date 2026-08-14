@@ -56,3 +56,61 @@ subjects:
     namespace: {{ .Release.Namespace }}
 {{- end }}
 {{- end }}
+{{- if and .Values.rbac.create .Values.api.enabled .Values.api.settings.writable }}
+---
+{{/*
+  Extra rights the settings screen's write actions need.
+
+  SEPARATE, AND OFF BY DEFAULT, because this is the largest grant in the chart.
+  It lets the API's ServiceAccount create ClusterRoleBindings and read and write
+  Secrets — which is to say it can grant roles and hold kubeconfigs for other
+  clusters. Every Hecate install does not need that, and a permission granted
+  because it was the default is one nobody decided to give.
+
+  What keeps it from being an escalation path is not this file. hecate-api
+  authorises the CALLER against each of these resources before it writes, and
+  will only bind the three roles the chart creates for people — because
+  Kubernetes' own escalation prevention compares the writer's rights, and the
+  writer here is the ServiceAccount rather than the person clicking. See
+  pkg/api/writes.go and its tests.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "hecate.fullname" . }}-settings
+  labels: {{- include "hecate.labels" . | nindent 4 }}
+rules:
+  # Granting people roles. `bind` is what lets the ServiceAccount create a
+  # binding to a role it does not itself hold, and it is restricted by name to
+  # the three the chart creates — so this cannot be used to hand out anything
+  # else, whatever the API were asked to do.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterrolebindings"]
+    verbs: ["get", "list", "create"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    verbs: ["bind"]
+    resourceNames: ["hecate-viewer", "hecate-promoter", "hecate-approver"]
+  # Remote cluster credentials, which are kubeconfigs.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "update"]
+  # Changing which evidence server a Gate trusts.
+  - apiGroups: ["hecate.dev"]
+    resources: ["gates"]
+    verbs: ["update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "hecate.fullname" . }}-settings
+  labels: {{- include "hecate.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "hecate.fullname" . }}-settings
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "hecate.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

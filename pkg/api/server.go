@@ -58,6 +58,21 @@ func (s *Server) Handler() http.Handler {
 	// list of their own namespaces is precisely backwards.
 	mux.Handle("GET /api/v1alpha1/namespaces", s.authenticated(s.listNamespaces))
 
+	// Settings reads across namespaces and filters per namespace, same as the
+	// namespace list, so it is authenticated here and authorised in the handler.
+	mux.Handle("GET /api/v1alpha1/settings", s.authenticated(s.settings))
+
+	// Settings writes. Each authorises the CALLER against the exact resource it
+	// touches, inside the handler, because guard() checks hecate.dev resources
+	// in a path namespace and these are RBAC bindings, core Secrets and a
+	// cluster-scoped grant. The server writes with its own ServiceAccount, so
+	// skipping that check would make every one of these a way to borrow the
+	// server's permissions.
+	mux.Handle("GET /api/v1alpha1/rbac/grants", s.authenticated(s.listBindings))
+	mux.Handle("POST /api/v1alpha1/rbac/grants", s.authenticated(s.bindRole))
+	mux.Handle("POST /api/v1alpha1/namespaces/{namespace}/clusters", s.authenticated(s.connectCluster))
+	mux.Handle("PUT /api/v1alpha1/namespaces/{namespace}/gates/{name}/evidence", s.authenticated(s.setEvidence))
+
 	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/gates",
 		s.guard(ActionRead, s.listGates))
 	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/gates/{name}",
@@ -334,8 +349,28 @@ func decode(r *http.Request, into any) error {
 //
 // A refusal is not a malfunction: "this Bundle has not cleared staging" is an
 // answer, and a client should be able to tell it from a server that broke.
+// BadRequest is a request the caller can fix by sending different input.
+//
+// Distinct from ops.IsRefused, which means the request was fine and the state
+// of the system said no. Conflating them tells someone to change their input
+// when the input was never the problem.
+type BadRequest struct{ Reason string }
+
+func (e *BadRequest) Error() string { return e.Reason }
+
 func writeOpsError(w http.ResponseWriter, err error) {
+	var badRequest *BadRequest
+	var forbidden *Forbidden
 	switch {
+	case errors.As(err, &badRequest):
+		writeError(w, http.StatusBadRequest, badRequest.Error())
+	case errors.As(err, &forbidden):
+		// Handlers that authorise for themselves — the settings writes, which
+		// check a resource guard() knows nothing about — return this rather
+		// than writing a response, so it has to be translated here. Without
+		// this case a refusal is reported as a server fault, which sends
+		// someone debugging Hecate when the answer is "you may not do that".
+		writeError(w, http.StatusForbidden, forbidden.Error())
 	case ops.IsNotFound(err):
 		writeError(w, http.StatusNotFound, err.Error())
 	case ops.IsRefused(err):

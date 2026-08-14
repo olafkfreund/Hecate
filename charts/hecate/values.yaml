@@ -112,6 +112,22 @@ api:
     # certificate — there is no option to skip that, deliberately.
     insecureCookie: false
 
+  # The settings screen's write actions: granting someone a Hecate role,
+  # storing a remote cluster's kubeconfig, pointing a Gate at a different
+  # evidence server.
+  #
+  # Off by default, and the default is the important part. Turning it on grants
+  # the API's ServiceAccount the right to create ClusterRoleBindings and to
+  # read and write Secrets — the largest grant in this chart. hecate-api
+  # authorises the caller against each of those before it writes and will bind
+  # only the three roles above, so it is not an escalation path; it is still a
+  # decision worth making deliberately rather than inheriting.
+  #
+  # Note also that a Gate edited here is a Gate edited in the cluster. If your
+  # Gates come from git, Flux restores the committed value on its next sync.
+  settings:
+    writable: false
+
   service:
     type: ClusterIP
     port: 443
