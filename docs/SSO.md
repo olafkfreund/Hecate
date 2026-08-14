@@ -101,16 +101,100 @@ Dex issues a token, the cluster accepts it, the API answers 200 — so a change
 that breaks any layer fails it. The full walkthrough, including the self-signed
 CA, is in [Onboarding](ONBOARDING.md#signing-in-to-the-web-portal).
 
+## Deploying it with the chart
+
+The variables above are what `hecate-api` reads. The chart sets them from
+`api.oidc`, and turning the API on without them gives you a UI that loads and
+bounces off `/auth/login`, because the UI has no token box — a bearer token is
+how the CLI talks to the API, not how a browser does.
+
+```yaml
+api:
+  enabled: true
+  # TLS terminating at an ingress in front rather than at Hecate.
+  allowInsecure: true
+  oidc:
+    enabled: true
+    issuer: https://dex.example.com
+    clientID: hecate
+    redirectURL: https://hecate.example.com/auth/callback
+    clientSecretRef:
+      name: hecate-oidc      # key: clientSecret
+    # Scopes BEYOND openid, which hecate-api always requests. Listing openid
+    # here asks for it twice.
+    scopes: "profile,email,groups"
+
+ingress:
+  enabled: true
+  className: nginx
+  host: hecate.example.com
+  tls:
+    enabled: true
+    secretName: hecate-tls
+```
+
+The client secret is a Secret reference and never a value: anything in values
+is readable by whoever can run `helm get values`.
+
+The chart refuses configurations that would render something broken rather than
+producing them — an ingress with no API behind it, an ingress with no host (on a
+shared controller that catches other applications' traffic), OIDC without an
+issuer or a secret reference, and the API without TLS.
+
 ## Provider recipes
 
-**Not written yet, deliberately.** The configuration above is provider-agnostic
-and is what every provider needs; what a recipe adds is the specific
-clicking-through for Okta, Entra, Google, Keycloak and the rest.
+The configuration above is provider-agnostic and is what every provider needs;
+what a recipe adds is the specific clicking-through for a given one.
 
-Those are only worth publishing once somebody has actually run them against a
-real tenant. A recipe written from documentation rather than from a working
-deployment is how a project ends up with instructions that are confidently
-wrong — which is the problem recipes exist to solve, made worse by carrying our
-name. Tracked in #52; contributions from anyone running one are welcome, and the
-useful contribution is the diff between this page and what you actually had to
-do.
+**Only recipes somebody has actually run appear here.** A recipe written from
+documentation rather than from a working deployment is how a project ends up
+with instructions that are confidently wrong — the problem recipes exist to
+solve, made worse by carrying our name. Okta, Entra, Google and Keycloak are
+still unwritten for that reason. Tracked in #52; the useful contribution is the
+diff between this page and what you actually had to do.
+
+### Dex on EKS
+
+Run against a real cluster, which is the bar this page sets for a recipe. Full
+scripted version: `infra/aws-hecate-demo/scripts/portal.sh` in the SARC repo.
+
+**EKS has to be told about the issuer.** This is the step that has no equivalent
+on a self-managed cluster where you would edit the API server flags:
+
+```bash
+aws eks associate-identity-provider-config --cluster-name <cluster> \
+  --oidc identityProviderConfigName=dex,issuerUrl=https://dex.example.com,\
+clientId=hecate,usernameClaim=email,groupsClaim=groups
+```
+
+Three things worth knowing before you spend the twenty minutes it takes:
+
+- **The issuer must be publicly reachable over HTTPS with a certificate that
+  chains.** The EKS control plane fetches the signing keys from outside your
+  VPC, so an in-cluster provider needs a real ingress and a real certificate. A
+  self-signed one fails at the end of the association with an error that does
+  not mention certificates.
+- **`usernameClaim=email` makes the user their email address**, so RBAC subjects
+  are `kind: User, name: someone@example.com`. Pick the claim before you write
+  the bindings; changing it later invalidates all of them.
+- **The association takes 10-20 minutes** and the cluster works normally
+  throughout. It is not wedged.
+
+Bind the ClusterRoles the chart creates unbound — `hecate-promoter` and
+`hecate-approver` are separate on purpose, and giving one subject both is a
+decision rather than the default:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hecate-promoter
+subjects:
+  - kind: User
+    name: someone@example.com
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: hecate-promoter
+  apiGroup: rbac.authorization.k8s.io
+```
