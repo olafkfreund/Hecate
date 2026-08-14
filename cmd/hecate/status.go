@@ -8,6 +8,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	corev1 "k8s.io/api/core/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/clientcmd"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -17,6 +18,26 @@ import (
 	"github.com/olafkfreund/hecate/pkg/llm"
 	"github.com/olafkfreund/hecate/pkg/ops"
 )
+
+// clientScheme is what every client in this binary is built with.
+//
+// v1alpha1 alone is not enough, and the gap is not obvious: recording an
+// approval reads the Fides credentials from a Secret, so `hecate approve`
+// against an evidence-bound Gate failed with "no kind is registered for the
+// type v1.Secret" — a message that names the scheme rather than the Secret and
+// sends you looking at RBAC. Nothing in the type system connects the Ops
+// methods that read Secrets to the scheme the caller happens to build, so this
+// is one function rather than three call sites that must each remember.
+func clientScheme() (*k8sruntime.Scheme, error) {
+	s := k8sruntime.NewScheme()
+	if err := v1alpha1.AddToScheme(s); err != nil {
+		return nil, err
+	}
+	if err := corev1.AddToScheme(s); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
 
 // operations builds an Ops against the cluster the kubeconfig points at.
 //
@@ -28,8 +49,8 @@ func operations() (*ops.Ops, error) {
 	if err != nil {
 		return nil, fmt.Errorf("no Kubernetes configuration: %w", err)
 	}
-	scheme := k8sruntime.NewScheme()
-	if err := v1alpha1.AddToScheme(scheme); err != nil {
+	scheme, err := clientScheme()
+	if err != nil {
 		return nil, err
 	}
 	c, err := client.New(cfg, client.Options{Scheme: scheme})

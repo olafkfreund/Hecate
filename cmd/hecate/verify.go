@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -173,8 +172,8 @@ func crossingsOf(ctx context.Context, bundle, namespace string) ([]crossing, int
 	if err != nil {
 		return nil, fail(exitError, "no Kubernetes configuration: %s", err)
 	}
-	scheme := k8sruntime.NewScheme()
-	if err := v1alpha1.AddToScheme(scheme); err != nil {
+	scheme, err := clientScheme()
+	if err != nil {
 		return nil, fail(exitError, "%s", err)
 	}
 	kube, err := client.New(cfg, client.Options{Scheme: scheme})
