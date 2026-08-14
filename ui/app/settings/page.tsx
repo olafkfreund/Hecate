@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
 
 import { api, ApiError, Settings, Grant } from "@/lib/api";
@@ -29,14 +29,21 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
-  async function refresh() {
+  // Every setState here happens after an await, never on the synchronous path
+  // an effect runs on. Calling a function that sets state synchronously from an
+  // effect makes React render again before the first render has committed, and
+  // the lint rule that catches it is right to: the version of this that did so
+  // was one thrown error away from a render loop.
+  const refresh = useCallback(async () => {
     try {
-      setSettings(await api.settings());
+      const s = await api.settings();
+      setSettings(s);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
     try {
-      setGrants((await api.grants()).grants);
+      const g = await api.grants();
+      setGrants(g.grants);
     } catch (e) {
       // A 403 here is the ordinary case for someone who may use Hecate but not
       // administer it, so it leaves the section absent rather than shouting.
@@ -45,10 +52,38 @@ export default function SettingsPage() {
       }
       setGrants(null);
     }
-  }
+  }, []);
 
+  // Promise callbacks rather than a call in the effect body. The lint rule
+  // objects to the latter because it cannot see that every setState is behind
+  // an await, and it is right to insist: a synchronous set during an effect
+  // renders again before the first render has committed. This is the shape the
+  // namespace picker in the shell already uses.
+  //
+  // `live` drops results that arrive after the page has gone, which is a real
+  // case here — the settings call probes every connected cluster before it
+  // answers, so it can outlive a quick navigation away.
   useEffect(() => {
-    void refresh();
+    let live = true;
+    api
+      .settings()
+      .then((s) => live && setSettings(s))
+      .catch((e) => live && setError(e instanceof Error ? e.message : String(e)));
+    api
+      .grants()
+      .then((g) => live && setGrants(g.grants))
+      .catch((e) => {
+        if (!live) return;
+        // A 403 is the ordinary case for someone who may use Hecate but not
+        // administer it, so the section is absent rather than shouting.
+        if (!(e instanceof ApiError && e.status === 403)) {
+          setError(e instanceof Error ? e.message : String(e));
+        }
+        setGrants(null);
+      });
+    return () => {
+      live = false;
+    };
   }, []);
 
   return (

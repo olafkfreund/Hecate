@@ -100,8 +100,11 @@ type Telemetry struct {
 // settings assembles the screen.
 func (s *Server) settings(ctx context.Context, subject Subject, _ *http.Request) (any, error) {
 	out := Settings{
-		Version:  s.Version,
-		Identity: Identity{Name: subject.Name, Groups: subject.Groups},
+		Version: s.Version,
+		// A conversion, not a copy: Identity exists to give the JSON its own
+		// shape and has the same fields, so staticcheck is right that spelling
+		// them out invites the two drifting apart.
+		Identity: Identity(subject),
 		Fides:    []FidesTarget{},
 		Clusters: []ClusterTarget{},
 	}

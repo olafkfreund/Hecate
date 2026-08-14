@@ -78,8 +78,10 @@ func (s *Server) bindRole(ctx context.Context, subject Subject, r *http.Request)
 		return nil, &BadRequest{Reason: fmt.Sprintf("kind must be %s or %s", rbacv1.UserKind, rbacv1.GroupKind)}
 	}
 	if _, ok := bindableRoles[req.Role]; !ok {
-		return nil, &BadRequest{Reason: fmt.Sprintf(
-			"role must be one of hecate-viewer, hecate-promoter or hecate-approver — this API binds only the roles the chart creates for people, because binding an arbitrary role would let a caller grant themselves anything the server can grant")}
+		return nil, &BadRequest{Reason: "role must be one of hecate-viewer, " +
+			"hecate-promoter or hecate-approver — this API binds only the roles the chart " +
+			"creates for people, because binding an arbitrary role would let a caller grant " +
+			"themselves anything the server can grant"}
 	}
 
 	// The caller, not the server. See ActionBindRole.

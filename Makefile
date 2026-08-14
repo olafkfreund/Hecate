@@ -39,13 +39,21 @@ fmt: ## Format Go and Nix
 	gofmt -w .
 	nixfmt *.nix
 
-lint: ## Lint Go and Nix
+lint: ## Lint Go, Nix and the UI
 	@# golangci-lint's defaults do not include gofmt, and CI checks it in a
 	@# separate step — so `make lint` passed while CI failed on formatting.
 	@test -z "$$(gofmt -l .)" || { echo "gofmt needed:"; gofmt -l .; exit 1; }
 	golangci-lint run
 	statix check .
 	deadnix --fail .
+	@# The UI too, and it belongs here for the reason stated above rather than a
+	@# different one: CI lints it in its own job, so `make lint` passing said
+	@# nothing about whether the push would. A React hooks violation in the
+	@# settings page got through exactly that gap.
+	@# Skipped when the app has never been installed, so `make lint` still works
+	@# for someone touching only Go and without Node.
+	@if [ -d ui/node_modules ]; then cd ui && npm run --silent lint; \
+	else echo "ui: skipped (run 'cd ui && npm ci' to lint it)"; fi
 
 check: vet test flake-hash-check crd-embed-check ## Everything CI enforces, locally
 	@test -z "$$(gofmt -l .)" || { echo "gofmt needed:"; gofmt -l .; exit 1; }
