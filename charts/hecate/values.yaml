@@ -69,6 +69,49 @@ api:
     secretName: ""
   # Only for a mesh or ingress that terminates TLS in front of Hecate.
   allowInsecure: false
+
+  # Browser sign-in.
+  #
+  # The API itself needs none of this: a caller presenting a Kubernetes bearer
+  # token is authenticated by TokenReview, which is how the CLI talks to it. But
+  # the UI has no token box — it redirects to /auth/login on a 401 — so without
+  # OIDC the web interface loads and bounces off a route that answers nothing.
+  # Leave disabled for an API-only deployment; enable it to use the UI.
+  oidc:
+    enabled: false
+    # The provider's issuer URL. Must be reachable BOTH from the browser and
+    # from inside the cluster, and must match the `iss` claim exactly — a
+    # trailing slash difference is rejected with a message about the issuer
+    # rather than about the slash.
+    #
+    # **The cluster must trust this same issuer.** Hecate authorises through
+    # TokenReview, so a token this provider issues is only useful if the
+    # Kubernetes API server also accepts it. Configure the API server's OIDC
+    # flags, or on EKS an identity provider config, against the same issuer and
+    # client ID. Skip that and every login succeeds while every request that
+    # follows is rejected — which reads as a broken UI rather than a missing
+    # cluster setting.
+    issuer: ""
+    clientID: ""
+    # The client secret is read from a Secret, never from values: anything set
+    # here ends up in the Helm release, which is readable by anyone who can
+    # `helm get values`.
+    clientSecretRef:
+      name: ""
+      key: clientSecret
+    # Where the provider sends the browser back. Must be an absolute URL ending
+    # /auth/callback, and must be registered with the provider — a mismatch
+    # fails at the provider with an error the application never sees.
+    redirectURL: ""
+    # Extra scopes BEYOND openid, which hecate-api always requests. Adding
+    # openid here asks for it twice.
+    scopes: "profile,email,groups"
+    # Allow the session cookie over plain HTTP. Local development only: it is
+    # the difference between a session token the network can read and one it
+    # cannot. Note this is about the COOKIE, not about verifying the issuer's
+    # certificate — there is no option to skip that, deliberately.
+    insecureCookie: false
+
   service:
     type: ClusterIP
     port: 443
@@ -79,6 +122,22 @@ api:
       memory: 64Mi
     limits:
       memory: 256Mi
+
+# Browser access to the API.
+#
+# Separate from `api.service` because exposing the UI is a different decision
+# from letting things inside the cluster call the API. A ClusterIP is enough for
+# the CLI and for anything in-cluster; a person with a browser needs a route in.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  # TLS at the ingress. With this set, api.allowInsecure is the matching choice
+  # for the backend — TLS terminates here rather than at Hecate.
+  tls:
+    enabled: false
+    secretName: ""
 
 metrics:
   enabled: true
