@@ -353,6 +353,13 @@ jobs:
           Hecate refuses to start against CRDs older than itself, so skipping
           this is a failed rollout rather than a silent behaviour change.
 
+          **Read [Behaviour changes](https://github.com/${{ github.repository }}/blob/$GITHUB_REF_NAME/docs/UPGRADING.md#behaviour-changes-by-version)
+          before upgrading.** These notes are generated from a fixed template
+          and say nothing about what changed, so anything that alters what
+          Hecate *does* — as opposed to what it offers — is recorded there
+          instead. A change that looks like a regression when you meet it
+          unannounced is the one worth reading first.
+
           Image: \`${{ env.REGISTRY }}/${{ env.IMAGE }}:$v\`
           Digest: \`${{ needs.image.outputs.digest }}\`
 
