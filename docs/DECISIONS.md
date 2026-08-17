@@ -1739,3 +1739,38 @@ is unchanged; `SchemeBuilder` keeps its name but is now a
 `*runtime.SchemeBuilder`, whose `Register` takes functions rather than objects.
 Nothing in the tree used it, and at v1alpha1 that is a break worth taking now
 rather than at v1.
+
+## D55 — The CLI has no login of its own
+
+*2026-08-17 — #73*
+
+`hecate` authenticates by not authenticating. It reaches the Kubernetes API
+through the kubeconfig — `ctrl.GetConfig()`, `clientcmd` — and never calls
+`hecate-api` at all. So it is already whoever `kubectl` is, and on a cluster
+using OIDC that means it inherits the `kubectl oidc-login` exec credential the
+cluster's own users already have.
+
+**So there is no `hecate login`, and that is the decision rather than an
+omission.** #73 asked for OIDC "needed by both the UI and `hecate login`". The
+UI needs it and has it. The CLI does not, and building one would mean a second
+credential path for a problem `kubectl` solves, plus a token of ours to store,
+expire and leak. The same argument the provider work makes against holding a
+long-lived PAT beside a short-lived installation token applies here: when there
+are two ways to authenticate, the weaker one is the one that gets used.
+
+**It also keeps authorisation honest.** Hecate does not decide who may promote;
+it asks Kubernetes, via SubjectAccessReview, and RBAC answers. A CLI holding its
+own credential would be a second identity to authorise, and the first thing
+anyone would ask for is a way to make it a service account with broad rights —
+which is the pipeline-shaped bypass the whole design exists to avoid.
+
+**What would reopen it.** A CLI command that must talk to `hecate-api` rather
+than to the API server. Nothing does today; `verify` talks to Fides directly
+with its own `--server`/`--token`, which is a different system and a credential
+the user already has. If that changes, the question is live again, and the
+answer should probably still be "reuse the kubeconfig's OIDC token" rather than
+"mint our own".
+
+Provider sign-in recipes — Okta, Entra, Google, Keycloak — are a separate
+matter, tracked in #52 and deliberately unwritten until somebody has run one
+against a real tenant.
