@@ -9,7 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -41,14 +41,14 @@ func imageWatch(repo string) v1alpha1.WatchSource {
 	return v1alpha1.WatchSource{Image: &v1alpha1.ImageWatch{Repo: repo}}
 }
 
-func newReconciler(t *testing.T, objs ...client.Object) (*Reconciler, client.Client, *record.FakeRecorder) {
+func newReconciler(t *testing.T, objs ...client.Object) (*Reconciler, client.Client, *events.FakeRecorder) {
 	t.Helper()
 	c := fake.NewClientBuilder().
 		WithScheme(scheme(t)).
 		WithObjects(objs...).
 		WithStatusSubresource(&v1alpha1.Beacon{}).
 		Build()
-	rec := record.NewFakeRecorder(20)
+	rec := events.NewFakeRecorder(20)
 	return &Reconciler{
 		Client:   c,
 		Resolver: &Resolver{Client: c},

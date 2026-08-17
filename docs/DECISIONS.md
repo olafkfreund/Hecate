@@ -1691,3 +1691,51 @@ to decide something the Beacon re-derives anyway.
 
 **A suspended Beacon is refused rather than accepted.** It would acknowledge the
 request and poll nothing, which reads to the caller as success.
+
+## D54 — An event says what we did and how it turned out
+
+*2026-08-17 — #116*
+
+controller-runtime 0.24 deprecated `GetEventRecorderFor` and
+`client-go/tools/record` in favour of `GetEventRecorder` and
+`client-go/tools/events`. The old API is not removed, so this was deferred work
+rather than optional work, and it was deferred for a reason: the new `Eventf`
+takes an `action` the old one had no room for, which is a decision about what
+Hecate says rather than a rename.
+
+**`action` is the operation, `reason` is the outcome.** The interface asks for
+"what action did the reporting controller take in the object's name", separately
+from why the object is in the state it is. So a Gate that starts a Passage, one
+that watches a crossing fail and one that watches it succeed are all `Crossing`,
+and what distinguishes them is `PassageStarted`, `CrossingFailed`,
+`BundleCrossed`. Five actions cover everything Hecate emits:
+
+| action | events |
+|---|---|
+| `Emitting` | `BundleEmitted` |
+| `Validating` | `InvalidSteps` |
+| `Crossing` | `PassageStarted`, `BundleCrossed`, `CrossingFailed`, `PassageSucceeded`, `PassageAborted`, `PassageFailed` |
+| `Resolving` | `BundleMissing` |
+| `Attesting` | `AttestationSkipped`, `AttestationFailed` |
+| `Monitoring` | `HealthChanged` |
+
+**No reason or type changed**, deliberately. Those are what people write alerts
+against, and a migration that quietly renamed one would break a paging rule to
+tidy an import.
+
+**The shared fake cannot see any of this**, which is the trap. `events.FakeRecorder`
+formats an event as type + reason + note and discards `action`, so every action
+in the tree could be empty and the whole suite would still pass — the first
+version of the test that was supposed to cover this passed its own literals in
+and asserted them back, and a deliberately wrong action at a call site sailed
+through it. `pkg/gate/events_test.go` uses a recorder that keeps the field and
+drives it through `Reconcile`.
+
+**`scheme.Builder` went at the same time**, for the reason its own deprecation
+gives: an API package should have minimal dependencies. `api/v1alpha1` now
+builds its scheme with apimachinery's `runtime.NewSchemeBuilder`, so importing
+Hecate's types no longer drags controller-runtime in behind them. `AddToScheme`
+is unchanged; `SchemeBuilder` keeps its name but is now a
+`*runtime.SchemeBuilder`, whose `Register` takes functions rather than objects.
+Nothing in the tree used it, and at v1alpha1 that is a break worth taking now
+rather than at v1.

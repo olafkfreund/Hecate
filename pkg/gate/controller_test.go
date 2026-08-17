@@ -12,7 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -46,14 +46,14 @@ func autoGate(name string, admissions ...v1alpha1.Admission) *v1alpha1.Gate {
 	return g
 }
 
-func newReconciler(t *testing.T, objs ...client.Object) (*Reconciler, client.Client, *record.FakeRecorder) {
+func newReconciler(t *testing.T, objs ...client.Object) (*Reconciler, client.Client, *events.FakeRecorder) {
 	t.Helper()
 	c := fake.NewClientBuilder().
 		WithScheme(scheme(t)).
 		WithObjects(objs...).
 		WithStatusSubresource(&v1alpha1.Gate{}, &v1alpha1.Bundle{}, &v1alpha1.Passage{}).
 		Build()
-	rec := record.NewFakeRecorder(20)
+	rec := events.NewFakeRecorder(20)
 	return &Reconciler{
 		Client:   c,
 		Recorder: rec,
@@ -604,7 +604,7 @@ func (s *swingingChecker) Check(context.Context, health.Request) v1alpha1.Health
 	return v1alpha1.HealthReport{Status: s.status}
 }
 
-func drain(rec *record.FakeRecorder) {
+func drain(rec *events.FakeRecorder) {
 	for {
 		select {
 		case <-rec.Events:
@@ -614,7 +614,7 @@ func drain(rec *record.FakeRecorder) {
 	}
 }
 
-func next(rec *record.FakeRecorder) string {
+func next(rec *events.FakeRecorder) string {
 	select {
 	case e := <-rec.Events:
 		return e

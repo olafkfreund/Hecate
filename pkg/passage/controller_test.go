@@ -12,7 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -53,14 +53,14 @@ func bundleObj() *v1alpha1.Bundle {
 	}
 }
 
-func newController(t *testing.T, runners []Runner, objs ...client.Object) (*Reconciler, client.Client, *record.FakeRecorder) {
+func newController(t *testing.T, runners []Runner, objs ...client.Object) (*Reconciler, client.Client, *events.FakeRecorder) {
 	t.Helper()
 	c := fake.NewClientBuilder().
 		WithScheme(scheme(t)).
 		WithObjects(objs...).
 		WithStatusSubresource(&v1alpha1.Passage{}, &v1alpha1.Bundle{}).
 		Build()
-	rec := record.NewFakeRecorder(20)
+	rec := events.NewFakeRecorder(20)
 	return &Reconciler{
 		Client:   c,
 		Engine:   newEngine(runners...),
@@ -296,7 +296,7 @@ func TestMissingPassageIsNotAnError(t *testing.T) {
 
 // drainFor asserts an event mentioning reason was recorded, and that no
 // duplicate follows on subsequent reconciles.
-func drainFor(t *testing.T, rec *record.FakeRecorder, reason string) {
+func drainFor(t *testing.T, rec *events.FakeRecorder, reason string) {
 	t.Helper()
 	select {
 	case e := <-rec.Events:
