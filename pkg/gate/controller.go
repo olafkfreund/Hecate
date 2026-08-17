@@ -10,7 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -68,7 +68,7 @@ type Reconciler struct {
 	// not checked — which is worse than checking it, and better than a
 	// controller that refuses to start because nobody wired a registry.
 	Steps    *passage.Registry
-	Recorder record.EventRecorder
+	Recorder events.EventRecorder
 	// Verifiers is the verifier registry, injectable for tests. Nil uses the
 	// built-in set.
 	Verifiers map[string]Verifier
@@ -122,7 +122,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if problems := r.checkSteps(&gate); len(problems) > 0 {
 		gate.Status.Eligible = nil
 		r.setReady(&gate, metav1.ConditionFalse, ReasonInvalidSteps, problems)
-		r.event(&gate, corev1.EventTypeWarning, ReasonInvalidSteps, problems)
+		r.event(&gate, corev1.EventTypeWarning, ReasonInvalidSteps, "Validating", problems)
 		logger.Info("gate has invalid steps", "problems", problems)
 		return ctrl.Result{}, r.Status().Update(ctx, &gate)
 	}
@@ -277,7 +277,7 @@ func (r *Reconciler) advance(
 		return "PassageFailed", err.Error()
 	}
 	gate.Status.ActivePassage = passage.Name
-	r.event(gate, corev1.EventTypeNormal, "PassageStarted",
+	r.event(gate, corev1.EventTypeNormal, "PassageStarted", "Crossing",
 		fmt.Sprintf("started Passage %s to cross Bundle %s", passage.Name, next.Name))
 	return "Crossing", fmt.Sprintf("Passage %s is in progress", passage.Name)
 }
@@ -494,7 +494,7 @@ func (r *Reconciler) recordOutcome(ctx context.Context, gate *v1alpha1.Gate, pas
 				return "", fmt.Errorf("recording blocked crossing on Bundle %s: %w", bundle.Name, err)
 			}
 		}
-		r.event(gate, corev1.EventTypeWarning, "CrossingFailed",
+		r.event(gate, corev1.EventTypeWarning, "CrossingFailed", "Crossing",
 			fmt.Sprintf("Bundle %s did not cross: %s", bundle.Name, passage.Status.Message))
 		return "", nil
 	}
@@ -560,7 +560,7 @@ func (r *Reconciler) recordOutcome(ctx context.Context, gate *v1alpha1.Gate, pas
 		}
 	}
 
-	r.event(gate, corev1.EventTypeNormal, "BundleCrossed",
+	r.event(gate, corev1.EventTypeNormal, "BundleCrossed", "Crossing",
 		fmt.Sprintf("Bundle %s crossed via Passage %s", bundle.Name, passage.Name))
 	return "", nil
 }
@@ -615,7 +615,7 @@ func (r *Reconciler) announceHealth(gate *v1alpha1.Gate, previous *v1alpha1.Heal
 	if issues := gate.Status.Health.Issues; len(issues) > 0 {
 		message = fmt.Sprintf("%s: %s", message, issues[0])
 	}
-	r.event(gate, eventType, "HealthChanged", message)
+	r.event(gate, eventType, "HealthChanged", "Monitoring", message)
 }
 
 func (r *Reconciler) assess(
@@ -735,11 +735,13 @@ func (r *Reconciler) setReady(gate *v1alpha1.Gate, status metav1.ConditionStatus
 	})
 }
 
-func (r *Reconciler) event(gate *v1alpha1.Gate, eventType, reason, message string) {
+// event records a Kubernetes event against the Gate. See the Beacon's
+// equivalent for what `action` is for.
+func (r *Reconciler) event(gate *v1alpha1.Gate, eventType, reason, action, message string) {
 	if r.Recorder == nil {
 		return
 	}
-	r.Recorder.Event(gate, eventType, reason, message)
+	r.Recorder.Eventf(gate, nil, eventType, reason, action, "%s", message)
 }
 
 // SetupWithManager registers the controller.
@@ -749,7 +751,7 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// argument — so this is a user-visible change to the events people alert
 		// on rather than a rename. Tracked in #116; the old API is deprecated but
 		// not removed, and controller-runtime suppresses it the same way itself.
-		r.Recorder = mgr.GetEventRecorderFor("gate-controller") //nolint:staticcheck // see #116
+		r.Recorder = mgr.GetEventRecorder("gate-controller")
 	}
 	// Watches rather than Owns: Passages carry no owner reference, because an
 	// owner reference would cascade-delete the record of every crossing when a

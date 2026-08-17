@@ -93,7 +93,7 @@ func (r *Reconciler) attest(ctx context.Context, p *v1alpha1.Passage, bundle *v1
 		// is worth saying out loud, because it may be hiding a Gate that did
 		// want this crossing recorded.
 		if !apierrors.IsNotFound(err) {
-			r.event(p, corev1.EventTypeWarning, "AttestationSkipped",
+			r.event(p, corev1.EventTypeWarning, "AttestationSkipped", "Attesting",
 				fmt.Sprintf("reading Gate %s to record the crossing: %s", p.Spec.Gate, err))
 		}
 		return
@@ -119,7 +119,7 @@ func (r *Reconciler) attest(ctx context.Context, p *v1alpha1.Passage, bundle *v1
 		// extend. Attesting to a trail we invent would be worse than not
 		// attesting: it would look like evidence and be attached to nothing CI
 		// produced.
-		r.event(p, corev1.EventTypeWarning, "AttestationSkipped",
+		r.event(p, corev1.EventTypeWarning, "AttestationSkipped", "Attesting",
 			fmt.Sprintf("Fides has no trail for the Bundle's artifacts, so the crossing of %s "+
 				"could not be recorded — the build that produced them did not report the artifact",
 				p.Spec.Gate))
@@ -252,7 +252,7 @@ func steps(p *v1alpha1.Passage) []map[string]any {
 }
 
 func (r *Reconciler) attestationFailed(p *v1alpha1.Passage, err error) {
-	r.event(p, corev1.EventTypeWarning, "AttestationFailed",
+	r.event(p, corev1.EventTypeWarning, "AttestationFailed", "Attesting",
 		fmt.Sprintf("the crossing of %s was not recorded in Fides: %s — the promotion happened, "+
 			"the evidence did not", p.Spec.Gate, err))
 }

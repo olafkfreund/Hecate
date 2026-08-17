@@ -12,7 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -130,7 +130,7 @@ func digestBundle() *v1alpha1.Bundle {
 
 // attestController is newController plus a scheme that knows about Secrets,
 // which the credentials lookup needs.
-func attestController(t *testing.T, runners []Runner, objs ...client.Object) (*Reconciler, client.Client, *record.FakeRecorder) {
+func attestController(t *testing.T, runners []Runner, objs ...client.Object) (*Reconciler, client.Client, *events.FakeRecorder) {
 	t.Helper()
 	s := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(s); err != nil {
@@ -144,7 +144,7 @@ func attestController(t *testing.T, runners []Runner, objs ...client.Object) (*R
 		WithObjects(objs...).
 		WithStatusSubresource(&v1alpha1.Passage{}, &v1alpha1.Bundle{}).
 		Build()
-	rec := record.NewFakeRecorder(20)
+	rec := events.NewFakeRecorder(20)
 	return &Reconciler{
 		Client:   c,
 		Engine:   newEngine(runners...),
@@ -332,7 +332,7 @@ func TestAttestingReusesTheTrailTheGatesWereJudgedOn(t *testing.T) {
 
 // drain returns everything the recorder has, so a test can assert about the
 // absence of an event as well as the presence of one.
-func drain(rec *record.FakeRecorder) string {
+func drain(rec *events.FakeRecorder) string {
 	var all []string
 	for {
 		select {
