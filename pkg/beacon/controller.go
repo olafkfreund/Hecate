@@ -10,7 +10,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -36,7 +36,7 @@ const DefaultInterval = 5 * time.Minute
 type Reconciler struct {
 	client.Client
 	Resolver *Resolver
-	Recorder record.EventRecorder
+	Recorder events.EventRecorder
 	// Now is the clock, injectable for tests.
 	Now func() time.Time
 }
@@ -119,7 +119,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		beacon.Status.LatestBundle = name
 		if created {
 			logger.Info("emitted Bundle", "bundle", name)
-			r.event(&beacon, corev1.EventTypeNormal, "BundleEmitted",
+			r.event(&beacon, corev1.EventTypeNormal, "BundleEmitted", "Emitting",
 				fmt.Sprintf("emitted Bundle %s from %d artifact(s)", name, len(artifacts)))
 		}
 		r.setReady(&beacon, metav1.ConditionTrue, "Discovered",
@@ -240,11 +240,17 @@ func (r *Reconciler) updateStatus(ctx context.Context, beacon *v1alpha1.Beacon) 
 	return r.Status().Update(ctx, beacon)
 }
 
-func (r *Reconciler) event(beacon *v1alpha1.Beacon, eventType, reason, message string) {
+// event records a Kubernetes event against the Beacon.
+//
+// `action` is what this controller did, `reason` is how it turned out — the
+// split the events API asks for and the old one had no room for. The note is
+// passed as an argument rather than as the format string, because a message
+// built from a registry's error can contain a stray %.
+func (r *Reconciler) event(beacon *v1alpha1.Beacon, eventType, reason, action, message string) {
 	if r.Recorder == nil {
 		return
 	}
-	r.Recorder.Event(beacon, eventType, reason, message)
+	r.Recorder.Eventf(beacon, nil, eventType, reason, action, "%s", message)
 }
 
 // pollTrigger decides which changes wake the Beacon.
@@ -290,7 +296,7 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// argument — so this is a user-visible change to the events people alert
 		// on rather than a rename. Tracked in #116; the old API is deprecated but
 		// not removed, and controller-runtime suppresses it the same way itself.
-		r.Recorder = mgr.GetEventRecorderFor("beacon-controller") //nolint:staticcheck // see #116
+		r.Recorder = mgr.GetEventRecorder("beacon-controller")
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.Beacon{}).
