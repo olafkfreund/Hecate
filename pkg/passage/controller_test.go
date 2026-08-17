@@ -432,3 +432,45 @@ func leadTimeObservations(t *testing.T) (uint64, float64) {
 	}
 	return count, sum
 }
+
+// capturing keeps the `action` argument, which events.FakeRecorder discards.
+// See the Beacon's equivalent and D54.
+type capturing struct{ actions map[string]string }
+
+func (c *capturing) Eventf(_, _ runtime.Object, _, reason, action, _ string, _ ...any) {
+	if c.actions == nil {
+		c.actions = map[string]string{}
+	}
+	c.actions[reason] = action
+}
+
+// A Passage crosses, so its terminal announcements are Crossing, and a Bundle
+// that went missing is Resolving. Driven through Reconcile.
+func TestPassageEventsNameTheirAction(t *testing.T) {
+	t.Run("a finished crossing is Crossing", func(t *testing.T) {
+		step := &scripted{name: "a", results: []StepResult{ok("done")}}
+		r, _, _ := newController(t, []Runner{step}, passageObj(v1alpha1.Step{Uses: "a"}), bundleObj())
+		rec := &capturing{}
+		r.Recorder = rec
+
+		advance(t, r)
+
+		if got := rec.actions["PassageSucceeded"]; got != "Crossing" {
+			t.Errorf("PassageSucceeded action = %q, want %q (all: %v)", got, "Crossing", rec.actions)
+		}
+	})
+
+	t.Run("a vanished Bundle is Resolving", func(t *testing.T) {
+		// No Bundle object, so the Passage cannot be completed honestly.
+		step := &scripted{name: "a", results: []StepResult{ok("done")}}
+		r, _, _ := newController(t, []Runner{step}, passageObj(v1alpha1.Step{Uses: "a"}))
+		rec := &capturing{}
+		r.Recorder = rec
+
+		advance(t, r)
+
+		if got := rec.actions["BundleMissing"]; got != "Resolving" {
+			t.Errorf("BundleMissing action = %q, want %q (all: %v)", got, "Resolving", rec.actions)
+		}
+	})
+}

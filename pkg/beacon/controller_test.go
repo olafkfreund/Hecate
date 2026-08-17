@@ -410,3 +410,38 @@ func TestASpecChangeWakesTheBeacon(t *testing.T) {
 		t.Error("editing a Beacon's spec did not wake it")
 	}
 }
+
+// capturing keeps the `action` argument, which events.FakeRecorder discards.
+//
+// The shared fake formats an event as type + reason + note, so with it alone
+// every action in this package could be empty and TestEmittingRecordsAnEvent
+// above would still pass. See D54.
+type capturing struct{ actions map[string]string }
+
+func (c *capturing) Eventf(_, _ runtime.Object, _, reason, action, _ string, _ ...any) {
+	if c.actions == nil {
+		c.actions = map[string]string{}
+	}
+	c.actions[reason] = action
+}
+
+// The Beacon emits, so its action is Emitting. Driven through Reconcile rather
+// than by calling r.event directly: a test that passes its own literals in and
+// asserts them back proves only that Go can pass arguments.
+func TestBeaconEventsNameTheirAction(t *testing.T) {
+	repo, _ := pushTags(t, "acme/podinfo", "6.1.0")
+	b := beaconWith(imageWatch(repo))
+	r, _, _ := newReconciler(t, b)
+	rec := &capturing{}
+	r.Recorder = rec
+
+	reconcile(t, r, b)
+
+	action, ok := rec.actions["BundleEmitted"]
+	if !ok {
+		t.Fatalf("no BundleEmitted event was recorded; got %v", rec.actions)
+	}
+	if action != "Emitting" {
+		t.Errorf("action = %q, want %q", action, "Emitting")
+	}
+}
