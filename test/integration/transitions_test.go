@@ -11,6 +11,13 @@
 //     than failing (D30);
 //  2. an allowlist refusal is cleared by allowlisting the digest.
 //
+// The second is proven outright. The first is proven as far as an organisation
+// with adopted controls allows: the approval registers as human sign-off, which
+// is the part Hecate is responsible for, and the release is then reported as
+// unproven rather than faked when the organisation's own controls are still
+// holding the change on evidence a synthetic trail cannot produce. The skip
+// says which. See #113.
+//
 // Both write, which is why they are opt-in rather than part of `make
 // fides-test`. Set FIDES_SCRATCH_FLOW to the name of a flow you are willing to
 // have written to:
@@ -229,14 +236,18 @@ func TestTransitionHeldChangeIsReleased(t *testing.T) {
 	ctx := context.Background()
 	step, sc := gateStep(t, s)
 
-	// A trail nobody has signed off on. Fides holds it because a human
-	// approval is missing, which is the control working rather than a fault.
+	// A trail nobody has signed off on. Fides holds it, which is the control
+	// working rather than a fault.
 	before, err := c.ChangeGate(ctx, s.Trail)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !before.Held() {
 		t.Fatalf("a brand-new trail was approved before anyone signed off: %+v", before)
+	}
+	if before.Approvals.HumanApprovers != 0 {
+		t.Fatalf("a brand-new trail already has %d human approver(s)",
+			before.Approvals.HumanApprovers)
 	}
 
 	res, err := step.Run(ctx, withGates(t, sc, steps.GateChange))
@@ -281,18 +292,66 @@ func TestTransitionHeldChangeIsReleased(t *testing.T) {
 		}
 	}
 
-	// The transition itself.
 	after, err := c.ChangeGate(ctx, s.Trail)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// The half that is always provable: the approvals Hecate recorded count as
+	// human sign-off.
+	//
+	// This is the part #132 doubted. A service token's approval is stored with
+	// approver_kind "service", which Fides never counts, and its approved_by is
+	// the literal string "service-account" against UNIQUE(trail_id,
+	// approved_by) — so on a server without on_behalf_of delegation both roles
+	// collapse into one uncounted row. Seeing two counted approvers here is
+	// what says delegation is on and working.
+	if after.Approvals.HumanApprovers < 2 {
+		t.Fatalf("human approvers = %d after recording an approver and a deployer, want 2.\n"+
+			"count=%d approvers=%v deployers=%v\n"+
+			"Zero means the approvals were stored as kind \"service\": Fides counts only "+
+			"session-kind approvals, so on_behalf_of delegation was not honoured — it needs "+
+			"FIDES_DELEGATED_APPROVAL_ENABLED=true on the server and an Admin token. #132.",
+			after.Approvals.HumanApprovers, after.Approvals.Count,
+			after.Approvals.Approvers, after.Approvals.Deployers)
+	}
+	t.Logf("approvals registered as human sign-off: count=%d human=%d approvers=%v deployers=%v",
+		after.Approvals.Count, after.Approvals.HumanApprovers,
+		after.Approvals.Approvers, after.Approvals.Deployers)
+
+	// The other half needs a trail whose *only* blocker was the signature.
+	//
+	// Fides approves on `len(failed) == 0 && len(missing) == 0 &&
+	// humanApprovers >= 1`, so on an organisation with real controls adopted, a
+	// trail this test invented is held by its missing SBOM, scans and
+	// provenance no matter who signs it. That is the compliance system working
+	// as designed, not a defect, and the three ways to get past it — synthesise
+	// evidence that satisfies each control's JQ rules, waive the controls, or
+	// rewrite their rules — are all either guesswork or a change to the
+	// organisation's real posture. Waivers are org-wide, so waiving here would
+	// weaken the controls over Hecate's own release trails.
+	//
+	// So this reports rather than pretends. See #113.
+	if len(after.MissingEvidence) > 0 || len(after.Failed) > 0 {
+		t.Skipf("the approval registered, but this organisation's controls still hold the "+
+			"change on evidence a synthetic trail cannot produce, so the release half of the "+
+			"transition is unproven here. Run against an organisation with no controls "+
+			"adopted, or against a trail a real build populated.\nstill outstanding: %v",
+			after.Blockers())
+	}
+
 	if after.Held() {
+		hint := "Evidence went missing between the check above and here, which should not happen."
+		if after.Approvals.HumanApprovers == 0 {
+			hint = "human_approvers is 0, so the approvals were recorded as kind \"service\". " +
+				"Fides counts only session-kind approvals, so on_behalf_of delegation was not " +
+				"honoured — it needs FIDES_DELEGATED_APPROVAL_ENABLED=true on the server and " +
+				"an Admin token. #132."
+		}
 		t.Fatalf("the change is still held after both approvals were recorded: %s\n"+
-			"blockers: %v\napprovals: count=%d human=%d\n"+
-			"A human_approvers of 0 here means the approvals landed as kind \"service\": "+
-			"Fides only counts session-kind approvals, so on_behalf_of delegation was not "+
-			"honoured (needs FIDES_DELEGATED_APPROVAL_ENABLED=true and an Admin token). #132.",
-			after.Summary, after.Blockers(), after.Approvals.Count, after.Approvals.HumanApprovers)
+			"blockers: %v\napprovals: count=%d human=%d\n%s",
+			after.Summary, after.Blockers(),
+			after.Approvals.Count, after.Approvals.HumanApprovers, hint)
 	}
 
 	// And the crossing that was waiting now goes through, which is the part
