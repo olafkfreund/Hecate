@@ -365,3 +365,59 @@ func TestRecordApprovalSendsTheApproval(t *testing.T) {
 		t.Errorf("body = %v", got)
 	}
 }
+
+// An approval Fides stores but will never count must not read as success.
+//
+// This is the failure the whole distinction exists for: the request returns
+// 201, the approval is genuinely recorded, and the change gate goes on holding
+// because it counts only session-kind approvers. Before #132 that was
+// indistinguishable from a sign-off that worked, and the promotion waited for a
+// signature that had already been given.
+func TestAnApprovalTheGateWillNotCountIsReported(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		body      string
+		uncounted bool
+	}{
+		{"delegated to a human", `{"status":"approved","kind":"session"}`, false},
+		{"attributed to the service token", `{"status":"approved","kind":"service"}`, true},
+		// An older Fides says nothing about the kind. Guessing would report
+		// every approval as uncounted, which is worse than the silence.
+		{"a server that reports no kind", ``, false},
+		{"a server that answers with an empty object", `{}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+			c, err := New(Config{BaseURL: srv.URL, Token: "k"})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			err = c.RecordApproval(context.Background(), "aaaa1111-0000-0000-0000-000000000000",
+				Approval{By: "olaf@acme.example", Role: RoleApprover})
+
+			if IsUncounted(err) != tc.uncounted {
+				t.Fatalf("IsUncounted = %v, want %v (err = %v)", IsUncounted(err), tc.uncounted, err)
+			}
+			if !tc.uncounted {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			// The message has to name what to change, or an operator is left
+			// with an approval that vanished and no idea why.
+			for _, want := range []string{
+				"FIDES_DELEGATED_APPROVAL_ENABLED", "Admin", "olaf@acme.example", RoleApprover,
+			} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("the refusal does not mention %q: %v", want, err)
+				}
+			}
+		})
+	}
+}
