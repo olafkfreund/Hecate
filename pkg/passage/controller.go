@@ -9,7 +9,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -30,7 +30,7 @@ import (
 type Reconciler struct {
 	client.Client
 	Engine   *Engine
-	Recorder record.EventRecorder
+	Recorder events.EventRecorder
 	// WorkRoot is the base directory for Passage scratch space. Empty means a
 	// directory under the system temp dir.
 	WorkRoot string
@@ -175,7 +175,7 @@ func (r *Reconciler) failMissingBundle(ctx context.Context, p *v1alpha1.Passage)
 	p.Status.Phase = v1alpha1.PassageFailed
 	p.Status.Message = fmt.Sprintf("Bundle %s no longer exists", p.Spec.Bundle)
 	p.Status.FinishedAt = &now
-	r.event(p, corev1.EventTypeWarning, "BundleMissing", p.Status.Message)
+	r.event(p, corev1.EventTypeWarning, "BundleMissing", "Resolving", p.Status.Message)
 	return r.Status().Update(ctx, p)
 }
 
@@ -197,13 +197,13 @@ func (r *Reconciler) announce(p *v1alpha1.Passage, before v1alpha1.PassagePhase)
 	}
 	switch p.Status.Phase {
 	case v1alpha1.PassageSucceeded:
-		r.event(p, corev1.EventTypeNormal, "PassageSucceeded",
+		r.event(p, corev1.EventTypeNormal, "PassageSucceeded", "Crossing",
 			fmt.Sprintf("Bundle %s crossed %s", p.Spec.Bundle, p.Spec.Gate))
 	case v1alpha1.PassageAborted:
-		r.event(p, corev1.EventTypeWarning, "PassageAborted",
+		r.event(p, corev1.EventTypeWarning, "PassageAborted", "Crossing",
 			fmt.Sprintf("crossing %s was aborted", p.Spec.Gate))
 	default:
-		r.event(p, corev1.EventTypeWarning, "PassageFailed",
+		r.event(p, corev1.EventTypeWarning, "PassageFailed", "Crossing",
 			fmt.Sprintf("crossing %s failed: %s", p.Spec.Gate, p.Status.Message))
 	}
 }
@@ -237,11 +237,13 @@ func span(from, to *metav1.Time) float64 {
 	return to.Sub(from.Time).Seconds()
 }
 
-func (r *Reconciler) event(p *v1alpha1.Passage, eventType, reason, message string) {
+// event records a Kubernetes event against the Passage. See the Beacon's
+// equivalent for what `action` is for.
+func (r *Reconciler) event(p *v1alpha1.Passage, eventType, reason, action, message string) {
 	if r.Recorder == nil {
 		return
 	}
-	r.Recorder.Event(p, eventType, reason, message)
+	r.Recorder.Eventf(p, nil, eventType, reason, action, "%s", message)
 }
 
 // SetupWithManager registers the controller.
@@ -251,7 +253,7 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// argument — so this is a user-visible change to the events people alert
 		// on rather than a rename. Tracked in #116; the old API is deprecated but
 		// not removed, and controller-runtime suppresses it the same way itself.
-		r.Recorder = mgr.GetEventRecorderFor("passage-controller") //nolint:staticcheck // see #116
+		r.Recorder = mgr.GetEventRecorder("passage-controller")
 	}
 	if r.Engine == nil {
 		return fmt.Errorf("passage Reconciler requires an Engine")
