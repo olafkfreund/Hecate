@@ -320,14 +320,65 @@ type Approval struct {
 	Reason string
 }
 
+// UncountedError is an approval Fides stored but will never count.
+//
+// The change gate approves on `no failing controls, no missing evidence, and at
+// least one *human* approver`, and it counts an approver as human only when the
+// stored `approver_kind` is `session`. A bearer token authenticates as a
+// service, so Hecate's approvals only count when Fides honours the
+// `on_behalf_of` delegation — which is default-deny, needs the server run with
+// FIDES_DELEGATED_APPROVAL_ENABLED=true, and needs this token to hold Admin.
+//
+// When it is not honoured the request still returns 201. The approval is real,
+// it is simply invisible to the gate, and the promotion waits for a signature
+// that has already been given. Worse, a service principal's stored identity is
+// the literal string "service-account" against a UNIQUE(trail_id, approved_by)
+// constraint, so an approver and a deployer recorded this way collapse into one
+// row and four-eyes can never be satisfied.
+//
+// None of that is visible from the status code, which is why this exists.
+type UncountedError struct {
+	// Kind is what Fides stored, e.g. "service". Anything but "session" is
+	// uncounted.
+	Kind string
+	// By is the identity the approval was meant to be attributed to.
+	By string
+	// Role is the role that was recorded.
+	Role string
+}
+
+func (e *UncountedError) Error() string {
+	return fmt.Sprintf(
+		"fides: the %s approval for %s was stored as %q rather than \"session\", so the change "+
+			"gate will not count it and the change stays held. Fides honours an on_behalf_of "+
+			"approval only when the server runs with FIDES_DELEGATED_APPROVAL_ENABLED=true, the "+
+			"token holds the Admin role, and %s is a registered user in the organisation",
+		e.Role, e.By, e.Kind, e.By)
+}
+
+// IsUncounted reports whether an approval was stored but will never be counted.
+func IsUncounted(err error) bool {
+	var e *UncountedError
+	return errors.As(err, &e)
+}
+
 // RecordApproval records a sign-off on a trail, so Fides can evaluate
 // segregation of duties over the identities involved.
 //
-// Fides derives its verdict from the trail's committer tag plus the recorded
-// approvals: committer, approver and deployer must be three distinct people. It
-// treats a missing role as non-compliant rather than absent, so recording only
-// one of them leaves the change gate holding for a reason that reads like a
-// policy failure.
+// **What the change gate actually checks** is narrower than it looks, and
+// getting this wrong is easy: the verdict is `no failing controls, no missing
+// evidence, and at least one human approver`. It does not compare identities.
+// Pairwise distinctness of committer, approver and deployer is evaluated
+// separately and only produces an attestation of type
+// `segregation-of-duties` — which changes the verdict solely when some control
+// lists that type among the evidence it requires.
+//
+// So recording both roles matters for the controls that ask for four-eyes, and
+// the *count* of human approvers is what lifts a plain hold.
+//
+// Returns an UncountedError when Fides stored the approval in a form the gate
+// will not count. That is not a transport failure and retrying will not fix it;
+// see UncountedError for what will.
 func (c *Client) RecordApproval(ctx context.Context, trail string, a Approval) error {
 	switch {
 	case strings.TrimSpace(trail) == "":
@@ -341,10 +392,28 @@ func (c *Client) RecordApproval(ctx context.Context, trail string, a Approval) e
 			a.Role, RoleApprover, RoleDeployer)
 	}
 
-	return c.do(ctx, http.MethodPost, "api/v1/trails/"+url.PathEscape(trail)+"/approvals",
+	// Fides reports on the approval itself which kind it stored, so this needs
+	// no second call to find out whether the sign-off will count.
+	var out struct {
+		Kind string `json:"kind"`
+	}
+	err := c.do(ctx, http.MethodPost, "api/v1/trails/"+url.PathEscape(trail)+"/approvals",
 		map[string]any{
 			"role":         a.Role,
 			"on_behalf_of": a.By,
 			"reason":       a.Reason,
-		}, nil)
+		}, &out)
+	if err != nil {
+		return err
+	}
+	// An older Fides that does not report a kind is left alone rather than
+	// guessed at: reporting every approval as uncounted would be worse than the
+	// silence this replaces.
+	if out.Kind != "" && out.Kind != approvalKindSession {
+		return &UncountedError{Kind: out.Kind, By: a.By, Role: a.Role}
+	}
+	return nil
 }
+
+// approvalKindSession is the stored kind the change gate counts as human.
+const approvalKindSession = "session"

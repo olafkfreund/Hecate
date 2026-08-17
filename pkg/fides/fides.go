@@ -253,6 +253,13 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	if out == nil {
 		return nil
 	}
+	// A 2xx with no body is a success, not a parse failure. Fides answers some
+	// writes with a confirmation object and others with nothing at all, and a
+	// caller that only wants to read the confirmation when there is one should
+	// not have the write reported as failed because there was not.
+	if len(bytes.TrimSpace(answer)) == 0 {
+		return nil
+	}
 	if err := json.Unmarshal(answer, out); err != nil {
 		return fmt.Errorf("fides: %s %s: decoding the response: %w", method, path, err)
 	}

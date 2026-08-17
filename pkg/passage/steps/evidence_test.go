@@ -40,6 +40,9 @@ type fidesServer struct {
 	reported []map[string]any
 	// approvals holds the bodies POSTed to a trail's /approvals.
 	approvals []map[string]any
+	// approvalKind is the "kind" the fake reports back on an approval. Empty
+	// means it says nothing, as an older Fides does.
+	approvalKind string
 	// order is every call in the order it arrived, because some of these are
 	// only correct in a particular order.
 	order []string
@@ -83,7 +86,11 @@ func (f *fidesServer) start(t *testing.T) string {
 			f.order = append(f.order, "approval")
 			f.approvals = append(f.approvals, decodeBody(t, r))
 			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"status":"approved"}`))
+			if f.approvalKind != "" {
+				_, _ = w.Write([]byte(`{"status":"approved","kind":"` + f.approvalKind + `"}`))
+			} else {
+				_, _ = w.Write([]byte(`{"status":"approved"}`))
+			}
 			return
 		case strings.HasSuffix(path, "/artifacts") && r.Method == http.MethodPost:
 			// Reporting, not looking up. Same path, different verb — the fake
@@ -537,5 +544,58 @@ func TestAnAutomaticCrossingRecordsNoDeployer(t *testing.T) {
 	}
 	if len(fake.approvals) != 0 {
 		t.Errorf("an automatic crossing recorded %v as a human deployer", fake.approvals)
+	}
+}
+
+// A deployer Fides will never count must stop the crossing, not be retried.
+//
+// This is the end of the chain #132 describes. Fides takes the approval and
+// answers 201, but stores it as kind "service", which the change gate does not
+// count as a human. Retrying cannot change that — no amount of waiting turns a
+// service approval into a session one — so a retryable failure would leave the
+// Passage requeueing for ever against a hold that its own deployer record can
+// never lift, with nothing anywhere saying why.
+func TestAnUncountedDeployerFailsTheCrossingRatherThanRetrying(t *testing.T) {
+	fake := &fidesServer{approvalKind: "service"}
+	server := fake.start(t)
+
+	sc := evidenceCtx(t, EvidenceGateConfig{Gates: []string{GateChange}}, testDigest)
+	sc.Actor = "olaf@acme.example"
+
+	_, err := evidenceStep(t, server, nil).Run(context.Background(), sc)
+
+	if err == nil {
+		t.Fatal("the crossing succeeded on an approval the change gate will never count")
+	}
+	if !passage.IsTerminal(err) {
+		t.Fatalf("err = %v, want a terminal failure — retrying cannot make a service "+
+			"approval countable", err)
+	}
+	if got := passage.ReasonOf(err); got != ReasonInvalidConfig {
+		t.Errorf("reason = %s, want %s: this is configuration, not an outage", got, ReasonInvalidConfig)
+	}
+	// The message has to name what to change, or an operator is left with a
+	// crossing that stopped and no idea what to fix.
+	for _, want := range []string{"FIDES_DELEGATED_APPROVAL_ENABLED", "Admin", "olaf@acme.example"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the failure does not mention %q: %v", want, err)
+		}
+	}
+}
+
+// And the counted case still passes, so the check above cannot be satisfied by
+// refusing everything.
+func TestACountedDeployerCrossesNormally(t *testing.T) {
+	fake := &fidesServer{approvalKind: "session"}
+	server := fake.start(t)
+
+	sc := evidenceCtx(t, EvidenceGateConfig{Gates: []string{GateChange}}, testDigest)
+	sc.Actor = "olaf@acme.example"
+
+	if _, err := evidenceStep(t, server, nil).Run(context.Background(), sc); err != nil {
+		t.Fatalf("a session-kind approval failed the crossing: %v", err)
+	}
+	if len(fake.approvals) != 1 {
+		t.Errorf("recorded %d approvals, want one", len(fake.approvals))
 	}
 }

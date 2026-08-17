@@ -195,6 +195,12 @@ func (o *Ops) recordApprovalInFides(
 		Reason: fmt.Sprintf("approved for Gate %s in %s", g.Name, g.Namespace),
 	})
 	if err != nil {
+		// Refused rather than failed: Fides took the approval, it simply will
+		// not count it, and telling someone their sign-off landed when the gate
+		// will keep holding is the worst of the available answers (#132).
+		if fides.IsUncounted(err) {
+			return &RefusedError{Action: "approve", Reason: err.Error()}
+		}
 		return fmt.Errorf("recording the approval in Fides: %w", err)
 	}
 	return nil

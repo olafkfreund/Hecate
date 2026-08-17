@@ -289,6 +289,13 @@ func (e *EvidenceGate) recordDeployer(
 		Reason: fmt.Sprintf("crossing Gate %s in %s", sc.Gate, sc.Namespace),
 	})
 	if err != nil {
+		// An uncounted approval is a configuration problem, not an outage.
+		// Retrying it would leave the crossing waiting on a signature that has
+		// already been given, for ever, which is precisely the silence this
+		// distinction exists to break (#132).
+		if fides.IsUncounted(err) {
+			return passage.FailTerminal(ReasonInvalidConfig, "%s: %s", StepEvidenceGate, err)
+		}
 		return unavailable("recording the deployer", err)
 	}
 	return nil
