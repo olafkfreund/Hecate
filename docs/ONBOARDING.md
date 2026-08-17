@@ -93,6 +93,38 @@ It has already earned its place: it found that Fides answers `200` with
 `{"valid":true,"count":0}` for a trail that does not exist, which `hecate
 verify` was reporting as a verified chain and exit 0.
 
+### The transitions, which write
+
+Reads confirm every state we can observe. They do not confirm the two things
+the gates exist to do: a held change resuming once it is approved, and an
+allowlist refusal clearing once the digest is allowlisted. Those are the whole
+reason a hold returns `Running` rather than failing, and until #113 nothing
+proved either happened.
+
+Proving a transition means causing one, so these tests write. They are opt-in,
+and stay skipped unless you name a flow you are willing to have written to:
+
+```console
+$ export FIDES_SCRATCH_FLOW=hecate-integration
+$ make fides-test
+```
+
+**Point that at a scratch flow, never at the flow recording real releases.**
+Fides has no delete endpoint for trails, artifacts, attestations or approvals —
+attestations are hash-chained and append-only by design, the rest simply have no
+route — so each run leaves one trail and one artifact behind permanently. The
+allowlist entry is the one thing that can be taken back, and is.
+
+A fresh trail per run is not fussiness. An approval cannot be withdrawn, so a
+trail that has been approved once starts approved, and the hold-then-release
+transition is observable exactly once per trail.
+
+The change-gate half also needs the server running with
+`FIDES_DELEGATED_APPROVAL_ENABLED=true` and an **Admin** token, because Fides
+counts only session-kind approvals and a service token's approval is never one.
+That is a sharper constraint than it looks — see #132 — and the test says so in
+its failure message rather than leaving you to work it out.
+
 ## 4. Bring up a test cluster
 
 ```console
