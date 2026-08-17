@@ -61,6 +61,40 @@ check exists to prevent, and by then it has already happened.
 
 ---
 
+## Behaviour changes, by version
+
+Changes that alter what Hecate *does* rather than what it offers — the kind that
+look like a regression if you meet them without warning. New features are not
+listed here; the release notes cover those.
+
+### Unreleased
+
+**`hecate approve` now refuses when Fides will not count the approval.** It
+previously reported success.
+
+Nothing has broken. The approvals in question never counted: Fides tallies an
+approver as human only when the stored kind is `session`, and a bearer token
+authenticates as a *service*. It honours the `on_behalf_of` delegation that
+turns a service call into a human sign-off only when the server runs with
+`FIDES_DELEGATED_APPROVAL_ENABLED=true`, the token holds the **Admin** role, and
+the named identity is a registered user in the organisation. Miss any of those
+and the request still returns `201`, the approval is stored, and the change gate
+goes on holding — for a signature that has already been given.
+
+If approvals start being refused after this upgrade, they were doing nothing
+before it. Either configure delegation as above, or stop relying on Hecate to
+record the sign-off and record it in Fides directly.
+
+The same applies mid-crossing: an `evidence-gate` step that records a deployer
+Fides will not count now fails the Passage terminally instead of retrying.
+Retrying cannot help — no amount of waiting turns a service approval into a
+session one — and the alternative was a crossing that waited for ever.
+
+**This sits awkwardly with least privilege, and knowingly so.** Delegation
+requires Admin, which is the opposite of the Writer-scoped account we recommend
+and use for recording evidence. There is no good answer on Hecate's side; see
+issue #132.
+
 ## What happens to in-flight promotions
 
 **They resume. They do not restart, and they are not run twice.**
