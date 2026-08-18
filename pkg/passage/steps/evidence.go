@@ -259,9 +259,15 @@ func (e *EvidenceGate) allowlist(
 			return unavailable("checking the environment allowlist", err)
 		}
 		if !approved {
+			// --reason is not optional decoration. Fides requires it as of
+			// v0.7.0: an allowlist entry is an accepted risk, and one with no
+			// stated justification cannot be evaluated by an auditor later.
+			// Without the flag this command now fails, so a hint that omits it
+			// sends the operator to a dead end at exactly the moment they are
+			// already blocked.
 			return passage.FailTerminal(ReasonNotAllowlisted,
 				"%s: %s is not on this environment's allowlist — approve it with "+
-					"`fides allowlist add --env %s --sha %s`",
+					"`fides allowlist add --env %s --sha %s --reason \"<why this is accepted>\"`",
 				StepEvidenceGate, digest, environment, strings.TrimPrefix(digest, "sha256:"))
 		}
 	}
