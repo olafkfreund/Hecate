@@ -23,27 +23,62 @@ import (
 // means CI did not register the artifact, and the caller decides whether that
 // is disqualifying.
 //
-// ponytail: Fides has no by-digest lookup that also returns the trail — its
-// /search/artifacts filters by sha but omits trail_id, and /artifacts returns
-// trail_id but takes no filter — so this reads the org's artifacts and matches
-// here. One call per crossing.
+// The lookup is one filtered call: /search/artifacts takes the digest and, since
+// fides#442, returns trail_id alongside it.
 //
-// The ceiling is lower than "grows with the artifact count" suggests, which is
-// what this comment used to say: /artifacts also runs a per-row query for each
-// artifact's SBOM and embeds the payload, so the response is the size of every
-// SBOM in the organisation. Hundreds of megabytes is reachable, to learn one
-// 36-byte trail id.
+// It falls back to reading /artifacts when the response has no trail_id *key*,
+// which is how a Fides predating that change answers. The distinction matters
+// and is why this checks for the key rather than for a null value: an artifact
+// genuinely built outside a trail also reports trail_id, as null. Treating
+// "absent" and "null" alike would make an old server look like an org whose
+// artifacts have no trails, and TrailForArtifact would answer "" — which the
+// caller reads as "CI never registered this digest" and gates on. A silently
+// wrong answer, rather than a slow one.
 //
-// The cheap upgrade is upstream and two lines: /search/artifacts already
-// filters by sha, already has LIMIT 100 and already joins trails, so adding
-// a.trail_id to its SELECT is the whole change. This function then becomes one
-// filtered call with no loop. Tracked in #111.
+// The fallback is worth keeping until Hecate states a minimum Fides version,
+// because /artifacts runs a per-row SBOM query and embeds the payload: the
+// response is the size of every SBOM in the organisation, hundreds of megabytes
+// reachable, to learn one 36-byte trail id. Slow is survivable; wrong is not.
 func (c *Client) TrailForArtifact(ctx context.Context, sha256 string) (string, error) {
 	digest := strings.TrimPrefix(strings.TrimSpace(sha256), "sha256:")
 	if digest == "" {
 		return "", errors.New("fides: no artifact digest")
 	}
 
+	// Decoded loosely so the presence of trail_id can be told from its value.
+	var found []map[string]json.RawMessage
+	if err := c.get(ctx, "api/v1/search/artifacts?sha="+url.QueryEscape(digest), &found); err != nil {
+		return "", err
+	}
+	for _, a := range found {
+		raw, ok := a["trail_id"]
+		if !ok {
+			// An old server. Nothing here can answer the question.
+			return c.trailByScanningArtifacts(ctx, digest)
+		}
+		// The digest is re-checked even though the server was asked to filter
+		// on it. The answer decides which trail a promotion gates on, so the
+		// cost of accepting a row for a different artifact is gating on
+		// somebody else's SBOM and scans — worth one comparison to refuse.
+		var sha string
+		if err := json.Unmarshal(a["sha256"], &sha); err == nil && !strings.EqualFold(sha, digest) {
+			continue
+		}
+		var id *string
+		if err := json.Unmarshal(raw, &id); err != nil {
+			return "", fmt.Errorf("fides: decoding trail_id: %w", err)
+		}
+		if id != nil && *id != "" {
+			return *id, nil
+		}
+	}
+	return "", nil
+}
+
+// trailByScanningArtifacts is the pre-fides#442 path: /artifacts carries
+// trail_id but takes no filter, so the whole organisation is read and matched
+// here. Kept only for servers whose /search/artifacts omits trail_id.
+func (c *Client) trailByScanningArtifacts(ctx context.Context, digest string) (string, error) {
 	var artifacts []struct {
 		SHA256  string  `json:"sha256"`
 		TrailID *string `json:"trail_id"`

@@ -421,3 +421,100 @@ func TestAnApprovalTheGateWillNotCountIsReported(t *testing.T) {
 		})
 	}
 }
+
+// The lookup must be the filtered one. Reading /artifacts to find a digest
+// pulls every SBOM in the organisation into the response, so a change that
+// quietly reverts to it would still pass every assertion above while making a
+// crossing's cheapest call its most expensive.
+func TestTrailForArtifactAsksTheServerToFilter(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		if r.URL.Path == "/api/v1/search/artifacts" {
+			if got := r.URL.Query().Get("sha"); got != "abcdef" {
+				t.Errorf("sha filter = %q, want abcdef", got)
+			}
+			_, _ = w.Write([]byte(`[{"sha256":"abcdef","trail_id":"the-trail"}]`))
+			return
+		}
+		t.Errorf("unexpected request to %s", r.URL.Path)
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	t.Cleanup(srv.Close)
+	c, err := New(Config{BaseURL: srv.URL, Token: "k"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := c.TrailForArtifact(context.Background(), "sha256:abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "the-trail" {
+		t.Errorf("trail = %q", got)
+	}
+	for _, p := range paths {
+		if p == "/api/v1/artifacts" {
+			t.Error("fell back to reading the whole organisation's artifacts when the filtered call answered")
+		}
+	}
+}
+
+// A Fides predating fides#442 omits trail_id from /search/artifacts entirely.
+// That is not the same as reporting no trail, and the difference decides a
+// promotion: read as "no trail", the caller concludes CI never registered the
+// digest and the gate refuses a change that is perfectly good.
+func TestTrailForArtifactFallsBackOnAnOlderServer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/search/artifacts":
+			// No trail_id key at all — the old response shape.
+			_, _ = w.Write([]byte(`[{"sha256":"abcdef","name":"app","type":"docker"}]`))
+		case "/api/v1/artifacts":
+			_, _ = w.Write([]byte(`[{"sha256":"abcdef","trail_id":"found-the-slow-way"}]`))
+		default:
+			t.Errorf("unexpected request to %s", r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	c, err := New(Config{BaseURL: srv.URL, Token: "k"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := c.TrailForArtifact(context.Background(), "abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "found-the-slow-way" {
+		t.Errorf("trail = %q — an older Fides must still resolve the digest", got)
+	}
+}
+
+// The other half of that distinction: trail_id present and null is a real
+// answer from a current server, and must NOT trigger the expensive fallback.
+func TestTrailForArtifactTrustsAnExplicitNull(t *testing.T) {
+	var scanned bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/artifacts" {
+			scanned = true
+		}
+		_, _ = w.Write([]byte(`[{"sha256":"abcdef","trail_id":null}]`))
+	}))
+	t.Cleanup(srv.Close)
+	c, err := New(Config{BaseURL: srv.URL, Token: "k"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := c.TrailForArtifact(context.Background(), "abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "" {
+		t.Errorf("trail = %q, want empty for an artifact built outside a trail", got)
+	}
+	if scanned {
+		t.Error("an explicit null is an answer; it must not fall back to reading the whole organisation")
+	}
+}
