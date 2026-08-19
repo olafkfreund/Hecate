@@ -184,28 +184,70 @@ func TestOCIPullReplacesRatherThanMerges(t *testing.T) {
 // A tar entry naming ../ would write outside the work dir. The archive is
 // remote content, so it is not trusted to stay inside.
 func TestOCIPullRefusesAnEscapingEntry(t *testing.T) {
-	// Plain tar, not gzipped: untar reads the layer's uncompressed form, and a
-	// static layer hands back exactly the bytes it was given.
-	var buf bytes.Buffer
-	tw := tar.NewWriter(&buf)
-	body := []byte("owned")
-	if err := tw.WriteHeader(&tar.Header{
-		Name: "../../escaped.yaml", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body)),
-	}); err != nil {
-		t.Fatal(err)
+	cases := []struct {
+		name  string
+		entry string
+	}{
+		{"climbing out of the directory", "../../escaped.yaml"},
+		{"an absolute path", "/tmp/escaped.yaml"},
+		// The containment check compares against the target directory plus a
+		// separator, and this is the entry that proves the separator is load
+		// bearing. Joining `../work-evil/x` onto `<base>/work` yields
+		// `<base>/work-evil/x`, which is prefixed by `<base>/work` as a plain
+		// string while being a wholly different directory. Without the
+		// separator it unpacks, and the two cases above still pass — so this
+		// is the only thing standing between the check and a sibling-directory
+		// write.
+		{"a sibling that shares a name prefix", "../work-evil/escaped.yaml"},
 	}
-	if _, err := tw.Write(body); err != nil {
-		t.Fatal(err)
-	}
-	if err := tw.Close(); err != nil {
-		t.Fatal(err)
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Plain tar, not gzipped: untar reads the layer's uncompressed
+			// form, and a static layer hands back exactly the bytes it was
+			// given.
+			var buf bytes.Buffer
+			tw := tar.NewWriter(&buf)
+			body := []byte("owned")
+			if err := tw.WriteHeader(&tar.Header{
+				Name: tc.entry, Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body)),
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tw.Write(body); err != nil {
+				t.Fatal(err)
+			}
+			if err := tw.Close(); err != nil {
+				t.Fatal(err)
+			}
 
-	layer := static.NewLayer(buf.Bytes(), fluxContentMediaType)
-	if _, err := untar(layer, t.TempDir()); err == nil {
-		t.Error("an entry escaping the target directory was unpacked")
-	} else if !strings.Contains(err.Error(), "escapes") {
-		t.Errorf("err = %v", err)
+			// A named subdirectory rather than the temp dir itself, so there is
+			// a real sibling for the third case to aim at.
+			base := t.TempDir()
+			dir := filepath.Join(base, "work")
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			layer := static.NewLayer(buf.Bytes(), fluxContentMediaType)
+			_, err := untar(layer, dir)
+			if err == nil {
+				t.Fatal("an entry escaping the target directory was unpacked")
+			}
+			if !strings.Contains(err.Error(), "escapes") {
+				t.Errorf("err = %v", err)
+			}
+
+			// The error is the contract, but the file is the damage. Assert
+			// nothing landed outside, in case a future guard reports the
+			// refusal after having already written.
+			if entries, err := os.ReadDir(base); err == nil {
+				for _, e := range entries {
+					if e.Name() != "work" {
+						t.Errorf("%q was created outside the target directory", e.Name())
+					}
+				}
+			}
+		})
 	}
 }
 
