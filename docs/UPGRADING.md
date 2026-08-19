@@ -76,7 +76,7 @@ Nothing has broken. The approvals in question never counted: Fides tallies an
 approver as human only when the stored kind is `session`, and a bearer token
 authenticates as a *service*. It honours the `on_behalf_of` delegation that
 turns a service call into a human sign-off only when the server runs with
-`FIDES_DELEGATED_APPROVAL_ENABLED=true`, the token holds the **Admin** role, and
+`FIDES_DELEGATED_APPROVAL_ENABLED=true`, the token is permitted to delegate, and
 the named identity is a registered user in the organisation. Miss any of those
 and the request still returns `201`, the approval is stored, and the change gate
 goes on holding — for a signature that has already been given.
@@ -90,10 +90,30 @@ Fides will not count now fails the Passage terminally instead of retrying.
 Retrying cannot help — no amount of waiting turns a service approval into a
 session one — and the alternative was a crossing that waited for ever.
 
-**This sits awkwardly with least privilege, and knowingly so.** Delegation
-requires Admin, which is the opposite of the Writer-scoped account we recommend
-and use for recording evidence. There is no good answer on Hecate's side; see
-issue #132.
+**"Permitted to delegate" no longer means Admin, and you should stop using an
+Admin token for this.** It used to mean exactly that, which was the opposite of
+the Writer-scoped account we recommend for recording evidence: to record *who*
+signed off on a deploy, the token also had to be able to create service
+accounts, rewrite controls and register users.
+
+Fides now carries `may_delegate_approvals` as a capability of its own, so the
+account Hecate uses can be Writer-scoped and hold that one permission — able to
+record a counted sign-off and to administer nothing. Grant it when you create
+the service account, or afterwards:
+
+```console
+$ curl -X POST "$FIDES/api/v1/tenant/service-accounts/<id>/delegation" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -d '{"may_delegate_approvals": true}'
+```
+
+That call is Admin-only, which is the point: granting the capability is an
+administrative act, using it is not.
+
+**Admin still works, so nothing breaks on upgrade** — it is accepted as the
+broader grant rather than the intended one. If Hecate's Fides token is Admin
+today only so that approvals count, it no longer needs to be, and #132 is closed
+on that basis.
 
 ## What happens to in-flight promotions
 
