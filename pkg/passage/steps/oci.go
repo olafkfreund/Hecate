@@ -346,6 +346,14 @@ func untar(layer v1.Layer, dir string) (int, error) {
 		if filepath.IsAbs(header.Name) {
 			return files, fmt.Errorf("entry %q escapes the target directory", header.Name)
 		}
+		// The archive root, which `tar -c .` emits and our own tarball() skips.
+		// Handled here rather than as an exception inside the check below: an
+		// `if target != dir || ...` guard leaves a path on which nothing is
+		// checked, which is both harder to read and, correctly, not recognised
+		// as a sanitiser by static analysis.
+		if header.Name == "." || header.Name == "./" {
+			continue
+		}
 		// Everything else is joined and then required to still be under dir, so
 		// `../../x` is refused rather than becoming `x`. The separator on the
 		// prefix is load bearing: without it `../work-evil/x` under `<base>/work`
@@ -353,7 +361,7 @@ func untar(layer v1.Layer, dir string) (int, error) {
 		// being a different directory. TestOCIPullRefusesAnEscapingEntry covers
 		// all three shapes.
 		target := filepath.Join(dir, header.Name)
-		if target != dir && !strings.HasPrefix(target, dir+string(os.PathSeparator)) {
+		if !strings.HasPrefix(target, filepath.Clean(dir)+string(os.PathSeparator)) {
 			return files, fmt.Errorf("entry %q escapes the target directory", header.Name)
 		}
 
