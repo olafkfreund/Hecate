@@ -336,15 +336,26 @@ func untar(layer v1.Layer, dir string) (int, error) {
 		}
 
 		// The archive is remote content, so it is not trusted to stay inside the
-		// directory. Refused rather than normalised: joining against a cleaned
-		// absolute path would silently relocate `../../x` to `x`, which is safe
-		// but hides that the artifact was malformed — and an artifact carrying
-		// traversal entries is worth failing over, not quietly repairing.
-		clean := filepath.Clean(header.Name)
-		if clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) || filepath.IsAbs(clean) {
+		// directory. Both checks below refuse rather than normalise: an artifact
+		// carrying an escaping entry is malformed, and quietly relocating it to
+		// somewhere safe would hide that while still deploying its contents.
+		//
+		// Absolute names are refused before joining, because Join cannot catch
+		// them: it treats an absolute entry as relative, so `/tmp/x` lands at
+		// `<dir>/tmp/x` — contained, and so invisible to the check after it.
+		if filepath.IsAbs(header.Name) {
 			return files, fmt.Errorf("entry %q escapes the target directory", header.Name)
 		}
-		target := filepath.Join(dir, clean)
+		// Everything else is joined and then required to still be under dir, so
+		// `../../x` is refused rather than becoming `x`. The separator on the
+		// prefix is load bearing: without it `../work-evil/x` under `<base>/work`
+		// yields `<base>/work-evil/x`, which shares the prefix as a string while
+		// being a different directory. TestOCIPullRefusesAnEscapingEntry covers
+		// all three shapes.
+		target := filepath.Join(dir, header.Name)
+		if target != dir && !strings.HasPrefix(target, dir+string(os.PathSeparator)) {
+			return files, fmt.Errorf("entry %q escapes the target directory", header.Name)
+		}
 
 		switch header.Typeflag {
 		case tar.TypeDir:

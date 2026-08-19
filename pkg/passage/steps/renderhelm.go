@@ -191,7 +191,10 @@ func (r *RenderHelm) values(workDir string, cfg RenderHelmConfig) (map[string]an
 // `helm template -f a.yaml -f b.yaml` does, and matching it matters more than
 // being intuitive.
 func mergeValues(dst, src map[string]any) map[string]any {
-	out := make(map[string]any, len(dst)+len(src))
+	// Sized from dst alone rather than len(dst)+len(src). The sum is what a
+	// map this size would need, but it is also an unchecked int addition, and
+	// a hint is only a hint — the map grows on its own. Not worth the flag.
+	out := make(map[string]any, len(dst))
 	for k, v := range dst {
 		out[k] = v
 	}
