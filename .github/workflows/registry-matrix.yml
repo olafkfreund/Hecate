@@ -1,0 +1,121 @@
+name: Registry matrix
+
+# Drives oci-push and oci-pull against real registries (#50).
+#
+# The unit tests run a registry in the test process, which proves the steps'
+# logic and nothing about authentication — and authentication is what actually
+# breaks, because every registry has its own idea of what a credential is.
+#
+# One job per registry, each skipping cleanly when its credential is absent, so
+# a fork sees green rather than a wall of red it cannot fix.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  # Registries change under us; a weekly run catches that without waiting for
+  # someone to open a pull request.
+  schedule:
+    - cron: '0 6 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  matrix:
+    name: ${{ matrix.registry }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # ghcr
+      id-token: write   # ecr, via OIDC
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - registry: ghcr
+          - registry: ecr
+          - registry: self-hosted
+          - registry: dockerhub
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # A registry with credentials, standing in for Harbor. Harbor serves OCI
+      # clients plain basic auth over the same distribution API, which is the
+      # part Hecate touches — its projects, scanning and replication are not on
+      # any path this exercises. Running the real thing means six containers and
+      # a prepare step for no additional coverage of our code.
+      - name: Start a self-hosted registry
+        if: matrix.registry == 'self-hosted'
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/reg-auth
+          docker run --rm --entrypoint htpasswd httpd:2 -Bbn ciuser cipass > /tmp/reg-auth/htpasswd
+          docker run -d --name local-reg -p 5555:5000 \
+            -v /tmp/reg-auth:/auth \
+            -e REGISTRY_AUTH=htpasswd \
+            -e REGISTRY_AUTH_HTPASSWD_REALM="Registry Realm" \
+            -e REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd \
+            registry:2
+          for _ in $(seq 30); do curl -sf -o /dev/null http://localhost:5555/v2/ && break; sleep 1; done
+          # Prove it actually demands credentials, or the run proves nothing.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:5555/v2/)" = "401"
+          echo cipass | docker login localhost:5555 -u ciuser --password-stdin
+
+      - name: Log in to GHCR
+        if: matrix.registry == 'ghcr'
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # No static keys: the role is assumed through GitHub's OIDC provider and
+      # can push to exactly one ECR repository.
+      - name: Assume the ECR role
+        if: matrix.registry == 'ecr'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::796973489124:role/hecate-github-deploy
+          aws-region: eu-west-2
+
+      - name: Log in to ECR
+        if: matrix.registry == 'ecr'
+        run: |
+          aws ecr get-login-password --region eu-west-2 \
+            | docker login --username AWS --password-stdin 796973489124.dkr.ecr.eu-west-2.amazonaws.com
+
+      - name: Log in to Docker Hub
+        id: dockerhub
+        if: matrix.registry == 'dockerhub'
+        env:
+          USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -z "$USERNAME" ] || [ -z "$TOKEN" ]; then
+            echo "::notice::DOCKERHUB_USERNAME/DOCKERHUB_TOKEN are not set, so Docker Hub is not covered."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "$TOKEN" | docker login -u "$USERNAME" --password-stdin
+          echo "repo=docker.io/$USERNAME/hecate-ci" >> "$GITHUB_OUTPUT"
+
+      - name: Push and pull
+        if: matrix.registry != 'dockerhub' || steps.dockerhub.outputs.skip != 'true'
+        env:
+          # A tag per run and per registry: several of these are mutable and a
+          # re-run must not race a previous one.
+          HECATE_REGISTRY_TAG: ci-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          case "${{ matrix.registry }}" in
+            ghcr)        export HECATE_REGISTRY_REPO="ghcr.io/${{ github.repository_owner }}/hecate-ci-registry-matrix" ;;
+            ecr)         export HECATE_REGISTRY_REPO="796973489124.dkr.ecr.eu-west-2.amazonaws.com/hecate-ci-registry-matrix" ;;
+            self-hosted) export HECATE_REGISTRY_REPO="localhost:5555/acme/manifests"; export HECATE_REGISTRY_INSECURE=true ;;
+            dockerhub)   export HECATE_REGISTRY_REPO="${{ steps.dockerhub.outputs.repo }}" ;;
+          esac
+          go test -tags registrymatrix -count=1 -v -timeout 10m -run TestRegistryMatrix ./pkg/passage/steps/
+
+      - name: Registry logs on failure
+        if: failure() && matrix.registry == 'self-hosted'
+        run: docker logs local-reg 2>&1 | tail -50
