@@ -195,7 +195,10 @@ and if the status call itself fails, that error is recorded against the step but
 `status.message` keeps the failure that actually broke the crossing.
 
 `credentialsRef` needs a Secret with `token` (or `password`) — an API token,
-which is not the same thing as push access.
+which is not the same thing as push access. It also accepts a GitHub App
+(`clientID`, `installationID`, `privateKey`), which is the better credential and
+is preferred when the Secret carries both; see
+[Credentials to git hosts](RBAC.md#credentials-to-git-hosts).
 
 **Reasons:** `ProviderAuthFailed`, `ProviderFailed`, `WorkDirLost`,
 `InvalidConfig`.
@@ -247,7 +250,10 @@ pull request closed unmerged fails terminally.
 
 Opening is idempotent, and adopts one the host reports as already existing.
 
-**Credentials:** an API token under `token`, or `password`.
+**Credentials:** a GitHub App (`clientID`, `installationID`, `privateKey`) —
+preferred, and preferred over a token in the same Secret — or an API token under
+`token`, or `password`. See
+[Credentials to git hosts](RBAC.md#credentials-to-git-hosts).
 
 **Self-managed hosts** must set both `provider` and `baseURL` — an appliance's
 hostname says nothing about its flavour, and guessing wrong sends GitLab requests
