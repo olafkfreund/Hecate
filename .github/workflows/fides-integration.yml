@@ -1,0 +1,121 @@
+name: Fides integration
+
+# Proves the two transitions the gates exist for, against a real Fides server
+# rather than a fake (#113).
+#
+# test/integration/fides_test.go already checks every answer Fides gives, but it
+# only reads. Reading confirms we parse what Fides sends; it does not confirm
+# that a held change is released once someone approves it, which is the whole
+# reason a hold returns Running rather than failing (D30).
+#
+# That half could not be proven against the organisation we use day to day: it
+# has around twenty adopted controls, so a trail this test creates is held on
+# evidence a synthetic trail cannot produce — SBOMs and scans from a build that
+# never happened — no matter who signs it. Waiving them is not an option either,
+# because control_exceptions are organisation-wide and would weaken the controls
+# over Hecate's own releases.
+#
+# A Fides started here has no adopted controls, so the change gate reduces to
+# its approval condition and the transition becomes observable. The server needs
+# only Postgres and starts in seconds.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  transitions:
+    name: Gate transitions against a real Fides
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Both containers on one network, rather than as job `services`. Service
+      # containers start in parallel, and fides-server migrates its schema at
+      # boot, so it loses a race against Postgres it cannot retry out of.
+      # Starting them in order costs three lines and removes the flake.
+      - name: Start Fides and its database
+        env:
+          # Pinned by digest, so a change in Fides cannot redden an unrelated
+          # Hecate pull request. That does mean this does not catch Fides drift
+          # — bump the digest deliberately when the client needs a newer server.
+          FIDES_IMAGE: ghcr.io/olafkfreund/fides-server@sha256:c0262d65965fc904fe4f4304dc4abba16171d97525fadb28861bb0d0c1a91288
+        run: |
+          set -euo pipefail
+          docker network create fides-ci
+          docker run -d --name fides-db --network fides-ci \
+            -e POSTGRES_PASSWORD=p -e POSTGRES_USER=fides -e POSTGRES_DB=fides \
+            postgres:16
+          for _ in $(seq 60); do
+            docker exec fides-db pg_isready -q -U fides && break
+            sleep 1
+          done
+          docker exec fides-db pg_isready -U fides
+
+          # The static API token is scoped to one organisation id, fixed at
+          # server start, so the row has to carry exactly that id. POST /orgs
+          # mints its own id and cannot be used for this.
+          ORG_ID=$(uuidgen)
+          echo "FIDES_ORG_ID=$ORG_ID" >> "$GITHUB_ENV"
+
+          docker run -d --name fides-server --network fides-ci -p 18080:8080 \
+            -e DB_DSN="postgres://fides:p@fides-db:5432/fides?sslmode=disable" \
+            -e PORT=8080 \
+            -e STORAGE_DRIVER=local -e STORAGE_LOCAL_DIR=/tmp/evidence \
+            -e FIDES_API_TOKEN=ci-token \
+            -e FIDES_API_ORG_ID="$ORG_ID" \
+            -e FIDES_DELEGATED_APPROVAL_ENABLED=true \
+            "$FIDES_IMAGE"
+
+          for _ in $(seq 60); do
+            curl -sf http://localhost:18080/healthz >/dev/null && break
+            sleep 2
+          done
+          curl -sf http://localhost:18080/healthz
+
+      - name: Seed the organisation and a scratch flow
+        run: |
+          set -euo pipefail
+          docker exec fides-db psql -U fides -d fides -v ON_ERROR_STOP=1 \
+            -c "INSERT INTO organizations (id, name) VALUES ('$FIDES_ORG_ID', 'hecate-ci');"
+          curl -sf -X POST http://localhost:18080/api/v1/flows \
+            -H "Authorization: Bearer ci-token" \
+            -H 'Content-Type: application/json' \
+            -d "{\"org_id\":\"$FIDES_ORG_ID\",\"name\":\"hecate-integration\",\"description\":\"CI scratch flow\"}" \
+            > /dev/null
+
+          # The premise of this job. If a future Fides adopts controls by
+          # default, the change gate stops reducing to its approval condition
+          # and the release half would skip rather than fail — silently going
+          # back to proving nothing, which is what #113 was about.
+          # No `|| echo 0` here on purpose: a fallback would turn a renamed
+          # table into a silent pass, which is the failure this guard exists to
+          # prevent. ON_ERROR_STOP makes a bad query fail the job instead.
+          adopted=$(docker exec fides-db psql -U fides -d fides -v ON_ERROR_STOP=1 -tAc \
+            "SELECT count(*) FROM controls WHERE org_id = '$FIDES_ORG_ID' AND NOT archived;")
+          if [ "$adopted" != "0" ]; then
+            echo "This organisation has $adopted adopted controls, so the change gate"
+            echo "will hold on evidence a synthetic trail cannot produce and the"
+            echo "release transition would be skipped rather than proven."
+            exit 1
+          fi
+
+      - name: The two transitions
+        env:
+          FIDES_SERVER_URL: http://localhost:18080
+          FIDES_TOKEN: ci-token
+          FIDES_SCRATCH_FLOW: hecate-integration
+        run: go test -tags fides -count=1 -v -timeout 10m -run Transition ./test/integration/...
+
+      - name: Fides logs on failure
+        if: failure()
+        run: docker logs fides-server 2>&1 | tail -100
