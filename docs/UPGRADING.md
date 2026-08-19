@@ -140,59 +140,76 @@ that is not re-entrant will be run twice one day.
 
 ## What is stable
 
-### The API version
+**Nothing, until `v1.0`. That is the decision, not a hedge.**
 
 `v1alpha1` is a Kubernetes convention with a specific meaning, and Hecate means
-it: **fields may be renamed or removed, and there is no conversion webhook.** In
-practice the shapes below have been stable for some time and are unlikely to
-move, but "unlikely" is the commitment on offer until `v1.0`, not "will not".
+it literally: any field may be renamed, retyped or removed, and there is no
+conversion webhook to carry your objects across. In practice the shapes below
+have not moved in a long time and probably will not — but "probably will not" is
+not something to build a fleet on, and publishing a stable-field list before we
+are willing to be held to it would be worse than publishing nothing. A promise
+that gets quietly broken costs more than one never made.
 
-What Hecate does commit to before then:
+So there is no per-field stability table here, deliberately. #54 asked for one;
+the answer is that it arrives with `v1.0` and not before.
 
-- **No silent field removal.** A field that goes away goes away in a release
-  whose notes say so.
+### What Hecate does commit to in the meantime
+
+These are narrower than a stability guarantee and are meant to be relied on:
+
+- **No silent removal.** A field that goes away goes away in a release whose
+  notes say so, under
+  [Behaviour changes](#behaviour-changes-by-version) if it changes what Hecate
+  does.
 - **Stored objects keep working across a patch release.** `0.3.1` reads what
   `0.3.0` wrote.
-- **The startup check, not your incident.** Any CRD change ships with a
-  controller that refuses to run against the old one.
+- **A failed rollout rather than a silent misread.** Any CRD change ships with a
+  controller that refuses to start against the older API, so a missed
+  `kubectl apply` is an error message and not a Gate quietly ignoring a field.
 
-### Fields
+That last one is the practical protection. It does not stop a field changing; it
+stops a field changing *without you finding out*.
 
-> **Proposed, pending sign-off — this table is the half of #54 that is not yet
-> settled.** It reflects what the code does today, not a decision anyone has
-> made about what to promise. Do not cite it as a commitment yet.
+### Planning for it
 
-| kind | fields |
-|---|---|
-| `Beacon` | `interval`, `watch`, `emit`, `retain`, `suspend` |
-| `Gate` | `admits`, `passage`, `watch`, `verify`, `auto`, `windows`, `suspend`, `vars`, `retain`, `evidence` |
-| `Passage` | `gate`, `bundle`, `steps`, `vars`, `actor`, `abort` |
-| `Bundle` | `beacon`, `digest`, `alias`, `artifacts` |
+If you are building on Hecate before `v1.0`, the cheap insurance is to keep your
+Beacon, Gate and Passage manifests in git and reconciled by Flux — which is the
+model Hecate assumes anyway. A renamed field is then a diff to make once, in one
+place, rather than a fleet to hunt through.
 
-`Bundle` is the one to be most careful with: its `digest` is content-addressed
-and its name is derived from it, so a change to how a digest is computed renames
-every Bundle and re-emits the lot.
+`Bundle` is the one to watch hardest, and not because it is likeliest to change.
+Its `digest` is content-addressed and its name is derived from it, so any change
+to how a digest is computed renames every Bundle and re-emits the lot.
 
 ### The Go API
 
 `api/v1alpha1` is importable, and people do import it for the types alone.
-`AddToScheme` and `GroupVersion` are the surface to depend on.
+`AddToScheme` and `GroupVersion` are the surface to depend on — and they carry
+the same `v1alpha1` caveat as everything else.
 
-`SchemeBuilder` is exported but is not a stable shape — it changed type in the
+`SchemeBuilder` is exported but is not a stable shape: it changed type in the
 release that dropped controller-runtime from this package, so `Register` now
 takes functions rather than objects. Nothing needs to call it; use
 `AddToScheme`.
 
 ### Step names and their config
 
-Step `uses:` names and their `with:` fields are part of the contract in the same
-sense the CRDs are — a Passage that names `git-commit` should keep working. See
-[STEPS.md](STEPS.md).
+Step `uses:` names and their `with:` fields sit under the same `v1alpha1` rule
+as the CRD fields: intended to keep working, not guaranteed to. A Passage naming
+`git-commit` should go on working, and if that changes it changes in a release
+whose notes say so. See [STEPS.md](STEPS.md).
 
 ### Events
 
-Event `reason` and `type` are what alerts are written against and are treated as
-stable. The `action` field is newer; see D54.
+The same, with one difference worth stating: event `reason` and `type` are what
+alerts get written against, so they are treated as the most expensive thing here
+to change and are not renamed for tidiness. #134 migrated every controller to a
+new events API without touching a single `reason` — the `action` field was added
+beside them precisely so nothing had to move. See D54.
+
+Intent, though, not a guarantee. Until `v1.0` the honest advice is that an alert
+on an event `reason` is the safest thing to build, and still worth re-checking
+at each upgrade.
 
 ### Not part of any contract
 
