@@ -599,3 +599,31 @@ func TestACountedDeployerCrossesNormally(t *testing.T) {
 		t.Errorf("recorded %d approvals, want one", len(fake.approvals))
 	}
 }
+
+// The allowlist refusal hands the operator a command to run. It has to be a
+// command that actually works: they are already blocked, and a hint that fails
+// when pasted costs them a second round-trip to find out why.
+//
+// Fides requires --reason as of v0.7.0 -- an allowlist entry is an accepted
+// risk, and one with no stated justification cannot be evaluated by an auditor
+// later. The hint omitted it and so pointed at a dead end. The table-driven
+// refusal test above only asserts "fides allowlist add", which passes either
+// way, so this pins the part that was actually wrong.
+func TestNotAllowlistedHintIsARunnableCommand(t *testing.T) {
+	f := &fidesServer{allowlist: `{"approved":false}`}
+	step := evidenceStep(t, f.start(t), nil)
+
+	_, err := step.Run(context.Background(), evidenceCtx(t, EvidenceGateConfig{
+		Gates: []string{GateAllowlist},
+	}, testDigest))
+
+	if !passage.IsTerminal(err) || passage.ReasonOf(err) != ReasonNotAllowlisted {
+		t.Fatalf("err = %v, reason = %s", err, passage.ReasonOf(err))
+	}
+	msg := err.Error()
+	for _, want := range []string{"fides allowlist add", "--env", "--sha", "--reason"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the hint must be runnable as printed; missing %q in: %s", want, msg)
+		}
+	}
+}
