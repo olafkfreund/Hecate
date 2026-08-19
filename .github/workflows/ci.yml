@@ -34,10 +34,54 @@ jobs:
         run: go vet ./...
 
       - name: go test
-        run: go test -race -coverprofile=coverage.out ./...
+        run: |
+          set -o pipefail
+          go test -race -coverprofile=coverage.out -json ./... | tee gotest.jsonl
 
       - name: coverage summary
         run: go tool cover -func=coverage.out | tail -1
+
+      # Record the unit-test result on the Fides `hecate` trail as a
+      # `test-result` attestation (payload: passed/failed/skipped/total) — the
+      # same tamper-evident chain the portal CR "Tests" tab and ServiceNow
+      # u_fides_test_result mirror read back. Flow resolved by name; trail keyed
+      # by commit sha. always() so a failing suite still records compliant=false.
+      # Inert until FIDES secrets are set.
+      - name: Attest test results to Fides
+        if: ${{ always() }}
+        env:
+          FIDES_SERVER_URL: ${{ vars.FIDES_SERVER_URL }}
+          FIDES_API_TOKEN: ${{ secrets.FIDES_API_TOKEN }}
+          FIDES_FLOW: hecate
+          TRAIL_NAME: ${{ github.sha }}
+          COMMIT_SHA: ${{ github.sha }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          [ -n "${FIDES_API_TOKEN}" ] && [ -n "${FIDES_SERVER_URL}" ] || { echo "Fides not configured; skipping"; exit 0; }
+          [ -f gotest.jsonl ] || { echo "no gotest.jsonl; skipping"; exit 0; }
+          base="${FIDES_SERVER_URL%/}/api/v1"
+          auth="Authorization: Bearer ${FIDES_API_TOKEN}"
+          flow_id="$(curl -sf -H "$auth" "$base/flows" | jq -r --arg n "$FIDES_FLOW" '.[]?|select(.name==$n)|.id' | head -1 || true)"
+          [ -n "${flow_id:-}" ] && [ "$flow_id" != "null" ] || { echo "flow $FIDES_FLOW not found; skipping"; exit 0; }
+          trail_id="$(curl -sf -H "$auth" "$base/flows/$flow_id/trails" | jq -r --arg n "$TRAIL_NAME" '.[]?|select(.name==$n)|.id' | head -1 || true)"
+          if [ -z "${trail_id:-}" ] || [ "$trail_id" = "null" ]; then
+            trail_id="$(curl -sf -H "$auth" -H 'Content-Type: application/json' -X POST "$base/trails" \
+              -d "$(jq -n --arg f "$flow_id" --arg n "$TRAIL_NAME" --arg c "$COMMIT_SHA" --arg r "$REPO_URL" \
+                    '{flow_id:$f,name:$n,commit:$c,repository:$r}')" | jq -r '.id')"
+          fi
+          # go test -json: count test-level events (package-level events have no .Test)
+          P=$(jq -rs 'map(select(.Test!=null and .Action=="pass"))|length' gotest.jsonl)
+          F=$(jq -rs 'map(select(.Test!=null and .Action=="fail"))|length' gotest.jsonl)
+          Sk=$(jq -rs 'map(select(.Test!=null and .Action=="skip"))|length' gotest.jsonl)
+          Tt=$((P + F + Sk))
+          if [ "$F" = "0" ]; then C=true; else C=false; fi
+          payload="$(jq -nc --argjson c "$C" --argjson p "$P" --argjson f "$F" --argjson s "$Sk" --argjson t "$Tt" \
+            '{compliant:$c,passed:$p,failed:$f,skipped:$s,total:$t,suite:"hecate go test"}')"
+          curl -sf -H "$auth" -H 'Content-Type: application/json' -X POST "$base/attestations" \
+            -d "$(jq -n --arg tid "$trail_id" --arg pl "$payload" \
+                  '{trail_id:$tid,name:"unit-tests",type_name:"test-result",payload:$pl}')" >/dev/null
+          echo "attested test-result on trail $trail_id: passed=$P failed=$F skipped=$Sk total=$Tt"
 
   lint:
     name: Lint
