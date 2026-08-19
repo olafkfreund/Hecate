@@ -72,15 +72,20 @@ jobs:
 
       # No static keys: the role is assumed through GitHub's OIDC provider and
       # can push to exactly one ECR repository.
+      # Only in the repository the IAM role trusts. The Synechron mirror runs
+      # this file too, and its OIDC subject names synechron/Hecate, so the
+      # assume-role fails there — a red run on the mirror for a role it was
+      # never meant to hold. The other three legs need nothing repository
+      # specific and run everywhere.
       - name: Assume the ECR role
-        if: matrix.registry == 'ecr'
+        if: matrix.registry == 'ecr' && github.repository == 'olafkfreund/Hecate'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::796973489124:role/hecate-github-deploy
           aws-region: eu-west-2
 
       - name: Log in to ECR
-        if: matrix.registry == 'ecr'
+        if: matrix.registry == 'ecr' && github.repository == 'olafkfreund/Hecate'
         run: |
           aws ecr get-login-password --region eu-west-2 \
             | docker login --username AWS --password-stdin 796973489124.dkr.ecr.eu-west-2.amazonaws.com
@@ -101,7 +106,9 @@ jobs:
           echo "repo=docker.io/$USERNAME/hecate-ci" >> "$GITHUB_OUTPUT"
 
       - name: Push and pull
-        if: matrix.registry != 'dockerhub' || steps.dockerhub.outputs.skip != 'true'
+        if: |
+          (matrix.registry != 'dockerhub' || steps.dockerhub.outputs.skip != 'true') &&
+          (matrix.registry != 'ecr' || github.repository == 'olafkfreund/Hecate')
         env:
           # A tag per run and per registry: several of these are mutable and a
           # re-run must not race a previous one.
