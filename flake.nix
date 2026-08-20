@@ -15,7 +15,7 @@
     }:
     let
       # Bump in lockstep with the git tag when cutting a release.
-      version = "0.5.0";
+      version = "0.6.0";
 
       systems = [
         "x86_64-linux"
