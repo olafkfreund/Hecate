@@ -176,9 +176,17 @@ export interface Totals {
   failed: number;
 }
 
+/** Day is one day's crossings and failures, for the trend. */
+export interface Day {
+  date: string;
+  crossed: number;
+  failed: number;
+}
+
 export interface Overview {
   namespaces: NamespaceOverview[];
   totals: Totals;
+  activity: Day[];
 }
 
 /** Unauthenticated is thrown when the API says the caller is not signed in. */

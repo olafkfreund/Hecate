@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/olafkfreund/hecate/api/v1alpha1"
 )
@@ -20,7 +21,37 @@ type Overview struct {
 	Namespaces []NamespaceOverview `json:"namespaces"`
 	// Totals is the whole picture in numbers.
 	Totals Totals `json:"totals"`
+	// Activity is what crossed and what failed, by day, oldest first.
+	Activity []Day `json:"activity"`
 }
+
+// Day is one day's crossings and failures.
+//
+// Built from Gate.status.history rather than from Passages: a Gate keeps a
+// bounded number of Passages and the detail ages out, while history is capped
+// but long-lived and survives the Passage it names. A trend drawn from
+// Passages would quietly shorten itself as retention collected them, which is
+// the one thing a trend must not do.
+type Day struct {
+	// Date is the day in YYYY-MM-DD, in UTC. A chart axis needs a stable label
+	// and the server is the only place that knows what "today" means for the
+	// data it just counted.
+	Date string `json:"date"`
+	// Crossed is how many Bundles entered a Gate that day.
+	Crossed int `json:"crossed"`
+	// Failed is how many Passages ended badly that day.
+	//
+	// Subject to Passage retention, unlike Crossed — a failure that has been
+	// collected is no longer counted. Better than not drawing failures at all,
+	// but it means the further back the chart goes the more it flatters.
+	Failed int `json:"failed"`
+}
+
+// activityDays is how far back the chart looks.
+//
+// Two weeks: long enough to show a bad week against a good one, short enough
+// that Passage retention has probably not eaten the failures yet.
+const activityDays = 14
 
 // NamespaceOverview is one namespace's Gates.
 type NamespaceOverview struct {
@@ -99,7 +130,9 @@ func (o *Ops) Overview(ctx context.Context, namespaces []string) (*Overview, err
 	// Which Gate each running Passage is crossing, so a Gate can name it
 	// without a second pass over the Passages for every Gate.
 	running := map[string]string{}
-	out := &Overview{Namespaces: []NamespaceOverview{}}
+	crossedOn := map[string]int{}
+	failedOn := map[string]int{}
+	out := &Overview{Namespaces: []NamespaceOverview{}, Activity: []Day{}}
 
 	for i := range passages.Items {
 		p := &passages.Items[i]
@@ -112,6 +145,12 @@ func (o *Ops) Overview(ctx context.Context, namespaces []string) (*Overview, err
 			out.Totals.Running++
 		case v1alpha1.PassageFailed:
 			out.Totals.Failed++
+			// FinishedAt, not the creation time: a Passage that ran for an hour
+			// belongs to the day it gave up on, which is the day someone was
+			// looking at it.
+			if p.Status.FinishedAt != nil {
+				failedOn[day(p.Status.FinishedAt.Time)]++
+			}
 		}
 	}
 
@@ -120,6 +159,9 @@ func (o *Ops) Overview(ctx context.Context, namespaces []string) (*Overview, err
 		g := &gates.Items[i]
 		if !visible[g.Namespace] {
 			continue
+		}
+		for _, occ := range g.Status.History {
+			crossedOn[day(occ.EnteredAt.Time)]++
 		}
 		s := summarise(g, running[g.Namespace+"/"+g.Name])
 		byNamespace[g.Namespace] = append(byNamespace[g.Namespace], s)
@@ -147,7 +189,30 @@ func (o *Ops) Overview(ctx context.Context, namespaces []string) (*Overview, err
 	sort.Slice(out.Namespaces, func(a, b int) bool {
 		return out.Namespaces[a].Namespace < out.Namespaces[b].Namespace
 	})
+	out.Activity = activity(o.now().Time, crossedOn, failedOn)
 	return out, nil
+}
+
+// day is the UTC date a time falls on.
+//
+// UTC rather than the server's zone: the two ends of this are a Kubernetes
+// timestamp and a chart axis, and a bucket boundary that moves with whichever
+// zone the pod happens to run in makes the same data draw differently in two
+// deployments.
+func day(t time.Time) string { return t.UTC().Format("2006-01-02") }
+
+// activity fills in every day in the window, including the quiet ones.
+//
+// A series with gaps draws a chart where a week of nothing looks the same
+// width as a day of nothing — the empty days are the shape of the story, not
+// missing data, so they are zeroes rather than absences.
+func activity(now time.Time, crossed, failed map[string]int) []Day {
+	days := make([]Day, 0, activityDays)
+	for i := activityDays - 1; i >= 0; i-- {
+		d := day(now.AddDate(0, 0, -i))
+		days = append(days, Day{Date: d, Crossed: crossed[d], Failed: failed[d]})
+	}
+	return days
 }
 
 func summarise(g *v1alpha1.Gate, runningPassage string) GateSummary {
