@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 import { Activity, DoorOpen, LayoutDashboard, Package, Radio, Route, ShieldCheck, Moon, Sun, Monitor, Cog, ScrollText } from "lucide-react";
-import { useHydrated, useQueryParam } from "@/lib/browser";
+import { setQueryParam, useHydrated, useQueryParam } from "@/lib/browser";
 import { api } from "@/lib/api";
 
 // Ordered the way a Bundle travels: a Beacon sees a version, emits a Bundle, a
@@ -24,6 +24,7 @@ const nav = [
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
+  useLandingNamespace();
 
   return (
     <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-6">
@@ -75,6 +76,46 @@ export function Shell({ children }: { children: React.ReactNode }) {
       </footer>
     </div>
   );
+}
+
+/**
+ * useLandingNamespace moves an addressless visit to a namespace that has
+ * something in it.
+ *
+ * Arriving with no `?namespace=` used to mean `default`, and `default` is
+ * almost never where anyone's Gates are — so the first thing every page said
+ * to a new arrival was that there was nothing to see. The API already knows
+ * which namespaces hold Gates or Beacons, because the picker is built from
+ * exactly that list; landing is now decided by the same answer rather than by
+ * a constant that was only ever a placeholder.
+ *
+ * A namespace named in the URL always wins and is never touched. That is the
+ * whole point of keeping it there: a link to a Gate has to open on that Gate
+ * for whoever it was sent to, not on whichever namespace their server happened
+ * to list first.
+ */
+function useLandingNamespace() {
+  useEffect(() => {
+    // Already somewhere specific — a shared link, or a picker choice. Leave it.
+    if (new URLSearchParams(window.location.search).has("namespace")) return;
+
+    let live = true;
+    api
+      .namespaces()
+      .then((r) => {
+        // Sorted server-side, so this is stable between loads rather than
+        // whichever namespace the cluster happened to return first.
+        const first = r.namespaces?.[0];
+        if (live && first) setQueryParam("namespace", first);
+      })
+      // Quiet, like the picker's own discovery. Failing to find a better
+      // namespace leaves the page on `default`, which is exactly where it was
+      // before this existed — a worse landing spot, not a broken page.
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
 }
 
 /**
