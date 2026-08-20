@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
-import { Activity, DoorOpen, Package, Radio, Route, ShieldCheck, Moon, Sun, Monitor, Cog, ScrollText } from "lucide-react";
+import { Activity, DoorOpen, LayoutDashboard, Package, Radio, Route, ShieldCheck, Moon, Sun, Monitor, Cog, ScrollText } from "lucide-react";
 import { useHydrated, useQueryParam } from "@/lib/browser";
 import { api } from "@/lib/api";
 
@@ -12,7 +12,8 @@ import { api } from "@/lib/api";
 // Gate admits it, a Passage carries it. Someone learning the model reads the
 // nav left to right and gets the pipeline in the right order.
 const nav = [
-  { href: "/", label: "Gates", icon: DoorOpen },
+  { href: "/", label: "Overview", icon: LayoutDashboard },
+  { href: "/gates/", label: "Gates", icon: DoorOpen },
   { href: "/beacons/", label: "Beacons", icon: Radio },
   { href: "/bundles/", label: "Bundles", icon: Package },
   { href: "/passages/", label: "Passages", icon: Route },
@@ -58,7 +59,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </nav>
 
         <div className="ml-auto flex items-center gap-3">
-          <Namespace />
+          {/* Not on the Overview: it spans every namespace, so a picker there
+              would be a control that changes nothing — and a control that
+              appears to do nothing is read as broken rather than as not
+              applicable. */}
+          {path !== "/" && <Namespace />}
           <ThemeToggle />
         </div>
       </header>

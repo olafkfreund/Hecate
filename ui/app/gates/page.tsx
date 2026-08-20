@@ -7,6 +7,7 @@ import { api, ApiError, Unauthenticated, type Explanation } from "@/lib/api";
 import { Panel, useLiveApi, useNamespace } from "@/components/loader";
 import { useQueryParam } from "@/lib/browser";
 import { HealthDot } from "@/components/health";
+import { GateList } from "./list";
 
 /**
  * One Gate, and why nothing is crossing it.
@@ -16,7 +17,17 @@ import { HealthDot } from "@/components/health";
  * knowable then — `/gates/?name=production` is uglier than `/gates/production`
  * and, unlike it, actually works and is still a link somebody can send.
  */
-export default function GateDetail() {
+export default function Gates() {
+  const name = useQueryParam("name", "");
+  // One route, two views, as Bundles and Passages do it. Without a name this
+  // used to be a dead end telling you to go back — the list belongs here, and
+  // "/" belongs to the question a person actually arrives with, which is how
+  // everything is rather than how one namespace is.
+  if (!name) return <GateList />;
+  return <GateDetail />;
+}
+
+function GateDetail() {
   const ns = useNamespace();
   const name = useQueryParam("name", "");
   const [crossed, setCrossed] = useState(0);
@@ -25,18 +36,10 @@ export default function GateDetail() {
   // to "why is nothing crossing" changes the moment something is.
   const state = useLiveApi(() => api.explain(ns, name), [ns, name, crossed]);
 
-  if (!name) {
-    return (
-      <p className="text-sm text-[var(--muted-foreground)]">
-        No Gate named. <Link href="/" className="underline">Back to Gates</Link>.
-      </p>
-    );
-  }
-
   return (
     <div>
       <Link
-        href="/"
+        href="/gates/"
         className="mb-4 inline-flex items-center gap-1.5 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
       >
         <ArrowLeft size={14} aria-hidden />

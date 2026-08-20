@@ -81,9 +81,16 @@ func newServer(t *testing.T, tokens map[string]string, rbac grants, objs ...clie
 					if attrs.Subresource != "" {
 						resource += "/" + attrs.Subresource
 					}
-					review.Status = authorizationv1.SubjectAccessReviewStatus{
-						Allowed: rbac[review.Spec.User][attrs.Verb+" "+resource],
+					// A namespace-specific answer wins over the general one,
+					// so a test can grant a right everywhere and withhold it in
+					// one place — which is what a team-scoped operator actually
+					// looks like, and the only shape that exercises a filter.
+					held := rbac[review.Spec.User]
+					allowed, ok := held[attrs.Verb+" "+resource+" in "+attrs.Namespace]
+					if !ok {
+						allowed = held[attrs.Verb+" "+resource]
 					}
+					review.Status = authorizationv1.SubjectAccessReviewStatus{Allowed: allowed}
 					return nil
 				}
 				return c.Create(ctx, obj, opts...)

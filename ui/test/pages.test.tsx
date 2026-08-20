@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 
-import Gates from "@/app/page";
+import Gates from "@/app/gates/page";
 import Bundles from "@/app/bundles/page";
 import Passages from "@/app/passages/page";
 import GateDetail from "@/app/gates/page";
@@ -22,7 +22,7 @@ function atNamespace(query: string) {
 
 describe("pages render the data the API actually returns", () => {
   it("Gates lists every Gate, its health and what may cross", async () => {
-    atNamespace("/?namespace=uidemo");
+    atNamespace("/gates/?namespace=uidemo");
     vi.spyOn(api, "gates").mockResolvedValue(fixtures.gates);
 
     render(<Gates />);
@@ -38,7 +38,7 @@ describe("pages render the data the API actually returns", () => {
   });
 
   it("draws the pipeline the Gates imply, including where approval is needed", async () => {
-    atNamespace("/?namespace=uidemo");
+    atNamespace("/gates/?namespace=uidemo");
     vi.spyOn(api, "gates").mockResolvedValue(fixtures.gates);
 
     render(<Gates />);
@@ -54,7 +54,7 @@ describe("pages render the data the API actually returns", () => {
   });
 
   it("Bundles prefers the alias, which is what a person recognises", async () => {
-    atNamespace("/?namespace=uidemo");
+    atNamespace("/gates/?namespace=uidemo");
     vi.spyOn(api, "bundles").mockResolvedValue(fixtures.bundles);
 
     render(<Bundles />);
@@ -63,7 +63,7 @@ describe("pages render the data the API actually returns", () => {
   });
 
   it("Passages shows where each one was going and how it ended", async () => {
-    atNamespace("/?namespace=uidemo");
+    atNamespace("/gates/?namespace=uidemo");
     vi.spyOn(api, "passages").mockResolvedValue(fixtures.passages);
 
     render(<Passages />);
@@ -106,7 +106,7 @@ describe("pages render the data the API actually returns", () => {
 
 describe("the states that are not data", () => {
   it("offers a sign-in rather than an error when the session has gone", async () => {
-    atNamespace("/?namespace=uidemo");
+    atNamespace("/gates/?namespace=uidemo");
     vi.spyOn(api, "gates").mockRejectedValue(new Unauthenticated());
 
     render(<Gates />);
@@ -115,7 +115,7 @@ describe("the states that are not data", () => {
   });
 
   it("says an empty namespace is empty, rather than showing nothing at all", async () => {
-    atNamespace("/?namespace=empty");
+    atNamespace("/gates/?namespace=empty");
     vi.spyOn(api, "gates").mockResolvedValue([]);
 
     render(<Gates />);
@@ -124,7 +124,7 @@ describe("the states that are not data", () => {
   });
 
   it("reads the namespace from the URL, not from a hydration-time default", async () => {
-    atNamespace("/?namespace=uidemo");
+    atNamespace("/gates/?namespace=uidemo");
     const gates = vi.spyOn(api, "gates").mockResolvedValue(fixtures.gates);
 
     render(<Gates />);
