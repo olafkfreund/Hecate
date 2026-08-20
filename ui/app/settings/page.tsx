@@ -428,6 +428,17 @@ function ClusterForm({
         only sees its own namespace on the remote cluster — a cluster reference is not a way
         around the tenant rule.
       </p>
+      {/* The commonest way to get this wrong, and it fails a day later rather
+          than now: `kubectl create token` and the kubeconfig an EKS or GKE
+          helper prints both carry a bound token that expires, and a cluster
+          connected with one works until it does not. Said here because the
+          screen is where the mistake is made — the error it eventually
+          produces says only that credentials were asked for. */}
+      <p className="text-xs text-[var(--muted-foreground)]">
+        Use a credential that does not expire. A bound service-account token — what{" "}
+        <code>kubectl create token</code> gives you by default — lasts an hour or a day, and the
+        connection stops working when it runs out.
+      </p>
     </form>
   );
 }
