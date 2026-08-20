@@ -11,6 +11,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -282,9 +283,34 @@ func (s *Server) probeCluster(ctx context.Context, secret string) (bool, string)
 		return false, err.Error()
 	}
 	if _, err := dc.ServerVersion(); err != nil {
-		return false, err.Error()
+		return false, unreachableBecause(err)
 	}
 	return true, ""
+}
+
+// unreachableBecause turns a failed connection into something actionable.
+//
+// Every other failure in this check already says what to do about it; this one
+// used to pass the client library's own words through, and for the commonest
+// cause those words are actively misleading. "the server has asked for the
+// client to provide credentials" describes a 401 accurately and suggests the
+// kubeconfig has no credential in it — when in practice it has one that has
+// since expired.
+//
+// A bound service-account token is what `kubectl create token` returns by
+// default and what the cloud helpers print, and it lasts an hour or a day. So a
+// cluster connected this way works when it is tested and fails quietly
+// afterwards, which is the shape of the problem worth naming.
+func unreachableBecause(err error) string {
+	if apierrors.IsUnauthorized(err) {
+		return "the cluster rejected the credentials in this Secret. If the kubeconfig holds a " +
+			"bound service-account token — what `kubectl create token` gives you by default — it " +
+			"has most likely expired; reconnect with a credential that does not."
+	}
+	if apierrors.IsForbidden(err) {
+		return "the credentials are accepted but may not read this cluster: " + err.Error()
+	}
+	return err.Error()
 }
 
 func dedupe(in []string) []string {
