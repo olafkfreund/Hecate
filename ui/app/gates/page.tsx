@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, CircleAlert, Loader2 } from "lucide-react";
 import { api, ApiError, Unauthenticated, type Explanation } from "@/lib/api";
-import { Panel, useApi, useNamespace } from "@/components/loader";
+import { Panel, useLiveApi, useNamespace } from "@/components/loader";
 import { useQueryParam } from "@/lib/browser";
 import { HealthDot } from "@/components/health";
 
@@ -23,7 +23,7 @@ export default function GateDetail() {
 
   // `crossed` is in the deps so promoting reloads the explanation: the answer
   // to "why is nothing crossing" changes the moment something is.
-  const state = useApi(() => api.explain(ns, name), [ns, name, crossed]);
+  const state = useLiveApi(() => api.explain(ns, name), [ns, name, crossed]);
 
   if (!name) {
     return (

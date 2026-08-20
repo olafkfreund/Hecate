@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Loader2, RefreshCw } from "lucide-react";
 import { api, ApiError, Unauthenticated, type Beacon } from "@/lib/api";
-import { Panel, useApi, useNamespace } from "@/components/loader";
+import { Panel, useLiveApi, useNamespace } from "@/components/loader";
 import { useQueryParam } from "@/lib/browser";
 import { describeWatch } from "./page";
 
@@ -13,7 +13,7 @@ export function BeaconDetail() {
   const ns = useNamespace();
   const name = useQueryParam("name", "");
   const [polled, setPolled] = useState(0);
-  const state = useApi(() => api.beacon(ns, name), [ns, name, polled]);
+  const state = useLiveApi(() => api.beacon(ns, name), [ns, name, polled]);
 
   return (
     <div>

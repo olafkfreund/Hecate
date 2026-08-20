@@ -3,7 +3,7 @@
 import { ArrowRight, CheckCircle2, Clock, ShieldCheck, XCircle } from "lucide-react";
 
 import { api, AuditEntry } from "@/lib/api";
-import { Panel, useApi, useNamespace } from "@/components/loader";
+import { Panel, useLiveApi, useNamespace } from "@/components/loader";
 
 /**
  * The audit trail: what happened, to what, on whose say-so, and against which
@@ -21,7 +21,7 @@ export default function AuditPage() {
   // live in Panel, so a page loading by hand shows raw error text to someone
   // whose session merely expired — a dead end on the one page an auditor is
   // most likely to arrive at cold.
-  const state = useApi(() => api.audit(namespace), [namespace]);
+  const state = useLiveApi(() => api.audit(namespace), [namespace]);
 
   return (
     <div className="space-y-6">
