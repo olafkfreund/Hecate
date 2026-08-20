@@ -189,6 +189,19 @@ export interface Overview {
   activity: Day[];
 }
 
+/** FluxResource is one Flux object a Gate depends on. */
+export interface FluxResource {
+  kind: string;
+  name: string;
+  namespace: string;
+  suspended: boolean;
+  health: Health;
+  detail?: string;
+  revision?: string;
+  lastHandled?: string;
+  missing: boolean;
+}
+
 /** Unauthenticated is thrown when the API says the caller is not signed in. */
 export class Unauthenticated extends Error {
   constructor() {
@@ -389,6 +402,30 @@ export const api = {
   gate: (ns: string, name: string) => get<Gate>(`${base(ns)}/gates/${encodeURIComponent(name)}`),
   explain: (ns: string, name: string) =>
     get<Explanation>(`${base(ns)}/gates/${encodeURIComponent(name)}/explain`),
+
+  /** flux is what this Gate's crossings actually depend on. */
+  flux: (ns: string, gate: string) =>
+    get<FluxResource[]>(`${base(ns)}/gates/${encodeURIComponent(gate)}/flux`),
+
+  /**
+   * suspendFlux stops or restarts Flux reconciling one resource.
+   *
+   * A separate permission from promoting, and a bigger one: suspending stops
+   * every future deploy of a resource and is cluster state git will not
+   * restore, so it outlives whoever did it.
+   */
+  suspendFlux: (ns: string, gate: string, kind: string, name: string, suspend: boolean) =>
+    post<{ kind: string; name: string; suspended: boolean; by: string }>(
+      `${base(ns)}/gates/${encodeURIComponent(gate)}/flux/suspend`,
+      { kind, name, suspend },
+    ),
+
+  /** reconcileFlux asks Flux to look at one resource now. */
+  reconcileFlux: (ns: string, gate: string, kind: string, name: string) =>
+    post<{ requestedAt: string }>(
+      `${base(ns)}/gates/${encodeURIComponent(gate)}/flux/reconcile`,
+      { kind, name },
+    ),
   bundles: (ns: string) => get<Bundle[]>(`${base(ns)}/bundles`),
   bundle: (ns: string, name: string) =>
     get<Bundle>(`${base(ns)}/bundles/${encodeURIComponent(name)}`),
