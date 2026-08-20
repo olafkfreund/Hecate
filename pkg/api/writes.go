@@ -33,12 +33,19 @@ const ClusterLabel = "hecate.dev/cluster"
 // can grant — which is not the same as what the caller can, because the server
 // does the writing.
 //
-// These three are the roles the chart creates for people, and binding one is
-// the whole of "add a user" in a system that has no users of its own.
+// These are the roles the chart creates for people, and binding one is the
+// whole of "add a user" in a system that has no users of its own.
+//
+// hecate-flux-operator is here rather than left to kubectl: anyone who can
+// reach this endpoint can already grant promoter, and a role that exists but
+// can only be bound by hand is a surprise rather than a safeguard. What keeps
+// it honest is that it must be granted deliberately — nothing binds it by
+// default, and no other role implies it.
 var bindableRoles = map[string]struct{}{
-	"hecate-viewer":   {},
-	"hecate-promoter": {},
-	"hecate-approver": {},
+	"hecate-viewer":        {},
+	"hecate-promoter":      {},
+	"hecate-approver":      {},
+	"hecate-flux-operator": {},
 }
 
 // bindRoleRequest is "let this person do this".
@@ -79,7 +86,7 @@ func (s *Server) bindRole(ctx context.Context, subject Subject, r *http.Request)
 	}
 	if _, ok := bindableRoles[req.Role]; !ok {
 		return nil, &BadRequest{Reason: "role must be one of hecate-viewer, " +
-			"hecate-promoter or hecate-approver — this API binds only the roles the chart " +
+			"hecate-promoter, hecate-approver or hecate-flux-operator — this API binds only the roles the chart " +
 			"creates for people, because binding an arbitrary role would let a caller grant " +
 			"themselves anything the server can grant"}
 	}

@@ -86,4 +86,40 @@ rules:
   - apiGroups: ["hecate.dev"]
     resources: ["beacons"]
     verbs: ["update"]
+---
+{{/*
+  A flux-operator can suspend, resume and reconcile the Flux resources a Gate
+  watches.
+
+  Its own role rather than a rule added to the promoter, because it is a bigger
+  right than promoting. Suspending a Kustomization stops every future deploy of
+  it, and is cluster state git will not restore — so it outlives whoever did it,
+  where a crossing leaves a Passage saying who asked and can be undone by
+  committing.
+
+  The rules are on Flux's own resources, not Hecate's, because that is what is
+  actually written. Someone who may already patch Kustomizations has this right
+  without Hecate's help; someone who may not should not gain it by being given
+  a Hecate role.
+
+  Deliberately unbound by default. A cluster where every promoter could silently
+  stop reconciliation is not the safe default, and the UI explains the refusal
+  rather than hiding the buttons — a control that vanishes teaches nobody that
+  the permission exists.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "hecate.fullname" . }}-flux-operator
+  labels: {{- include "hecate.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["kustomize.toolkit.fluxcd.io"]
+    resources: ["kustomizations"]
+    verbs: ["get", "list", "patch"]
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources: ["helmreleases"]
+    verbs: ["get", "list", "patch"]
+  - apiGroups: ["source.toolkit.fluxcd.io"]
+    resources: ["gitrepositories", "ocirepositories", "helmcharts", "helmrepositories", "buckets"]
+    verbs: ["get", "list", "patch"]
 {{- end }}

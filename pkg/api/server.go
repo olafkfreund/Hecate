@@ -114,6 +114,15 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1alpha1/namespaces/{namespace}/passages/{name}/abort",
 		s.guard(ActionAbort, s.abort))
 
+	// What a Gate's crossings actually depend on, and the three things an
+	// operator does to it when something is wrong.
+	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/gates/{name}/flux",
+		s.guard(ActionRead, s.fluxResources))
+	mux.Handle("POST /api/v1alpha1/namespaces/{namespace}/gates/{name}/flux/suspend",
+		s.guard(ActionOperateFlux, s.suspendFlux))
+	mux.Handle("POST /api/v1alpha1/namespaces/{namespace}/gates/{name}/flux/reconcile",
+		s.guard(ActionOperateFlux, s.reconcileFlux))
+
 	// Last, and on "/" so it catches everything the routes above did not.
 	// Go's mux prefers the more specific pattern, so /api/... and /healthz
 	// still reach their handlers — the UI only sees what is left.
@@ -448,4 +457,61 @@ func writeError(w http.ResponseWriter, status int, message string) {
 		"error":  message,
 		"status": strings.ToLower(http.StatusText(status)),
 	})
+}
+
+// ------------------------------------------------------------------ flux ----
+
+func (s *Server) fluxResources(ctx context.Context, _ Subject, r *http.Request) (any, error) {
+	return s.Ops.FluxResources(ctx, r.PathValue("namespace"), r.PathValue("name"))
+}
+
+// suspendFlux stops or restarts Flux reconciling one resource.
+//
+// The suspending is the dangerous half and the resuming is the remedy, so both
+// live on one route: an operator who can stop reconciliation must always be
+// able to start it again, and splitting them invites a deployment where the
+// second permission was never granted.
+func (s *Server) suspendFlux(ctx context.Context, subject Subject, r *http.Request) (any, error) {
+	var body struct {
+		Kind    string `json:"kind"`
+		Name    string `json:"name"`
+		Suspend bool   `json:"suspend"`
+	}
+	if err := decode(r, &body); err != nil {
+		return nil, err
+	}
+	if body.Kind == "" || body.Name == "" {
+		return nil, &BadRequest{Reason: "kind and name are required"}
+	}
+	namespace, gate := r.PathValue("namespace"), r.PathValue("name")
+	if err := s.Ops.SetFluxSuspend(ctx, namespace, gate, body.Kind, body.Name, body.Suspend); err != nil {
+		return nil, err
+	}
+	// The actor is echoed because a suspension outlives the session that made
+	// it, and "who stopped this" is the first question asked about one.
+	return map[string]any{
+		"kind": body.Kind, "name": body.Name,
+		"suspended": body.Suspend, "by": subject.Name,
+	}, nil
+}
+
+func (s *Server) reconcileFlux(ctx context.Context, _ Subject, r *http.Request) (any, error) {
+	var body struct {
+		Kind string `json:"kind"`
+		Name string `json:"name"`
+	}
+	if err := decode(r, &body); err != nil {
+		return nil, err
+	}
+	if body.Kind == "" || body.Name == "" {
+		return nil, &BadRequest{Reason: "kind and name are required"}
+	}
+	stamp, err := s.Ops.ReconcileFlux(ctx, r.PathValue("namespace"), r.PathValue("name"),
+		body.Kind, body.Name)
+	if err != nil {
+		return nil, err
+	}
+	// Echoed so a caller can match it against status.lastHandledReconcileAt and
+	// know its own request landed.
+	return map[string]any{"requestedAt": stamp}, nil
 }

@@ -8,6 +8,7 @@ import { Panel, useLiveApi, useNamespace } from "@/components/loader";
 import { useQueryParam } from "@/lib/browser";
 import { HealthDot } from "@/components/health";
 import { GateList } from "./list";
+import { FluxPanel } from "@/components/flux";
 
 /**
  * One Gate, and why nothing is crossing it.
@@ -104,6 +105,8 @@ function GateDetail() {
                 </ul>
               </section>
             )}
+
+            <FluxPanel namespace={ns} gate={ex.gate} />
 
             <Eligible
               namespace={ns}

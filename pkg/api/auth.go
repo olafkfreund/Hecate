@@ -64,6 +64,22 @@ var (
 	ActionApprove = Action{Verb: "update", Resource: "bundles/status"}
 	// ActionAbort stops a running Passage.
 	ActionAbort = Action{Verb: "update", Resource: "passages"}
+	// ActionOperateFlux suspends, resumes or reconciles a Flux resource a Gate
+	// watches.
+	//
+	// Its own action, and deliberately not folded into promoting. Suspending a
+	// Kustomization stops every future deploy of it and is state git will not
+	// restore, so it outlives whoever did it — that is a bigger right than
+	// asking a Gate to cross a Bundle, which git can undo and which leaves a
+	// Passage saying who asked.
+	//
+	// Checked against Flux's own resource rather than a Hecate one, because
+	// that is what is actually being written: someone who may patch
+	// Kustomizations has this right already, and someone who may not should not
+	// gain it by having a Hecate role.
+	ActionOperateFlux = Action{
+		Verb: "patch", Group: "kustomize.toolkit.fluxcd.io", Resource: "kustomizations",
+	}
 	// coreGroup names the core API group, whose real name is the empty string.
 	// Spelled out so an Action can ask for it without being mistaken for one
 	// that never set a group at all.
