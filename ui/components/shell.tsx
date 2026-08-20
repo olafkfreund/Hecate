@@ -4,12 +4,16 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
-import { Activity, DoorOpen, Package, Route, ShieldCheck, Moon, Sun, Monitor, Cog, ScrollText } from "lucide-react";
+import { Activity, DoorOpen, Package, Radio, Route, ShieldCheck, Moon, Sun, Monitor, Cog, ScrollText } from "lucide-react";
 import { useHydrated, useQueryParam } from "@/lib/browser";
 import { api } from "@/lib/api";
 
+// Ordered the way a Bundle travels: a Beacon sees a version, emits a Bundle, a
+// Gate admits it, a Passage carries it. Someone learning the model reads the
+// nav left to right and gets the pipeline in the right order.
 const nav = [
   { href: "/", label: "Gates", icon: DoorOpen },
+  { href: "/beacons/", label: "Beacons", icon: Radio },
   { href: "/bundles/", label: "Bundles", icon: Package },
   { href: "/passages/", label: "Passages", icon: Route },
   { href: "/approvals/", label: "Approvals", icon: ShieldCheck },

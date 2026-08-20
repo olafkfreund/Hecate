@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 
 import Bundles from "@/app/bundles/page";
-import { timeline } from "@/lib/timeline";
+import { timeline, took } from "@/lib/timeline";
 import { api } from "@/lib/api";
 import * as fixtures from "./fixtures";
 
@@ -80,5 +80,27 @@ describe("the Bundle detail page", () => {
     render(<Bundles />);
 
     await waitFor(() => expect(list).toHaveBeenCalledWith("uidemo"));
+  });
+});
+
+describe("how long something took", () => {
+  it("rounds to the unit a person would say it in", () => {
+    const from = "2026-08-20T10:00:00Z";
+    expect(took(from, "2026-08-20T10:00:04Z")).toBe("4s");
+    expect(took(from, "2026-08-20T10:02:00Z")).toBe("2m");
+    expect(took(from, "2026-08-20T10:02:30Z")).toBe("2m 30s");
+    expect(took(from, "2026-08-20T11:00:00Z")).toBe("1h");
+    expect(took(from, "2026-08-20T11:30:00Z")).toBe("1h 30m");
+  });
+
+  it("says nothing rather than guessing", () => {
+    // Still running: no end, so no duration. See took's own note — a value
+    // computed once at render freezes and reads as a wedged step.
+    expect(took("2026-08-20T10:00:00Z", undefined)).toBeNull();
+    expect(took(undefined, "2026-08-20T10:00:00Z")).toBeNull();
+    // Clocks disagree across nodes, and a negative duration is a wrong answer
+    // rather than a small one.
+    expect(took("2026-08-20T10:00:05Z", "2026-08-20T10:00:00Z")).toBeNull();
+    expect(took("not a time", "also not")).toBeNull();
   });
 });

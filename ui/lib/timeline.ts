@@ -44,6 +44,28 @@ function pick(c: GateCrossing) {
   return { at: c.at, gate: c.gate, actor: c.actor, reason: c.reason, passage: c.passage };
 }
 
+/**
+ * took renders how long something between two timestamps took.
+ *
+ * Only for work that has finished. A step that is still running deliberately
+ * has no duration here: the page does not yet refresh itself, so an elapsed
+ * time computed once at render would freeze at whatever it was when the page
+ * loaded — which reads as a stuck step rather than a stale number, and is worse
+ * than saying nothing.
+ */
+export function took(startedAt?: string, finishedAt?: string): string | null {
+  if (!startedAt || !finishedAt) return null;
+  const ms = Date.parse(finishedAt) - Date.parse(startedAt);
+  if (Number.isNaN(ms) || ms < 0) return null;
+
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return s % 60 === 0 ? `${m}m` : `${m}m ${s % 60}s`;
+  const h = Math.floor(m / 60);
+  return m % 60 === 0 ? `${h}h` : `${h}h ${m % 60}m`;
+}
+
 /** describeArtifact is what the artifact is, in one line. */
 export function describeArtifact(a: {
   image?: { repo: string; tag?: string; digest?: string };

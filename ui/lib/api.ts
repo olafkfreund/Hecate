@@ -78,16 +78,67 @@ export interface Bundle {
   };
 }
 
+/**
+ * StepStatus is one step's outcome.
+ *
+ * `reason` is carried alongside `message` rather than instead of it: the CRD
+ * defines message for a human reading one failure and reason as a stable code
+ * for anything reasoning across many, and a detail page showing only the prose
+ * cannot answer "is this the same problem as yesterday?".
+ */
+export interface StepStatus {
+  uses: string;
+  as?: string;
+  phase: string;
+  reason?: string;
+  message?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  attempts?: number;
+}
+
 export interface Passage {
   metadata: { name: string; namespace: string };
-  spec: { gate: string; bundle: string; actor?: string };
+  spec: { gate: string; bundle: string; actor?: string; abort?: boolean };
   status?: {
     phase?: string;
     message?: string;
     startedAt?: string;
     finishedAt?: string;
     traceID?: string;
-    steps?: { uses: string; phase: string; message?: string }[];
+    currentStep?: number;
+    steps?: StepStatus[];
+  };
+}
+
+/**
+ * Beacon is a source Hecate watches, and the thing that emits Bundles.
+ *
+ * `spec.watch` is kept as the discriminated union the CRD defines rather than
+ * flattened to a label: a Beacon may watch several sources of different kinds,
+ * and which kind it is decides what identifies it — a repo for an image, a repo
+ * and chart name for a chart.
+ */
+export interface WatchSource {
+  image?: { repo: string; constraint?: string; platform?: string };
+  chart?: { repo: string; name?: string; constraint?: string };
+  git?: { repo: string };
+  provider?: { name: string };
+}
+
+export interface Beacon {
+  metadata: { name: string; namespace: string };
+  spec: {
+    interval?: string;
+    watch?: WatchSource[];
+    emit?: string;
+    suspend?: boolean;
+  };
+  status?: {
+    lastPolled?: string;
+    latestBundle?: string;
+    lastHandledReconcileAt?: string;
+    conditions?: { type: string; status: string; reason?: string; message?: string }[];
   };
 }
 
@@ -286,6 +337,40 @@ export const api = {
   evidence: (ns: string, name: string) =>
     get<Evidence>(`${base(ns)}/bundles/${encodeURIComponent(name)}/evidence`),
   passages: (ns: string) => get<Passage[]>(`${base(ns)}/passages`),
+  passage: (ns: string, name: string) =>
+    get<Passage>(`${base(ns)}/passages/${encodeURIComponent(name)}`),
+
+  beacons: (ns: string) => get<Beacon[]>(`${base(ns)}/beacons`),
+  beacon: (ns: string, name: string) =>
+    get<Beacon>(`${base(ns)}/beacons/${encodeURIComponent(name)}`),
+
+  /**
+   * poll asks a Beacon to look at its sources now.
+   *
+   * The returned token is `status.lastHandledReconcileAt` once the controller
+   * has acted, so a caller can tell its own request landed rather than watching
+   * for any change and hoping.
+   */
+  poll: (ns: string, beacon: string) =>
+    post<{ requestedAt: string }>(
+      `${base(ns)}/beacons/${encodeURIComponent(beacon)}/poll`,
+      {},
+    ),
+
+  /**
+   * abort stops a Passage that is running.
+   *
+   * A separate permission from promoting, like approving is: being allowed to
+   * start a crossing does not imply being allowed to stop one half-way, which
+   * can leave the target in a state neither the old nor the new Bundle
+   * describes.
+   */
+  abort: (ns: string, passage: string) =>
+    post<{ passage: string; aborted: boolean; abortedBy: string }>(
+      `${base(ns)}/passages/${encodeURIComponent(passage)}/abort`,
+      {},
+    ),
+
   health: () => get<{ status: string; version: string }>("/healthz"),
 
   /**
