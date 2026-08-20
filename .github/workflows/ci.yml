@@ -68,7 +68,7 @@ jobs:
           if [ -z "${trail_id:-}" ] || [ "$trail_id" = "null" ]; then
             trail_id="$(curl -sf -H "$auth" -H 'Content-Type: application/json' -X POST "$base/trails" \
               -d "$(jq -n --arg f "$flow_id" --arg n "$TRAIL_NAME" --arg c "$COMMIT_SHA" --arg r "$REPO_URL" \
-                    '{flow_id:$f,name:$n,commit:$c,repository:$r}')" | jq -r '.id')"
+                    '{flow_id:$f,name:$n,git_commit:$c,git_repository:$r}')" | jq -r '.id')"
           fi
           # go test -json: count test-level events (package-level events have no .Test)
           P=$(jq -rs 'map(select(.Test!=null and .Action=="pass"))|length' gotest.jsonl)
