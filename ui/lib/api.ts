@@ -142,6 +142,45 @@ export interface Beacon {
   };
 }
 
+
+/**
+ * Overview is every Gate the caller can see, across every namespace.
+ *
+ * Mirrors pkg/ops/overview.go. Hand-written like the rest of this file, and
+ * therefore able to drift — see the note below.
+ */
+export interface GateSummary {
+  name: string;
+  health: Health;
+  issues?: string[];
+  current?: string;
+  eligible: number;
+  running?: string;
+  suspended: boolean;
+}
+
+export interface NamespaceOverview {
+  namespace: string;
+  gates: GateSummary[];
+}
+
+export interface Totals {
+  gates: number;
+  healthy: number;
+  progressing: number;
+  degraded: number;
+  unknown: number;
+  suspended: number;
+  eligible: number;
+  running: number;
+  failed: number;
+}
+
+export interface Overview {
+  namespaces: NamespaceOverview[];
+  totals: Totals;
+}
+
 /** Unauthenticated is thrown when the API says the caller is not signed in. */
 export class Unauthenticated extends Error {
   constructor() {
@@ -287,6 +326,16 @@ export const api = {
   namespaces: () => get<{ namespaces: string[] }>("/api/v1alpha1/namespaces"),
 
   settings: () => get<Settings>("/api/v1alpha1/settings"),
+
+  /**
+   * overview is every Gate this person can see, in one call.
+   *
+   * Cluster-wide and not namespaced, because "how is everything" is not a
+   * question about one namespace. The server filters to what the caller may
+   * read rather than refusing the whole answer — a board that 403s because one
+   * namespace is out of reach is useless to a team-scoped operator.
+   */
+  overview: () => get<Overview>("/api/v1alpha1/overview"),
 
   /**
    * audit is what happened, newest first.

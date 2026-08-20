@@ -4,10 +4,13 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { Shell } from "@/components/shell";
 import { api } from "@/lib/api";
 
-// Shell marks the active tab from usePathname, which has no router to read
-// outside Next and returns null. Nothing to do with the picker; without it the
-// component throws before the control renders.
-vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
+// Shell reads usePathname, which has no router outside Next and returns null.
+//
+// Reading window.location rather than returning a constant: the Shell now uses
+// the path for more than marking the active tab — the namespace picker is
+// hidden on the cluster-wide Overview at "/" — so a mock pinned to one path
+// would decide the outcome of every test using it, whatever URL that test set.
+vi.mock("next/navigation", () => ({ usePathname: () => window.location.pathname }));
 
 /**
  * The namespace control used to be a text box, which meant finding the
@@ -29,7 +32,7 @@ beforeEach(() => {
 
 describe("the namespace picker", () => {
   it("offers the namespaces the API says this user can see", async () => {
-    at("/?namespace=demo");
+    at("/gates/?namespace=demo");
     vi.spyOn(api, "namespaces").mockResolvedValue({
       namespaces: ["demo", "staging", "production"],
     });
@@ -53,7 +56,7 @@ describe("the namespace picker", () => {
     // was deleted between the two. A <select> whose value is absent from its
     // options renders blank, so the page would describe one namespace while the
     // control named none.
-    at("/?namespace=somewhere-else");
+    at("/gates/?namespace=somewhere-else");
     vi.spyOn(api, "namespaces").mockResolvedValue({ namespaces: ["demo"] });
 
     render(<Shell>{null}</Shell>);
@@ -67,7 +70,7 @@ describe("the namespace picker", () => {
     // Degrading to "just the namespace you are in" is the old text-box
     // behaviour, which is usable. An error banner over a page that otherwise
     // renders is not.
-    at("/?namespace=demo");
+    at("/gates/?namespace=demo");
     vi.spyOn(api, "namespaces").mockRejectedValue(new Error("boom"));
 
     render(<Shell>{null}</Shell>);
@@ -75,5 +78,27 @@ describe("the namespace picker", () => {
     const select = (await screen.findByLabelText("Namespace")) as HTMLSelectElement;
     await waitFor(() => expect(select.value).toBe("demo"));
     expect(select.options.length).toBe(1);
+  });
+});
+
+describe("where the picker belongs", () => {
+  it("is absent on the Overview, which spans every namespace", async () => {
+    at("/");
+    vi.spyOn(api, "namespaces").mockResolvedValue({ namespaces: ["demo"] });
+
+    render(<Shell>{null}</Shell>);
+
+    // A control that changes nothing on the page it is shown on reads as
+    // broken rather than as not applicable.
+    expect(screen.queryByLabelText("Namespace")).toBeNull();
+  });
+
+  it("is present on a page that is about one namespace", async () => {
+    at("/gates/?namespace=demo");
+    vi.spyOn(api, "namespaces").mockResolvedValue({ namespaces: ["demo"] });
+
+    render(<Shell>{null}</Shell>);
+
+    expect(await screen.findByLabelText("Namespace")).toBeDefined();
   });
 });

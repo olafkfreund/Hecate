@@ -62,6 +62,10 @@ func (s *Server) Handler() http.Handler {
 	// namespace list, so it is authenticated here and authorised in the handler.
 	mux.Handle("GET /api/v1alpha1/settings", s.authenticated(s.settings))
 
+	// Every Gate the caller can see, in every namespace they can see it in.
+	// Authenticated rather than guarded: see the note on overview.
+	mux.Handle("GET /api/v1alpha1/overview", s.authenticated(s.overview))
+
 	// Settings writes. Each authorises the CALLER against the exact resource it
 	// touches, inside the handler, because guard() checks hecate.dev resources
 	// in a path namespace and these are RBAC bindings, core Secrets and a
@@ -211,6 +215,28 @@ func (s *Server) authenticated(h handler) http.Handler {
 // be a directory of other teams' namespaces, which is a small information leak
 // and a guaranteed support question when clicking it 403s.
 func (s *Server) listNamespaces(ctx context.Context, subject Subject, _ *http.Request) (any, error) {
+	visible, err := s.visibleNamespaces(ctx, subject)
+	if err != nil {
+		return nil, err
+	}
+	// Never null: the UI renders this straight into a list, and a null there is
+	// a crash rather than an empty picker.
+	return map[string]any{"namespaces": visible}, nil
+}
+
+// visibleNamespaces is every namespace with Hecate resources that this subject
+// may read.
+//
+// Filtering, not refusing. Every other read authorises one namespace named in
+// the path and answers 403 when the caller may not have it; these two routes
+// span the cluster, and refusing the whole answer because one namespace is out
+// of reach would make a cluster-wide view useless to exactly the team-scoped
+// operators it is most useful to.
+//
+// Shared by the namespace picker and the overview deliberately: two callers
+// deciding "what may this person see" separately is two chances to disagree,
+// and the one that disagreed generously would be the bug nobody notices.
+func (s *Server) visibleNamespaces(ctx context.Context, subject Subject) ([]string, error) {
 	all, err := s.Ops.Namespaces(ctx)
 	if err != nil {
 		return nil, err
@@ -230,9 +256,22 @@ func (s *Server) listNamespaces(ctx context.Context, subject Subject, _ *http.Re
 		}
 		visible = append(visible, ns)
 	}
-	// Never null: the UI renders this straight into a list, and a null there is
-	// a crash rather than an empty picker.
-	return map[string]any{"namespaces": visible}, nil
+	return visible, nil
+}
+
+// overview is every Gate this caller can see, across every namespace.
+//
+// Not behind guard() for the same reason listNamespaces is not: guard
+// authorises against a namespace in the path, and this route has none, so it
+// would ask "may you read gates cluster-wide?" — a right a team-scoped operator
+// has no reason to hold, and refusing them a board of their own Gates is
+// precisely backwards.
+func (s *Server) overview(ctx context.Context, subject Subject, _ *http.Request) (any, error) {
+	visible, err := s.visibleNamespaces(ctx, subject)
+	if err != nil {
+		return nil, err
+	}
+	return s.Ops.Overview(ctx, visible)
 }
 
 func (s *Server) listBeacons(ctx context.Context, _ Subject, r *http.Request) (any, error) {
