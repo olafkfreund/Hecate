@@ -218,3 +218,78 @@ func mustJSON(t *testing.T, v any) string {
 	}
 	return string(b)
 }
+
+func TestOverviewDrawsCrossingsAndFailuresByDay(t *testing.T) {
+	// A fixed clock, so the window is the same every run — newServer already
+	// pins Ops.Now to `base`.
+	g := gateIn("acme", "production", v1alpha1.HealthHealthy)
+	g.Status.History = []v1alpha1.GateOccupant{
+		{Bundle: "app-3", EnteredAt: metav1.Time{Time: base}},
+		{Bundle: "app-2", EnteredAt: metav1.Time{Time: base}},
+		{Bundle: "app-1", EnteredAt: metav1.Time{Time: base.AddDate(0, 0, -2)}},
+	}
+	failed := &v1alpha1.Passage{
+		ObjectMeta: metav1.ObjectMeta{Name: "app-4-production", Namespace: "acme"},
+		Spec:       v1alpha1.PassageSpec{Gate: "production", Bundle: "app-4"},
+		Status: v1alpha1.PassageStatus{
+			Phase:      v1alpha1.PassageFailed,
+			FinishedAt: &metav1.Time{Time: base},
+		},
+	}
+
+	s, _ := newServer(t, map[string]string{"tok": "ada"},
+		grants{"ada": {"list gates": true}}, g, failed)
+
+	got := getOverview(t, s, "tok")
+
+	// Every day in the window, including the quiet ones: a series with gaps
+	// draws a week of nothing the same width as a day of nothing.
+	if len(got.Activity) != 14 {
+		t.Fatalf("activity covers %d days, want 14", len(got.Activity))
+	}
+	today := got.Activity[len(got.Activity)-1]
+	if today.Date != base.UTC().Format("2006-01-02") {
+		t.Errorf("the series ends on %s, want today (%s)", today.Date, base.UTC().Format("2006-01-02"))
+	}
+	if today.Crossed != 2 || today.Failed != 1 {
+		t.Errorf("today is %+v, want 2 crossed and 1 failed", today)
+	}
+	// Two days back holds the older crossing, and nothing has drifted into it.
+	if older := got.Activity[len(got.Activity)-3]; older.Crossed != 1 || older.Failed != 0 {
+		t.Errorf("two days ago is %+v, want 1 crossed and 0 failed", older)
+	}
+}
+
+func TestOverviewActivityIgnoresNamespacesTheCallerMayNotRead(t *testing.T) {
+	mine := gateIn("acme", "production", v1alpha1.HealthHealthy)
+	mine.Status.History = []v1alpha1.GateOccupant{
+		{Bundle: "app-1", EnteredAt: metav1.Time{Time: base}},
+	}
+	theirs := gateIn("finance", "payments", v1alpha1.HealthHealthy)
+	theirs.Status.History = []v1alpha1.GateOccupant{
+		{Bundle: "pay-1", EnteredAt: metav1.Time{Time: base}},
+		{Bundle: "pay-2", EnteredAt: metav1.Time{Time: base}},
+	}
+
+	s, _ := newServer(t, map[string]string{"tok": "ada"},
+		grants{"ada": {"list gates": true, "list gates in finance": false}}, mine, theirs)
+
+	got := getOverview(t, s, "tok")
+
+	// The chart is drawn from the same filtered set as everything else. A
+	// deployment rate that counted another team's releases would be a number
+	// nobody could reconcile with what they can see.
+	if today := got.Activity[len(got.Activity)-1]; today.Crossed != 1 {
+		t.Errorf("today counts %d crossings, want 1 — finance leaked into the chart", today.Crossed)
+	}
+}
+
+func TestOverviewActivityIsNeverNull(t *testing.T) {
+	s, _ := newServer(t, map[string]string{"tok": "ada"}, grants{"ada": {"list gates": true}})
+
+	rec := call(t, s, "tok", http.MethodGet, "/api/v1alpha1/overview", "")
+	// The chart maps over this directly.
+	if strings.Contains(rec.Body.String(), `"activity":null`) {
+		t.Error("activity serialised as null, which the chart cannot map over")
+	}
+}

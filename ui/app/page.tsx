@@ -1,19 +1,26 @@
 "use client";
 
 import Link from "next/link";
-import { CircleDot, PauseCircle, TriangleAlert } from "lucide-react";
+import {
+  CircleDot,
+  Clock,
+  DoorOpen,
+  PauseCircle,
+  TriangleAlert,
+  XCircle,
+} from "lucide-react";
 import { api, type GateSummary, type Overview, type Totals } from "@/lib/api";
 import { Panel, useLiveApi } from "@/components/loader";
 import { HealthDot } from "@/components/health";
+import { ActivityChart } from "@/components/activity";
 
 /**
  * Everything, in one screen.
  *
- * The first thing on the page answers "is anything wrong?", because that is the
- * question someone opening a dashboard is actually asking; the Gates below
- * answer "what, and where"; and the pages they link to answer the rest. A board
- * that opened with a table of forty Gates would make every reader do the
- * summarising themselves, every time.
+ * Read in three passes, and built in that order: the cards answer "is anything
+ * wrong?", the chart answers "has it been getting worse?", and the Gate cards
+ * answer "where?". A board that opened with a table of forty Gates would make
+ * every reader do all three themselves, every time.
  *
  * Cluster-wide, and deliberately not namespaced — the namespace picker does not
  * apply here, which is the point of it existing.
@@ -39,7 +46,18 @@ export default function OverviewPage() {
               </p>
             ) : (
               <div className="space-y-8">
-                <Summary totals={o.totals} />
+                <Cards totals={o.totals} />
+
+                <section>
+                  <h2 className="text-sm font-medium">Crossings</h2>
+                  <p className="mt-0.5 text-sm text-[var(--muted-foreground)]">
+                    What entered a Gate, and what failed trying, over {o.activity.length} days.
+                  </p>
+                  <div className="mt-3 rounded-lg border border-[var(--border)] p-3">
+                    <ActivityChart days={o.activity} />
+                  </div>
+                </section>
+
                 {o.namespaces.map((n) => (
                   <section key={n.namespace}>
                     <h2 className="text-sm font-medium">
@@ -50,11 +68,11 @@ export default function OverviewPage() {
                         {n.namespace}
                       </Link>
                     </h2>
-                    <ul className="mt-2 divide-y divide-[var(--border)]">
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                       {n.gates.map((g) => (
-                        <GateRow key={g.name} gate={g} namespace={n.namespace} />
+                        <GateCard key={g.name} gate={g} namespace={n.namespace} />
                       ))}
-                    </ul>
+                    </div>
                   </section>
                 ))}
               </div>
@@ -67,106 +85,119 @@ export default function OverviewPage() {
 }
 
 /**
- * Summary is the headline: what needs attention, then what is happening.
+ * The headline numbers.
  *
- * Only the counts that are not zero, apart from Gates itself. A row of zeroes
- * is a row a reader has to check every time to learn nothing, and it buries the
- * one number that is not zero among six that are.
+ * Only the cards that are not zero, apart from Gates itself. A row of noughts
+ * is a row a reader checks every time to learn nothing, and it buries the one
+ * number that is not zero among six that are.
  */
-function Summary({ totals }: { totals: Totals }) {
-  const attention = [
-    { n: totals.degraded, label: totals.degraded === 1 ? "degraded" : "degraded", tone: "text-[var(--destructive)]" },
-    { n: totals.failed, label: totals.failed === 1 ? "failed crossing" : "failed crossings", tone: "text-[var(--destructive)]" },
-    { n: totals.suspended, label: "suspended", tone: "text-[var(--unknown)]" },
-  ].filter((c) => c.n > 0);
-
-  const activity = [
-    { n: totals.running, label: totals.running === 1 ? "crossing now" : "crossing now" },
-    { n: totals.eligible, label: totals.eligible === 1 ? "waiting to cross" : "waiting to cross" },
-    { n: totals.progressing, label: "progressing" },
-  ].filter((c) => c.n > 0);
+function Cards({ totals }: { totals: Totals }) {
+  const cards = [
+    { n: totals.gates, label: totals.gates === 1 ? "Gate" : "Gates", Icon: DoorOpen, tone: "", always: true },
+    { n: totals.degraded, label: "degraded", Icon: TriangleAlert, tone: "text-[var(--destructive)]" },
+    { n: totals.failed, label: totals.failed === 1 ? "failed crossing" : "failed crossings", Icon: XCircle, tone: "text-[var(--destructive)]" },
+    { n: totals.suspended, label: "suspended", Icon: PauseCircle, tone: "text-[var(--unknown)]" },
+    { n: totals.running, label: "crossing now", Icon: CircleDot, tone: "text-[var(--progressing)]" },
+    { n: totals.eligible, label: "waiting to cross", Icon: Clock, tone: "text-[var(--muted-foreground)]" },
+  ].filter((c) => c.always || c.n > 0);
 
   return (
-    <section className="rounded-lg border border-[var(--border)] p-4">
-      {attention.length === 0 ? (
-        <p className="flex items-center gap-2 text-sm">
+    <section>
+      {/* The all-clear is a sentence, not a card. "0 degraded" makes a reader
+          check a number to learn nothing was wrong; saying so is one glance. */}
+      {totals.degraded === 0 && totals.failed === 0 && totals.suspended === 0 && (
+        <p className="mb-3 flex items-center gap-2 text-sm">
           <HealthDot health="Healthy" />
           <span className="text-[var(--muted-foreground)]">
-            {totals.gates === 1 ? "1 Gate" : `All ${totals.gates} Gates`} healthy.
+            Nothing needs attention.
           </span>
-        </p>
-      ) : (
-        <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-          <TriangleAlert size={16} className="text-[var(--destructive)]" aria-hidden />
-          {attention.map((c) => (
-            <span key={c.label} className={c.tone}>
-              <span className="font-semibold tabular-nums">{c.n}</span> {c.label}
-            </span>
-          ))}
-          <span className="text-[var(--muted-foreground)]">of {totals.gates}</span>
         </p>
       )}
 
-      {activity.length > 0 && (
-        <p className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-[var(--muted-foreground)]">
-          {activity.map((c) => (
-            <span key={c.label}>
-              <span className="font-semibold tabular-nums">{c.n}</span> {c.label}
-            </span>
-          ))}
-        </p>
-      )}
+      <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
+        {cards.map(({ n, label, Icon, tone }) => (
+          <div
+            key={label}
+            className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3"
+          >
+            <div className={`flex items-center gap-1.5 text-xs ${tone || "text-[var(--muted-foreground)]"}`}>
+              <Icon size={13} aria-hidden />
+              {label}
+            </div>
+            <div className={`mt-1 text-2xl font-semibold tabular-nums ${tone}`}>{n}</div>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }
 
-function GateRow({ gate, namespace }: { gate: GateSummary; namespace: string }) {
+/** The colour of a Gate card's left edge: its health, at a glance. */
+const edge: Record<string, string> = {
+  Healthy: "border-l-[var(--healthy)]",
+  Progressing: "border-l-[var(--progressing)]",
+  Degraded: "border-l-[var(--destructive)]",
+  Unknown: "border-l-[var(--unknown)]",
+  NotApplicable: "border-l-[var(--border)]",
+};
+
+function GateCard({ gate, namespace }: { gate: GateSummary; namespace: string }) {
   return (
-    <li className="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-2.5 text-sm">
-      <Link
-        href={{ pathname: "/gates/", query: { name: gate.name, namespace } }}
-        className="font-medium underline decoration-[var(--border)] underline-offset-4 hover:decoration-current"
-      >
-        {gate.name}
-      </Link>
-
-      <span className="text-[var(--muted-foreground)]">{gate.current || "nothing yet"}</span>
-
-      {/* A suspended Gate is usually healthy and admitting nothing, which is the
-          one state a health dot alone describes wrongly — and "nothing has
-          shipped all week" is usually this. */}
-      {gate.suspended && (
-        <span className="flex items-center gap-1 text-[var(--unknown)]">
-          <PauseCircle size={13} aria-hidden />
-          suspended
-        </span>
-      )}
-
-      {gate.running && (
+    <div
+      className={`rounded-lg border border-l-4 border-[var(--border)] bg-[var(--card)] p-3 ${
+        edge[gate.health] ?? edge.Unknown
+      }`}
+    >
+      <div className="flex items-baseline gap-2">
         <Link
-          href={{ pathname: "/passages/", query: { name: gate.running, namespace } }}
-          className="flex items-center gap-1 text-[var(--progressing)] underline decoration-[var(--border)] underline-offset-4 hover:decoration-current"
+          href={{ pathname: "/gates/", query: { name: gate.name, namespace } }}
+          className="font-medium underline decoration-[var(--border)] underline-offset-4 hover:decoration-current"
         >
-          <CircleDot size={13} aria-hidden />
-          crossing
+          {gate.name}
         </Link>
-      )}
-
-      {gate.eligible > 0 && !gate.running && (
-        <span className="text-[var(--muted-foreground)]">
-          {gate.eligible} waiting
+        {/* The word as well as the colour, always: roughly one man in twelve
+            cannot reliably tell the green from the red, and the edge stripe
+            would be all this card said. */}
+        <span className="ml-auto">
+          <HealthDot health={gate.health} />
         </span>
-      )}
+      </div>
 
-      <span className="ml-auto">
-        <HealthDot health={gate.health} />
-      </span>
+      <p className="mt-1 truncate text-sm text-[var(--muted-foreground)]" title={gate.current}>
+        {gate.current || "nothing yet"}
+      </p>
 
-      {/* The reason, not just the colour. A board showing a red dot and nothing
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        {gate.suspended && (
+          <span className="flex items-center gap-1 text-[var(--unknown)]">
+            <PauseCircle size={12} aria-hidden />
+            suspended
+          </span>
+        )}
+        {gate.running && (
+          <Link
+            href={{ pathname: "/passages/", query: { name: gate.running, namespace } }}
+            className="flex items-center gap-1 text-[var(--progressing)] underline decoration-[var(--border)] underline-offset-4 hover:decoration-current"
+          >
+            <CircleDot size={12} aria-hidden />
+            crossing
+          </Link>
+        )}
+        {gate.eligible > 0 && !gate.running && (
+          <span className="flex items-center gap-1 text-[var(--muted-foreground)]">
+            <Clock size={12} aria-hidden />
+            {gate.eligible} waiting
+          </span>
+        )}
+      </div>
+
+      {/* The reason, not just the colour. A card showing a red edge and nothing
           else sends every reader to the same second page to find out why. */}
       {gate.issues?.length ? (
-        <p className="w-full text-[var(--muted-foreground)]">{gate.issues.join(" · ")}</p>
+        <p className="mt-2 border-t border-[var(--border)] pt-2 text-xs text-[var(--muted-foreground)]">
+          {gate.issues.join(" · ")}
+        </p>
       ) : null}
-    </li>
+    </div>
   );
 }
