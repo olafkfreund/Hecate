@@ -184,7 +184,10 @@ export default function SettingsPage() {
         />
       </Section>
 
-      <Section title="Connected clusters">
+      <Section
+        title="Connected clusters"
+        hint="Other clusters this installation can promote into. The cluster Hecate runs in is not one of these — it needs no credentials and is always available."
+      >
         {settings?.clusters.length ? (
           settings.clusters.map((c) => (
             <div key={c.secret} className="space-y-1 border-b border-[var(--border)] py-3 last:border-0">
@@ -200,22 +203,34 @@ export default function SettingsPage() {
               <p className="text-sm text-[var(--muted-foreground)]">
                 {c.gates.length ? (
                   `watched by ${c.gates.join(", ")}`
-                ) : (
+                ) : c.reachable ? (
                   // Connected but unused is a normal state, not an error — and
                   // saying so is the difference between this screen and the one
                   // that listed only Gate-referenced clusters, where a freshly
                   // stored kubeconfig simply never appeared.
+                  //
+                  // Only when it is actually reachable, though. This used to say
+                  // "connected, not yet used" directly beneath a message saying
+                  // the cluster had rejected the credentials — two lines of the
+                  // same paragraph contradicting each other, and the cheerful
+                  // one is the one people believe.
                   <>
-                    connected, not yet used. Add{" "}
-                    <code>clusterRef: {`{name: ${c.secret.split("/")[1]}}`}</code> to a Gate&apos;s
-                    watch or flux-wait step.
+                    Connected, not yet used. Add{" "}
+                    <code>{`clusterRef: {name: ${c.secret.split("/")[1]}}`}</code>
+                    {" to a Gate’s watch or flux-wait step."}
                   </>
+                ) : (
+                  "Not usable until the credentials work. No Gate is watching it."
                 )}
               </p>
             </div>
           ))
         ) : (
-          <Empty>No clusters connected, and no Gate watches a remote one.</Empty>
+          <Empty>
+            Nothing to connect. Hecate promotes into the cluster it runs in, and reaches it
+            with its own service account — a connected cluster is only needed to promote into
+            a <em>different</em> one.
+          </Empty>
         )}
         <ClusterForm
           namespace={namespace}
@@ -259,10 +274,20 @@ export default function SettingsPage() {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  hint,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
   return (
     <section className="rounded-lg border border-[var(--border)] p-4">
-      <h2 className="pb-2 text-lg font-medium">{title}</h2>
+      <h2 className="text-lg font-medium">{title}</h2>
+      {hint && <p className="pb-2 pt-0.5 text-sm text-[var(--muted-foreground)]">{hint}</p>}
+      {!hint && <div className="pb-2" />}
       {children}
     </section>
   );
