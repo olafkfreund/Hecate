@@ -10,6 +10,7 @@ const base: SettingsData = {
   fides: [],
   clusters: [],
   telemetry: { configured: false },
+  home: { inCluster: true, server: "https://10.0.0.1:443", namespace: "hecate-system" },
 };
 
 function show(settings: SettingsData) {
@@ -54,15 +55,23 @@ describe("connected clusters", () => {
     expect(container.textContent).toContain("} to a Gate");
   });
 
-  it("explains an empty list as normal rather than as nothing being connected", async () => {
+  it("shows the cluster Hecate is in, so the panel is never empty on a working install", async () => {
     show(base);
 
-    // The old wording — "No clusters connected, and no Gate watches a remote
-    // one" — is true and reads as a fault, on an installation that is working
-    // perfectly. Hecate promotes into its own cluster with its own service
-    // account; a connected cluster is only for promoting into a different one.
-    await waitFor(() => expect(screen.getByText(/Nothing to connect/)).toBeDefined());
-    expect(screen.getByText(/promotes into the cluster it runs in/)).toBeDefined();
+    // Asked three times whether a cluster was connected, on an installation
+    // running inside one and promoting into it. A panel that could only ever
+    // list the *extra* clusters answered "none" to the question being asked.
+    await waitFor(() => expect(screen.getByText("https://10.0.0.1:443")).toBeDefined());
+    expect(screen.getByText("this cluster")).toBeDefined();
+    expect(screen.getByText(/no credentials to configure/)).toBeDefined();
+  });
+
+  it("says so when Hecate is not in a cluster at all", async () => {
+    show({ ...base, home: { inCluster: false } });
+
+    // A developer running the API against their own kubeconfig. The panel has
+    // nothing true to show, and inventing an address would be worse.
+    await waitFor(() => expect(screen.getByText(/not running inside a cluster/)).toBeDefined());
   });
 
   it("says what the section means, so an empty one is not read as a failure", async () => {

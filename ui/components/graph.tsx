@@ -2,15 +2,8 @@
 
 import Link from "next/link";
 import { build, NODE_H, NODE_W, type Node } from "@/lib/graph";
-import type { Gate, Health } from "@/lib/api";
-
-const stroke: Record<Health, string> = {
-  Healthy: "var(--healthy)",
-  Progressing: "var(--progressing)",
-  Degraded: "var(--destructive)",
-  Unknown: "var(--unknown)",
-  NotApplicable: "var(--border)",
-};
+import { healthVar } from "@/components/health";
+import type { Gate } from "@/lib/api";
 
 /**
  * The pipeline, drawn from what the Gates admit.
@@ -92,6 +85,7 @@ export function PipelineGraph({ gates, namespace }: { gates: Gate[]; namespace: 
 }
 
 function GraphNode({ node, namespace }: { node: Node; namespace: string }) {
+  const colour = node.kind === "gate" ? healthVar[node.health ?? "Unknown"] : "var(--border)";
   const body = (
     <g>
       <rect
@@ -101,18 +95,38 @@ function GraphNode({ node, namespace }: { node: Node; namespace: string }) {
         height={NODE_H}
         rx="8"
         fill="var(--secondary)"
-        stroke={node.kind === "gate" ? stroke[node.health ?? "Unknown"] : "var(--border)"}
+        stroke={colour}
         strokeWidth="1.5"
         // A Beacon is a source, not an environment; dashing it says so without
         // needing a legend.
         strokeDasharray={node.kind === "beacon" ? "4 3" : undefined}
       />
+      {/* A stripe down the leading edge, in the same colour as the outline.
+          The outline alone is a hairline at this size: on a wide pipeline the
+          eye lands on the box, not on its border, so a degraded Gate three
+          columns along reads as just another box. */}
+      {node.kind === "gate" && (
+        <rect x={node.x} y={node.y} width="4" height={NODE_H} rx="2" fill={colour} />
+      )}
       <text x={node.x + 12} y={node.y + 23} className="fill-[var(--foreground)] text-[13px] font-medium">
         {node.label}
       </text>
       <text x={node.x + 12} y={node.y + 41} className="fill-[var(--muted-foreground)] text-[11px]">
         {node.kind === "beacon" ? "beacon" : (node.current ?? "nothing yet")}
       </text>
+      {/* What is waiting at this Gate, on the Gate. The pipeline is where
+          someone looks to ask "where is it stuck", and a count that lives only
+          in the table below makes them look twice. */}
+      {node.kind === "gate" && node.waiting ? (
+        <text
+          x={node.x + NODE_W - 10}
+          y={node.y + 41}
+          textAnchor="end"
+          className="fill-[var(--muted-foreground)] text-[10px]"
+        >
+          {node.waiting} waiting
+        </text>
+      ) : null}
     </g>
   );
 

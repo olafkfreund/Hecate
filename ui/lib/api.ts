@@ -311,6 +311,7 @@ export type Settings = {
   }[];
   clusters: { secret: string; gates: string[]; reachable: boolean; detail?: string }[];
   telemetry: { endpoint?: string; configured: boolean };
+  home: { inCluster: boolean; server?: string; namespace?: string };
 };
 
 /** Grant is one person (or group) holding one Hecate role. */

@@ -24,3 +24,43 @@ export function HealthDot({ health }: { health?: Health }) {
     </span>
   );
 }
+
+/**
+ * The CSS variable each health maps to.
+ *
+ * One map, because health colour now appears in four places — the dot, the
+ * pipeline graph's node, a card's edge, and the Overview's cards — and four
+ * copies of it is four chances for a Degraded Gate to be red in one view and
+ * amber in another.
+ */
+export const healthVar: Record<Health, string> = {
+  Healthy: "var(--healthy)",
+  Progressing: "var(--progressing)",
+  Degraded: "var(--destructive)",
+  Unknown: "var(--unknown)",
+  // Not a colour of its own: "this Gate has no health to report" is not a
+  // state anyone needs to pick out of a row, and giving it one would put a
+  // fifth hue on screen that means nothing.
+  NotApplicable: "var(--border)",
+};
+
+/**
+ * The left-edge stripe class for a card.
+ *
+ * Written out rather than built from healthVar with a template literal, which
+ * is the obvious spelling and silently produces nothing: Tailwind generates
+ * arbitrary values by scanning the source for the literal class name, so a
+ * class assembled at runtime is one the stylesheet never contains. The card
+ * would render with no stripe at all and nothing would fail.
+ */
+const edge: Record<Health, string> = {
+  Healthy: "border-l-[var(--healthy)]",
+  Progressing: "border-l-[var(--progressing)]",
+  Degraded: "border-l-[var(--destructive)]",
+  Unknown: "border-l-[var(--unknown)]",
+  NotApplicable: "border-l-[var(--border)]",
+};
+
+export function healthEdge(health?: Health): string {
+  return edge[health ?? "Unknown"];
+}

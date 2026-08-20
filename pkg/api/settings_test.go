@@ -35,3 +35,45 @@ func TestUnreachableKeepsAnUnfamiliarErrorIntact(t *testing.T) {
 		t.Errorf("an unrecognised error was rewritten to %q", got)
 	}
 }
+
+func TestHomeClusterReportsWhereHecateRuns(t *testing.T) {
+	t.Setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
+	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
+
+	got := homeCluster()
+
+	if !got.InCluster {
+		t.Error("running in a cluster was not reported as such")
+	}
+	// The service address, which is what this process actually dials — not the
+	// public endpoint someone might expect. Honest beats familiar here.
+	if got.Server != "https://10.0.0.1:443" {
+		t.Errorf("server is %q, want https://10.0.0.1:443", got.Server)
+	}
+}
+
+func TestHomeClusterSaysNothingWhenNotInACluster(t *testing.T) {
+	t.Setenv("KUBERNETES_SERVICE_HOST", "")
+
+	got := homeCluster()
+
+	// A developer running the API against their own kubeconfig. Inventing an
+	// address would be worse than saying nothing, because the screen would then
+	// claim a connection that is not the one being used.
+	if got.InCluster || got.Server != "" {
+		t.Errorf("got %+v, want an empty home cluster", got)
+	}
+}
+
+func TestHomeClusterHandlesAnIPv6ServiceAddress(t *testing.T) {
+	t.Setenv("KUBERNETES_SERVICE_HOST", "fd00::1")
+	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
+
+	got := homeCluster()
+
+	// Bracketed, or the URL is unparseable. Concatenating host and port with a
+	// colon is the obvious spelling and produces https://fd00::1:443.
+	if got.Server != "https://[fd00::1]:443" {
+		t.Errorf("server is %q, want https://[fd00::1]:443", got.Server)
+	}
+}

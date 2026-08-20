@@ -188,6 +188,24 @@ export default function SettingsPage() {
         title="Connected clusters"
         hint="Other clusters this installation can promote into. The cluster Hecate runs in is not one of these — it needs no credentials and is always available."
       >
+        {/* The cluster Hecate is in, first and always. Everything below is an
+            addition to it, and a panel that showed only the additions read as
+            "no cluster connected" on the installation almost everyone has. */}
+        {settings?.home.inCluster && (
+          <div className="space-y-1 border-b border-[var(--border)] py-3">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="size-4 text-[var(--healthy)]" aria-label="reachable" />
+              <code className="text-sm">{settings.home.server}</code>
+              <span className="ml-auto text-xs text-[var(--muted-foreground)]">this cluster</span>
+            </div>
+            <p className="text-sm text-[var(--muted-foreground)]">
+              Where Hecate runs{settings.home.namespace ? ` (${settings.home.namespace})` : ""}, and
+              where it promotes unless a Gate names another. Reached with its own service account —
+              there are no credentials to configure and nothing to go stale.
+            </p>
+          </div>
+        )}
+
         {settings?.clusters.length ? (
           settings.clusters.map((c) => (
             <div key={c.secret} className="space-y-1 border-b border-[var(--border)] py-3 last:border-0">
@@ -226,11 +244,12 @@ export default function SettingsPage() {
             </div>
           ))
         ) : (
+          settings?.home.inCluster ? null : (
           <Empty>
-            Nothing to connect. Hecate promotes into the cluster it runs in, and reaches it
-            with its own service account — a connected cluster is only needed to promote into
-            a <em>different</em> one.
+            Nothing connected, and Hecate is not running inside a cluster either — so it is
+            reaching Kubernetes with whatever kubeconfig it was started with.
           </Empty>
+        )
         )}
         <ClusterForm
           namespace={namespace}
