@@ -18,6 +18,10 @@ export interface Node {
   kind: "beacon" | "gate";
   health?: Health;
   current?: string;
+  /** How many Bundles could cross this Gate now. */
+  waiting?: number;
+  /** True when the Gate is suspended and will admit nothing. */
+  suspended?: boolean;
   /** Column, from the sources. */
   rank: number;
   x: number;
@@ -58,6 +62,8 @@ export function build(gates: Gate[]): Graph {
     const node = add(`gate/${g.metadata.name}`, g.metadata.name, "gate");
     node.health = g.status?.health?.status;
     node.current = g.status?.current?.bundle;
+    node.waiting = g.status?.eligible?.length ?? 0;
+    node.suspended = g.spec.suspend;
 
     for (const a of g.spec.admits ?? []) {
       if (a.after?.length) {

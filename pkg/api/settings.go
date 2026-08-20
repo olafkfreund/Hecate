@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"os"
 	"sort"
@@ -41,6 +42,27 @@ type Settings struct {
 	Clusters []ClusterTarget `json:"clusters"`
 	// Telemetry is where traces go, if anywhere.
 	Telemetry Telemetry `json:"telemetry"`
+	// Home is the cluster Hecate itself runs in.
+	//
+	// Reported because the screen listing "connected clusters" was read three
+	// times as saying no cluster was connected, when Hecate was running inside
+	// one and promoting into it. A panel that can only ever show the extra
+	// clusters, and is empty on the installation everyone actually has, is a
+	// panel that says "none" to the question people are asking.
+	Home HomeCluster `json:"home"`
+}
+
+// HomeCluster is the cluster this process is running in.
+type HomeCluster struct {
+	// InCluster is whether Hecate is running inside Kubernetes at all, rather
+	// than against a kubeconfig on someone's laptop.
+	InCluster bool `json:"inCluster"`
+	// Server is the API server address, as this process reaches it. Inside a
+	// cluster that is the service address rather than the public endpoint,
+	// which is honest — it is what Hecate uses.
+	Server string `json:"server,omitempty"`
+	// Namespace is where Hecate itself is installed.
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // Identity is the authenticated caller.
@@ -109,6 +131,8 @@ func (s *Server) settings(ctx context.Context, subject Subject, _ *http.Request)
 		Fides:    []FidesTarget{},
 		Clusters: []ClusterTarget{},
 	}
+
+	out.Home = homeCluster()
 
 	// The OTEL_ variables are the standard ones the SDK reads, so this reports
 	// what the exporter is actually using rather than a Hecate-specific copy of
@@ -346,4 +370,25 @@ func clusterRefName(with *apiextensionsv1.JSON) string {
 		return ""
 	}
 	return cfg.ClusterRef.Name
+}
+
+// homeCluster describes the cluster this process is running in.
+//
+// Read from the environment and the service-account mount rather than from
+// configuration: those are what the client library itself uses to find the API
+// server, so this reports where Hecate is actually connected instead of where
+// someone once said it would be.
+func homeCluster() HomeCluster {
+	host, port := os.Getenv("KUBERNETES_SERVICE_HOST"), os.Getenv("KUBERNETES_SERVICE_PORT")
+	if host == "" {
+		// Not in a cluster: a developer running the API against their own
+		// kubeconfig. Saying so beats inventing an address.
+		return HomeCluster{}
+	}
+	h := HomeCluster{InCluster: true, Server: "https://" + net.JoinHostPort(host, port)}
+	// The namespace a pod is in, by the convention every client library uses.
+	if b, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
+		h.Namespace = strings.TrimSpace(string(b))
+	}
+	return h
 }

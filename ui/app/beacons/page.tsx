@@ -1,8 +1,9 @@
 "use client";
 
-import Link from "next/link";
+import { CircleAlert, CircleCheck, Eye, Package, PauseCircle, Timer } from "lucide-react";
 import { api, type Beacon, type WatchSource } from "@/lib/api";
 import { Panel, useLiveApi, useNamespace } from "@/components/loader";
+import { Card, Grid, Meta, Note, Pill, ago } from "@/components/card";
 import { useQueryParam } from "@/lib/browser";
 import { BeaconDetail } from "./detail";
 
@@ -50,39 +51,80 @@ function BeaconList({ ns }: { ns: string }) {
                 anything to admit.
               </p>
             ) : (
-              <ul className="divide-y divide-[var(--border)] text-sm">
+              <Grid>
                 {beacons.map((b: Beacon) => (
-                  <li key={b.metadata.name} className="flex items-baseline gap-3 py-2.5">
-                    <Link
-                      href={{
-                        pathname: "/beacons/",
-                        query: { name: b.metadata.name, namespace: ns },
-                      }}
-                      className="font-medium underline decoration-[var(--border)] underline-offset-4 hover:decoration-current"
-                    >
-                      {b.metadata.name}
-                    </Link>
-                    <span className="truncate text-[var(--muted-foreground)]">
-                      {(b.spec.watch ?? []).map(describeWatch).join(", ") || "watches nothing"}
-                    </span>
-                    {/* A suspended Beacon looks identical to a quiet one until
-                        you say so, and "nothing has shipped for a week" is
-                        usually this. */}
-                    {b.spec.suspend && (
-                      <span className="ml-auto shrink-0 text-[var(--unknown)]">suspended</span>
-                    )}
-                    {!b.spec.suspend && b.status?.latestBundle && (
-                      <span className="ml-auto shrink-0 text-[var(--muted-foreground)]">
-                        {b.status.latestBundle}
-                      </span>
-                    )}
-                  </li>
+                  <BeaconCard key={b.metadata.name} beacon={b} namespace={ns} />
                 ))}
-              </ul>
+              </Grid>
             )
           }
         </Panel>
       </div>
     </div>
+  );
+}
+
+function BeaconCard({ beacon, namespace }: { beacon: Beacon; namespace: string }) {
+  const watch = beacon.spec.watch ?? [];
+  // A Beacon reports its own trouble in conditions, and until now the list
+  // showed none of it: a Beacon that cannot reach its registry looked exactly
+  // like one whose registry has nothing new.
+  const bad = (beacon.status?.conditions ?? []).find(
+    (c) => c.type === "Ready" && c.status !== "True",
+  );
+
+  return (
+    <Card
+      href={{ pathname: "/beacons/", query: { name: beacon.metadata.name, namespace } }}
+      title={beacon.metadata.name}
+      edge={bad ? "border-l-[var(--destructive)]" : "border-l-[var(--healthy)]"}
+      right={
+        beacon.spec.suspend ? (
+          <Pill icon={PauseCircle} tone="warn">
+            suspended
+          </Pill>
+        ) : bad ? (
+          <Pill icon={CircleAlert} tone="bad">
+            not ready
+          </Pill>
+        ) : (
+          <Pill icon={CircleCheck} tone="good">
+            watching
+          </Pill>
+        )
+      }
+    >
+      <ul className="mt-1 space-y-0.5 text-sm text-[var(--muted-foreground)]">
+        {watch.length === 0 ? (
+          <li>watches nothing — it will never emit a Bundle</li>
+        ) : (
+          watch.map((w, i) => (
+            <li key={i} className="truncate" title={describeWatch(w)}>
+              {describeWatch(w)}
+            </li>
+          ))
+        )}
+      </ul>
+
+      <Meta>
+        {beacon.spec.interval && <Pill icon={Timer}>every {beacon.spec.interval}</Pill>}
+        {ago(beacon.status?.lastPolled) && (
+          <Pill icon={Eye}>looked {ago(beacon.status?.lastPolled)}</Pill>
+        )}
+        {beacon.status?.latestBundle && (
+          <Pill
+            icon={Package}
+            href={{
+              pathname: "/bundles/",
+              query: { name: beacon.status.latestBundle, namespace },
+            }}
+          >
+            {beacon.status.latestBundle}
+          </Pill>
+        )}
+      </Meta>
+
+      {bad && <Note tone="bad">{bad.message ?? bad.reason ?? "not ready"}</Note>}
+    </Card>
   );
 }
