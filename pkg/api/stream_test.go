@@ -19,8 +19,7 @@ import (
 // wakes to consume the next frame and post it to a channel nobody is listening
 // to. The frame is then lost, and the test reports the server never sent it.
 type frames struct {
-	ch   <-chan string
-	stop func()
+	ch <-chan string
 }
 
 func newFrames(body *bufio.Reader) *frames {
@@ -79,17 +78,17 @@ func liveStream(t *testing.T, s *Server, token, namespace string) (*frames, func
 		t.Fatal(err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		srv.Close()
 		t.Fatalf("watch returned %d, want 200", resp.StatusCode)
 	}
 	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		srv.Close()
 		t.Fatalf("Content-Type is %q, want text/event-stream", ct)
 	}
 	return newFrames(bufio.NewReader(resp.Body)), func() {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		srv.Close()
 	}
 }
