@@ -37,3 +37,20 @@ export function useQueryParam(name: string, fallback: string): string {
     () => fallback,
   );
 }
+
+/**
+ * setQueryParam rewrites one query parameter in place and tells the page.
+ *
+ * replaceState rather than a navigation, so landing on a namespace is not a
+ * history entry someone has to press Back through twice. The synthetic
+ * popstate is the part that matters: replaceState deliberately does not fire
+ * one, and useQueryParam subscribes to popstate — without it the address bar
+ * would change and the page would carry on showing the old value.
+ */
+export function setQueryParam(name: string, value: string): void {
+  const url = new URL(window.location.href);
+  if (url.searchParams.get(name) === value) return;
+  url.searchParams.set(name, value);
+  window.history.replaceState(window.history.state, "", url.toString());
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}
