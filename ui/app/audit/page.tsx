@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { ArrowRight, CheckCircle2, Clock, ShieldCheck, XCircle } from "lucide-react";
 
 import { api, AuditEntry } from "@/lib/api";
-import { useQueryParam } from "@/lib/browser";
+import { Panel, useApi, useNamespace } from "@/components/loader";
 
 /**
  * The audit trail: what happened, to what, on whose say-so, and against which
@@ -16,20 +15,13 @@ import { useQueryParam } from "@/lib/browser";
  * usually the question being asked when someone opens it.
  */
 export default function AuditPage() {
-  const namespace = useQueryParam("namespace", "default");
-  const [entries, setEntries] = useState<AuditEntry[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let live = true;
-    api
-      .audit(namespace)
-      .then((e) => live && setEntries(e))
-      .catch((e) => live && setError(e instanceof Error ? e.message : String(e)));
-    return () => {
-      live = false;
-    };
-  }, [namespace]);
+  const namespace = useNamespace();
+  // Panel and useApi rather than this page's own loading state, which is what
+  // it had: the sign-in prompt, the forbidden explanation and the error box all
+  // live in Panel, so a page loading by hand shows raw error text to someone
+  // whose session merely expired — a dead end on the one page an auditor is
+  // most likely to arrive at cold.
+  const state = useApi(() => api.audit(namespace), [namespace]);
 
   return (
     <div className="space-y-6">
@@ -40,86 +32,92 @@ export default function AuditPage() {
         </p>
       </header>
 
-      {error && (
-        <p className="rounded-md border border-red-500/40 bg-red-500/10 p-3 text-sm">{error}</p>
-      )}
-
-      {entries === null && !error && <p className="text-[var(--muted-foreground)]">Loading…</p>}
-
-      {entries?.length === 0 && (
-        <p className="text-[var(--muted-foreground)]">
-          Nothing has crossed a Gate in {namespace} yet.
-        </p>
-      )}
-
-      <ol className="space-y-3">
-        {entries?.map((e, i) => (
-          <li
-            key={`${e.passage ?? e.bundle}-${e.at}-${i}`}
-            className="rounded-lg border border-[var(--border)] p-3"
-          >
-            <div className="flex flex-wrap items-center gap-2">
-              <Marker kind={e.kind} />
-              <span className="font-medium">{e.bundle ?? "—"}</span>
-              <ArrowRight className="size-4 text-[var(--muted-foreground)]" aria-hidden />
-              <span className="font-medium">{e.gate}</span>
-              <span className="ml-auto text-sm text-[var(--muted-foreground)]">
-                {new Date(e.at).toLocaleString()}
-              </span>
-            </div>
-
-            <p className="pt-1 text-sm text-[var(--muted-foreground)]">
-              {/* An automatic Gate has no actor, and saying so beats an empty
-                  cell that reads as missing data. */}
-              {e.actor ? `by ${e.actor}` : "automatically"}
-              {e.verified === true && " · verified"}
-              {e.verified === false && " · not verified"}
-              {/* The digest, not the Bundle name, is what shipped. Truncated
-                  because the first bytes identify it and the rest is noise. */}
-              {e.digest && ` · ${e.digest.slice(0, 19)}`}
+      <Panel state={state}>
+        {(entries: AuditEntry[]) =>
+          entries.length === 0 ? (
+            <p className="text-[var(--muted-foreground)]">
+              Nothing has crossed a Gate in {namespace} yet.
             </p>
+          ) : (
+            <ol className="space-y-3">
+              {entries.map((e, i) => (
+                <li
+                  key={`${e.passage ?? e.bundle}-${e.at}-${i}`}
+                  className="rounded-lg border border-[var(--border)] p-3"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Marker kind={e.kind} />
+                    <span className="font-medium">{e.bundle ?? "—"}</span>
+                    <ArrowRight className="size-4 text-[var(--muted-foreground)]" aria-hidden />
+                    <span className="font-medium">{e.gate}</span>
+                    <span className="ml-auto text-sm text-[var(--muted-foreground)]">
+                      {new Date(e.at).toLocaleString()}
+                    </span>
+                  </div>
 
-            {e.detail && (
-              <p className="pt-1 text-sm text-red-400 break-words">{e.detail}</p>
-            )}
+                  <p className="pt-1 text-sm text-[var(--muted-foreground)]">
+                    {/* An automatic Gate has no actor, and saying so beats an empty
+                        cell that reads as missing data. */}
+                    {e.actor ? `by ${e.actor}` : "automatically"}
+                    {e.verified === true && " · verified"}
+                    {e.verified === false && " · not verified"}
+                    {/* The digest, not the Bundle name, is what shipped. Truncated
+                        because the first bytes identify it and the rest is noise. */}
+                    {e.digest && ` · ${e.digest.slice(0, 19)}`}
+                  </p>
 
-            {e.evidence && (e.evidence.trail || e.evidence.verdict) && (
-              <p className="pt-1 text-sm">
-                <span className="text-[var(--muted-foreground)]">evidence: </span>
-                {e.evidence.verdict && <span>{e.evidence.verdict}</span>}
-                {typeof e.evidence.risk === "number" && <span> · risk {e.evidence.risk}</span>}
-                {e.evidence.url ? (
-                  <a
-                    className="pl-1 underline"
-                    href={e.evidence.url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    trail
-                  </a>
-                ) : (
-                  e.evidence.trail && (
-                    <span className="pl-1 text-[var(--muted-foreground)]">{e.evidence.trail}</span>
-                  )
-                )}
-                {e.evidence.blockers?.length ? (
-                  <span className="text-red-400"> · {e.evidence.blockers.join(", ")}</span>
-                ) : null}
-              </p>
-            )}
-          </li>
-        ))}
-      </ol>
+                  {e.detail && (
+                    <p className="pt-1 break-words text-sm text-[var(--destructive)]">{e.detail}</p>
+                  )}
+
+                  {e.evidence && (e.evidence.trail || e.evidence.verdict) && (
+                    <p className="pt-1 text-sm">
+                      <span className="text-[var(--muted-foreground)]">evidence: </span>
+                      {e.evidence.verdict && <span>{e.evidence.verdict}</span>}
+                      {typeof e.evidence.risk === "number" && <span> · risk {e.evidence.risk}</span>}
+                      {e.evidence.url ? (
+                        <a
+                          className="pl-1 underline"
+                          href={e.evidence.url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          trail
+                        </a>
+                      ) : (
+                        e.evidence.trail && (
+                          <span className="pl-1 text-[var(--muted-foreground)]">
+                            {e.evidence.trail}
+                          </span>
+                        )
+                      )}
+                      {e.evidence.blockers?.length ? (
+                        <span className="text-[var(--destructive)]">
+                          {" "}
+                          · {e.evidence.blockers.join(", ")}
+                        </span>
+                      ) : null}
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ol>
+          )
+        }
+      </Panel>
     </div>
   );
 }
 
 function Marker({ kind }: { kind: AuditEntry["kind"] }) {
   const map = {
-    crossed: { Icon: CheckCircle2, tone: "text-green-500", label: "crossed" },
-    refused: { Icon: XCircle, tone: "text-red-500", label: "refused" },
-    running: { Icon: Clock, tone: "text-amber-500", label: "running" },
-    approved: { Icon: ShieldCheck, tone: "text-blue-400", label: "approved" },
+    // The theme's tokens, not raw Tailwind. globals.css copies Fides' palette
+    // whole so the two products look like one platform, and a literal green
+    // here is a colour that answers to neither theme nor product.
+    crossed: { Icon: CheckCircle2, tone: "text-[var(--healthy)]", label: "crossed" },
+    refused: { Icon: XCircle, tone: "text-[var(--destructive)]", label: "refused" },
+    running: { Icon: Clock, tone: "text-[var(--progressing)]", label: "running" },
+    approved: { Icon: ShieldCheck, tone: "text-[var(--unknown)]", label: "approved" },
   } as const;
   const { Icon, tone, label } = map[kind];
   return (
