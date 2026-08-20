@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { api, type Passage } from "@/lib/api";
-import { Panel, useApi, useNamespace } from "@/components/loader";
+import { Panel, useLiveApi, useNamespace } from "@/components/loader";
 import { useQueryParam } from "@/lib/browser";
 import { took } from "@/lib/timeline";
 import { PassageDetail } from "./detail";
@@ -18,7 +18,7 @@ export default function Passages() {
 }
 
 function PassageList({ ns }: { ns: string }) {
-  const state = useApi(() => api.passages(ns), [ns]);
+  const state = useLiveApi(() => api.passages(ns), [ns]);
 
   return (
     <div>

@@ -2,13 +2,13 @@
 
 import Link from "next/link";
 import { api, type Gate } from "@/lib/api";
-import { Panel, useApi, useNamespace } from "@/components/loader";
+import { Panel, useLiveApi, useNamespace } from "@/components/loader";
 import { HealthDot } from "@/components/health";
 import { PipelineGraph } from "@/components/graph";
 
 export default function Gates() {
   const ns = useNamespace();
-  const state = useApi(() => api.gates(ns), [ns]);
+  const state = useLiveApi(() => api.gates(ns), [ns]);
 
   return (
     <div>

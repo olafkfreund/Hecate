@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { api, type Bundle } from "@/lib/api";
-import { Panel, useApi, useNamespace } from "@/components/loader";
+import { Panel, useLiveApi, useNamespace } from "@/components/loader";
 import { useQueryParam } from "@/lib/browser";
 import { BundleDetail } from "./detail";
 
@@ -17,7 +17,7 @@ export default function Bundles() {
 }
 
 function BundleList({ ns }: { ns: string }) {
-  const state = useApi(() => api.bundles(ns), [ns]);
+  const state = useLiveApi(() => api.bundles(ns), [ns]);
 
   return (
     <div>

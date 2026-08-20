@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { api, type Bundle } from "@/lib/api";
-import { Panel, useApi, useNamespace } from "@/components/loader";
+import { Panel, useLiveApi, useNamespace } from "@/components/loader";
 import { useQueryParam } from "@/lib/browser";
 import { Timeline } from "@/components/timeline";
 import { describeArtifact } from "@/lib/timeline";
@@ -13,7 +13,7 @@ import { EvidencePanel } from "@/components/evidence";
 export function BundleDetail() {
   const ns = useNamespace();
   const name = useQueryParam("name", "");
-  const state = useApi(() => api.bundle(ns, name), [ns, name]);
+  const state = useLiveApi(() => api.bundle(ns, name), [ns, name]);
 
   return (
     <div>

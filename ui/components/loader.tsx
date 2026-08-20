@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { LogIn, TriangleAlert } from "lucide-react";
 import { ApiError, Unauthenticated, signIn } from "@/lib/api";
 import { useQueryParam } from "@/lib/browser";
+import { useLive } from "@/lib/live";
 
 /** useNamespace reads the namespace from the URL, defaulting to `default`. */
 export function useNamespace(): string {
@@ -38,6 +39,23 @@ export function useApi<T>(load: () => Promise<T>, deps: unknown[]): State<T> {
   }, deps);
 
   return state;
+}
+
+/**
+ * useLiveApi is useApi that reloads when the server says the namespace moved.
+ *
+ * Separate from useApi rather than a flag on it, because the two answer to
+ * different things: useApi reloads when its own inputs change, and a page using
+ * it is correct as of when it loaded. useLiveApi additionally follows the
+ * cluster, and is the right choice for anything showing state that moves on its
+ * own — a Passage running its steps, a Gate whose health is being rechecked.
+ *
+ * A page using this still works with no stream: useLive stays at zero, the
+ * dependency never changes, and the behaviour is exactly what it was before.
+ */
+export function useLiveApi<T>(load: () => Promise<T>, deps: unknown[]): State<T> {
+  const changes = useLive(useNamespace());
+  return useApi(load, [...deps, changes]);
 }
 
 /** Panel renders loading, the sign-in prompt, an error, or the children. */

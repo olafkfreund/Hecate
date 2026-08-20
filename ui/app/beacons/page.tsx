@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { api, type Beacon, type WatchSource } from "@/lib/api";
-import { Panel, useApi, useNamespace } from "@/components/loader";
+import { Panel, useLiveApi, useNamespace } from "@/components/loader";
 import { useQueryParam } from "@/lib/browser";
 import { BeaconDetail } from "./detail";
 
@@ -32,7 +32,7 @@ export function describeWatch(w: WatchSource): string {
 }
 
 function BeaconList({ ns }: { ns: string }) {
-  const state = useApi(() => api.beacons(ns), [ns]);
+  const state = useLiveApi(() => api.beacons(ns), [ns]);
 
   return (
     <div>

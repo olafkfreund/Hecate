@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Check, Loader2, ShieldCheck } from "lucide-react";
 import { api, ApiError, Unauthenticated, type Explanation } from "@/lib/api";
-import { Panel, useApi, useNamespace } from "@/components/loader";
+import { Panel, useLiveApi, useNamespace } from "@/components/loader";
 
 interface Pending {
   gate: string;
@@ -23,7 +23,7 @@ export default function Approvals() {
   const ns = useNamespace();
   const [approved, setApproved] = useState(0);
 
-  const state = useApi(async () => {
+  const state = useLiveApi(async () => {
     const gates = await api.gates(ns);
     // Sequential rather than Promise.all: a handful of Gates, and a burst of
     // parallel requests against an API that does a TokenReview and a

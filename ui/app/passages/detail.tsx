@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, CircleCheck, CircleDashed, CircleX, Loader2, OctagonX } from "lucide-react";
 import { api, ApiError, Unauthenticated, type Passage, type StepStatus } from "@/lib/api";
-import { Panel, useApi, useNamespace } from "@/components/loader";
+import { Panel, useLiveApi, useNamespace } from "@/components/loader";
 import { useQueryParam } from "@/lib/browser";
 import { took } from "@/lib/timeline";
 
@@ -18,7 +18,7 @@ export function PassageDetail() {
   const ns = useNamespace();
   const name = useQueryParam("name", "");
   const [aborted, setAborted] = useState(0);
-  const state = useApi(() => api.passage(ns, name), [ns, name, aborted]);
+  const state = useLiveApi(() => api.passage(ns, name), [ns, name, aborted]);
 
   return (
     <div>

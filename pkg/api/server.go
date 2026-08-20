@@ -91,6 +91,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/audit",
 		s.guard(ActionRead, s.auditTrail))
 
+	// Server-sent events: "something in this namespace changed". Read access,
+	// because that is what it lets you infer.
+	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/watch",
+		s.stream(ActionRead, s.watchNamespace))
+
 	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/passages",
 		s.guard(ActionRead, s.listPassages))
 	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/passages/{name}",
