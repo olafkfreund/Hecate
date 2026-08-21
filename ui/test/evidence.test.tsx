@@ -85,3 +85,75 @@ describe("the evidence panel", () => {
     expect(container.textContent).toContain("not the same as there being none");
   });
 });
+
+describe("the ITSM change on a crossing", () => {
+  const withChange = (change: Evidence["change"]): Evidence => ({ ...held, change });
+
+  it("names the change request, its approval and its state", async () => {
+    vi.spyOn(api, "evidence").mockResolvedValue(
+      withChange({
+        number: "CHG0033184",
+        state: "new",
+        approval: "not requested",
+        risk: "3",
+        on_hold: false,
+        short_description: "Rollback Oracle Version",
+        found: true,
+      }),
+    );
+
+    const { container } = render(<EvidencePanel namespace="uidemo" bundle="b1" />);
+
+    // The verdict says the crossing is held. This says which ticket has to move
+    // for it not to be, which is the next action rather than the diagnosis.
+    await waitFor(() => expect(screen.getByText("CHG0033184")).toBeDefined());
+    expect(container.textContent).toContain("not requested");
+    expect(container.textContent).toContain("Rollback Oracle Version");
+  });
+
+  it("says when an approved change is still on hold", async () => {
+    vi.spyOn(api, "evidence").mockResolvedValue(
+      withChange({
+        number: "CHG1",
+        state: "scheduled",
+        approval: "approved",
+        on_hold: true,
+        found: true,
+      }),
+    );
+
+    const { container } = render(<EvidencePanel namespace="uidemo" bundle="b1" />);
+
+    // Approved and not actionable is the one combination the approval word
+    // alone describes wrongly.
+    await waitFor(() => expect(screen.getByText("CHG1")).toBeDefined());
+    expect(container.textContent).toContain("on hold");
+  });
+
+  it("distinguishes a missing change from an unapproved one", async () => {
+    vi.spyOn(api, "evidence").mockResolvedValue(
+      withChange({ number: "CHG9", state: "", approval: "", on_hold: false, found: false }),
+    );
+
+    render(<EvidencePanel namespace="uidemo" bundle="b1" />);
+
+    // Different answers with different fixes, and only one of them is
+    // somebody's to sign.
+    await waitFor(() =>
+      expect(screen.getByText(/does not exist in ServiceNow/)).toBeDefined(),
+    );
+  });
+
+  it("shows nothing when no ITSM check was recorded", async () => {
+    vi.spyOn(api, "evidence").mockResolvedValue(held);
+
+    const { container } = render(<EvidencePanel namespace="uidemo" bundle="b1" />);
+
+    await waitFor(() => expect(screen.getByText("hold")).toBeDefined());
+    // The row itself, not merely its content: an empty change renders empty
+    // spans and no text, so asserting on text alone passes while a blank row
+    // sits on the page — which is what a mutation caught here.
+    expect(screen.queryByLabelText("Change request")).toBeNull();
+    expect(container.textContent).not.toContain("ServiceNow");
+  });
+});

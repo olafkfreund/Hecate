@@ -63,6 +63,10 @@ func (f *sodFides) start(t *testing.T) string {
 				return
 			}
 			_, _ = w.Write([]byte(f.changeGate))
+		case strings.Contains(r.URL.EscapedPath(), "/search/attestations"):
+			// No ITSM check on this trail, which is what most crossings look
+			// like. Evidence asks for one now and must not fail for want of it.
+			_, _ = w.Write([]byte(`[]`))
 		case strings.HasSuffix(r.URL.EscapedPath(), "/artifacts"):
 			if f.trail == "" {
 				_, _ = w.Write([]byte(`[]`))
