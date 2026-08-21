@@ -58,6 +58,23 @@ jobs:
           - flux: '2.9'
             k3s: 'rancher/k3s:v1.36.3-k3s1'    # N
     steps:
+      # Before anything: a k3d node is a container on the runner's filesystem,
+      # so the kubelet's eviction threshold is measured against whatever the
+      # runner has left. On a smaller runner this job crossed it — the node
+      # went NodeHasDiskPressure and evicted Flux's controllers, and Hecate's
+      # Deployment then never became Available. It presents as a Helm timeout,
+      # which sends you looking at the chart.
+      #
+      # Only toolchains nothing here uses. Go lives in hostedtoolcache and is
+      # deliberately untouched.
+      - name: Make room for the cluster
+        run: |
+          set -uo pipefail
+          echo "before:"; df -h / | tail -1
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL || true
+          echo "after:"; df -h / | tail -1
+
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
@@ -149,6 +166,13 @@ jobs:
       - name: Diagnostics on failure
         if: failure()
         run: |
+          # Disk first. Eviction under disk pressure looks like a Helm timeout
+          # or a controller that will not start, and both send you somewhere
+          # else — so the question is answered before it is asked.
+          df -h / | tail -1
+          kubectl get nodes -o json \
+            | jq -r '.items[].status.conditions[] | select(.type=="DiskPressure") | "DiskPressure=\(.status) \(.message // "")"' || true
+          kubectl get pods -A --field-selector=status.phase=Failed -o wide | head -20 || true
           kubectl get beacons,bundles,gates,passages -A -o wide || true
           kubectl -n hecate-system logs deploy/hecate --tail=100 || true
           kubectl -n flux-system get all || true
