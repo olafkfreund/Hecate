@@ -189,6 +189,18 @@ export interface Overview {
   activity: Day[];
 }
 
+/**
+ * Preflight is what the evidence gate would say about a Bundle, before anyone
+ * presses Cross.
+ */
+export interface Preflight {
+  bundle: string;
+  compliant: boolean;
+  missing?: string[];
+  policies?: string[];
+  unknown?: string;
+}
+
 /** FluxResource is one Flux object a Gate depends on. */
 export interface FluxResource {
   kind: string;
@@ -402,6 +414,17 @@ export const api = {
   gate: (ns: string, name: string) => get<Gate>(`${base(ns)}/gates/${encodeURIComponent(name)}`),
   explain: (ns: string, name: string) =>
     get<Explanation>(`${base(ns)}/gates/${encodeURIComponent(name)}/explain`),
+
+  /**
+   * preflight asks whether each eligible Bundle would actually cross.
+   *
+   * A separate call from explain, deliberately: explain loads on every page
+   * view and again on every live update, and this is one round-trip to Fides
+   * per eligible Bundle. Folding it in would make the page's refresh rate the
+   * rate at which Hecate polls Fides.
+   */
+  preflight: (ns: string, gate: string) =>
+    get<Preflight[]>(`${base(ns)}/gates/${encodeURIComponent(gate)}/preflight`),
 
   /** flux is what this Gate's crossings actually depend on. */
   flux: (ns: string, gate: string) =>
