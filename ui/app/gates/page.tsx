@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, CircleAlert, Loader2 } from "lucide-react";
-import { api, ApiError, Unauthenticated, type Explanation } from "@/lib/api";
-import { Panel, useLiveApi, useNamespace } from "@/components/loader";
+import { ArrowLeft, ArrowRight, CircleAlert, CircleCheck, CircleHelp, CircleX, Loader2 } from "lucide-react";
+import { api, ApiError, Unauthenticated, type Explanation, type Preflight } from "@/lib/api";
+import { Panel, useApi, useLiveApi, useNamespace } from "@/components/loader";
 import { useQueryParam } from "@/lib/browser";
 import { HealthDot } from "@/components/health";
 import { GateList } from "./list";
@@ -149,6 +149,13 @@ function Eligible({
   const [busy, setBusy] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
 
+  // Its own request rather than part of the Explanation, because it is a
+  // round-trip to Fides per eligible Bundle and the Explanation reloads on
+  // every live update. `bundles` in the deps so it is re-asked when the list
+  // changes and not on every tick.
+  const checks = useApi(() => api.preflight(namespace, gate), [namespace, gate, bundles.join(",")]);
+  const verdict = (b: string) => checks.data?.find((c) => c.bundle === b);
+
   if (bundles.length === 0) {
     return (
       <section>
@@ -182,20 +189,24 @@ function Eligible({
       <h2 className="text-sm font-medium">Eligible</h2>
       <ul className="mt-2 space-y-2">
         {bundles.map((b) => (
-          <li key={b} className="flex items-center gap-3 text-sm">
-            <span className="font-medium">{b}</span>
-            <button
-              onClick={() => cross(b)}
-              disabled={busy !== null}
-              className="ml-auto flex items-center gap-1.5 rounded-md bg-[var(--primary)] px-3 py-1.5 text-sm font-medium text-[var(--primary-foreground)] disabled:opacity-50"
-            >
-              {busy === b ? (
-                <Loader2 size={14} className="animate-spin" aria-hidden />
-              ) : (
-                <ArrowRight size={14} aria-hidden />
-              )}
-              Cross {gate}
-            </button>
+          <li key={b} className="text-sm">
+            <div className="flex items-center gap-3">
+              <span className="font-medium">{b}</span>
+              <Verdict check={verdict(b)} />
+              <button
+                onClick={() => cross(b)}
+                disabled={busy !== null}
+                className="ml-auto flex items-center gap-1.5 rounded-md bg-[var(--primary)] px-3 py-1.5 text-sm font-medium text-[var(--primary-foreground)] disabled:opacity-50"
+              >
+                {busy === b ? (
+                  <Loader2 size={14} className="animate-spin" aria-hidden />
+                ) : (
+                  <ArrowRight size={14} aria-hidden />
+                )}
+                Cross {gate}
+              </button>
+            </div>
+            <Why check={verdict(b)} />
           </li>
         ))}
       </ul>
@@ -205,5 +216,54 @@ function Eligible({
         </p>
       )}
     </section>
+  );
+}
+
+/**
+ * Verdict is what the evidence gate would say, beside the button that asks it.
+ *
+ * The button is not disabled by a failing check. Hecate does not decide this —
+ * the evidence gate does, at crossing time, and a UI that refused on its own
+ * would be a second copy of a rule that lives in one place. What this changes
+ * is that pressing it is now a decision rather than a discovery.
+ */
+function Verdict({ check }: { check?: Preflight }) {
+  if (!check) return null;
+  if (check.unknown) {
+    return (
+      <span className="flex items-center gap-1 text-xs text-[var(--unknown)]">
+        <CircleHelp size={12} aria-hidden />
+        evidence unknown
+      </span>
+    );
+  }
+  if (check.compliant) {
+    return (
+      <span className="flex items-center gap-1 text-xs text-[var(--healthy)]">
+        <CircleCheck size={12} aria-hidden />
+        evidence ready
+      </span>
+    );
+  }
+  return (
+    <span className="flex items-center gap-1 text-xs text-[var(--destructive)]">
+      <CircleX size={12} aria-hidden />
+      would be refused
+    </span>
+  );
+}
+
+/** Why is what is missing, since a refusal nobody can act on is just a status. */
+function Why({ check }: { check?: Preflight }) {
+  if (!check) return null;
+  if (check.unknown) {
+    return <p className="mt-1 text-xs text-[var(--muted-foreground)]">{check.unknown}</p>;
+  }
+  if (check.compliant || !check.missing?.length) return null;
+  return (
+    <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+      needs {check.missing.join(", ")}
+      {check.policies?.length ? ` — for ${check.policies.join(", ")}` : ""}
+    </p>
   );
 }

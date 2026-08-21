@@ -116,6 +116,11 @@ func (s *Server) Handler() http.Handler {
 
 	// What a Gate's crossings actually depend on, and the three things an
 	// operator does to it when something is wrong.
+	// Would the eligible Bundles actually cross? Read access, because it is a
+	// question about evidence that already exists rather than a change to any.
+	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/gates/{name}/preflight",
+		s.guard(ActionRead, s.preflight))
+
 	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/gates/{name}/flux",
 		s.guard(ActionRead, s.fluxResources))
 	mux.Handle("POST /api/v1alpha1/namespaces/{namespace}/gates/{name}/flux/suspend",
@@ -457,6 +462,10 @@ func writeError(w http.ResponseWriter, status int, message string) {
 		"error":  message,
 		"status": strings.ToLower(http.StatusText(status)),
 	})
+}
+
+func (s *Server) preflight(ctx context.Context, _ Subject, r *http.Request) (any, error) {
+	return s.Ops.Preflight(ctx, r.PathValue("namespace"), r.PathValue("name"))
 }
 
 // ------------------------------------------------------------------ flux ----
