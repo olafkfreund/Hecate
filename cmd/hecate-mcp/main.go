@@ -14,11 +14,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
@@ -85,6 +90,16 @@ func main() {
 		"expose promote and abort. Off by default: a tool a model can call is a tool it will call.")
 	actor := fs.String("actor", "",
 		"who authorised this server to act, recorded on every write. Required with --allow-writes.")
+	listen := fs.String("listen", "",
+		"serve MCP over HTTP on this address instead of stdio, e.g. 127.0.0.1:8085. "+
+			"Bind to loopback unless you have arranged authentication in front of it.")
+	allowedOrigins := fs.String("allowed-origins", "",
+		"comma-separated browser origins that may reach the HTTP transport. "+
+			"Empty turns every browser away, which is the safe default and does not "+
+			"affect clients that are not browsers.")
+	insecure := fs.Bool("insecure", false,
+		"serve HTTP with no authentication. Required to bind anything but loopback "+
+			"without a token, and a deliberate choice rather than an oversight.")
 	showVersion := fs.Bool("version", false, "print the version and exit")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		os.Exit(2)
@@ -94,13 +109,31 @@ func main() {
 		return
 	}
 
-	if err := run(*namespace, *allowWrites, *actor); err != nil {
+	if err := run(runOptions{
+		namespace:      *namespace,
+		allowWrites:    *allowWrites,
+		actor:          *actor,
+		listen:         *listen,
+		allowedOrigins: *allowedOrigins,
+		insecure:       *insecure,
+	}); err != nil {
 		fmt.Fprintf(os.Stderr, "hecate-mcp: %s\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(namespace string, allowWrites bool, actor string) error {
+// runOptions is what the flags decided.
+type runOptions struct {
+	namespace      string
+	allowWrites    bool
+	actor          string
+	listen         string
+	allowedOrigins string
+	insecure       bool
+}
+
+func run(opts runOptions) error {
+	namespace, allowWrites, actor := opts.namespace, opts.allowWrites, opts.actor
 	if allowWrites && actor == "" {
 		// A write with no actor is a write nobody is accountable for, and an
 		// agent acting anonymously is exactly the case where that matters.
@@ -147,6 +180,10 @@ func run(namespace string, allowWrites bool, actor string) error {
 		mode = "writes enabled as " + mcp.ActorPrefix + actor
 	}
 
+	if opts.listen != "" {
+		return serveHTTP(ctx, server, opts, namespace, mode)
+	}
+
 	fmt.Fprintf(os.Stderr, "hecate-mcp %s serving %s over stdio (%s)\n", version, namespace, mode)
 	return server.Serve(ctx, os.Stdin, os.Stdout)
 }
@@ -160,4 +197,77 @@ func kubeconfigNamespace() string {
 		return ns
 	}
 	return "default"
+}
+
+// serveHTTP runs the streamable HTTP transport.
+//
+// Authentication is the deployment's to arrange — a reverse proxy, an ingress
+// with OIDC, or a network nobody else is on. What this refuses to do is bind a
+// non-loopback address without being told the exposure was meant: an MCP server
+// with --allow-writes reachable from a network is a promote button with no
+// password on it.
+func serveHTTP(ctx context.Context, server *mcp.Server, opts runOptions, namespace, mode string) error {
+	host, _, err := net.SplitHostPort(opts.listen)
+	if err != nil {
+		return fmt.Errorf("--listen %q is not host:port: %w", opts.listen, err)
+	}
+	if !isLoopback(host) && !opts.insecure {
+		return fmt.Errorf(
+			"--listen %s is not loopback and there is no authentication here. Put a proxy in "+
+				"front of it, or pass --insecure to say the exposure is deliberate", opts.listen)
+	}
+
+	var origins []string
+	if opts.allowedOrigins != "" {
+		for _, o := range strings.Split(opts.allowedOrigins, ",") {
+			if o = strings.TrimSpace(o); o != "" {
+				origins = append(origins, o)
+			}
+		}
+	}
+
+	handler, err := server.Handler(mcp.HTTPOptions{
+		// Nil, and said so explicitly: this binary has no credential of its own
+		// to check against, and inventing one would be a second authentication
+		// system beside the cluster's.
+		AllowUnauthenticated: true,
+		AllowedOrigins:       origins,
+	})
+	if err != nil {
+		return err
+	}
+
+	srv := &http.Server{
+		Addr:              opts.listen,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	go func() {
+		<-ctx.Done()
+		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdown)
+	}()
+
+	fmt.Fprintf(os.Stderr, "hecate-mcp %s serving %s over http on %s (%s)\n",
+		version, namespace, opts.listen, mode)
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+// isLoopback reports whether an address binds only the local machine.
+//
+// An empty host means every interface, which is the one people type by accident
+// — ":8085" looks local and is not.
+func isLoopback(host string) bool {
+	if host == "" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

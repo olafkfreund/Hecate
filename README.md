@@ -215,7 +215,8 @@ different conclusions about the same cluster.
 ### Asking through an LLM
 
 ```console
-$ hecate-mcp -namespace acme      # stdio, read-only
+$ hecate-mcp -namespace acme                       # stdio, read-only
+$ hecate-mcp -namespace acme -listen 127.0.0.1:8085   # streamable HTTP
 ```
 
 An MCP server over the same operations layer, so an agent and the CLI cannot
@@ -226,6 +227,13 @@ rather than parses out of prose.
 It speaks both MCP eras — the stateless `2026-07-28` revision and the older
 handshake-based ones — because a modern-only server cannot be used by the
 clients most people are running today ([D33](docs/DECISIONS.md)).
+
+Over HTTP the version travels in the `MCP-Protocol-Version` header rather than
+in `_meta`, and a browser origin must be named with `--allowed-origins` — an
+unlisted one is turned away before its credentials are looked at, because a
+local server with no origin check can be driven by any page the user visits.
+There is no authentication of its own: bind loopback, or put a proxy in front
+and pass `--insecure` to say the exposure was meant.
 
 It reads by default. `--allow-writes --actor <you>` adds `promote` and `abort`,
 judged by the same rules as every other path. **It can never approve**, and
