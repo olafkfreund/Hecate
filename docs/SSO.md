@@ -103,14 +103,95 @@ CA, is in [Onboarding](ONBOARDING.md#signing-in-to-the-web-portal).
 
 ## Provider recipes
 
-**Not written yet, deliberately.** The configuration above is provider-agnostic
-and is what every provider needs; what a recipe adds is the specific
-clicking-through for Okta, Entra, Google, Keycloak and the rest.
+### Dex on EKS
 
-Those are only worth publishing once somebody has actually run them against a
-real tenant. A recipe written from documentation rather than from a working
-deployment is how a project ends up with instructions that are confidently
-wrong — which is the problem recipes exist to solve, made worse by carrying our
-name. Tracked in #52; contributions from anyone running one are welcome, and the
-useful contribution is the diff between this page and what you actually had to
-do.
+Written from the deployment it describes rather than from documentation, which
+is the bar this section sets for itself. Every value below was read back out of
+a cluster people sign into.
+
+**1. Dex.** The client id and the redirect URI have to match what Hecate is
+configured with, exactly — a trailing slash is a different URI.
+
+```yaml
+issuer: https://dex.example.com
+storage:
+  type: kubernetes          # see the warning below; `memory` will lock you out
+  config:
+    inCluster: true
+oauth2:
+  skipApprovalScreen: true  # a consent screen for your own tool is a click nobody learns from
+staticClients:
+  - id: hecate
+    name: Hecate
+    secret: <the same value as Hecate's clientSecret Secret>
+    redirectURIs:
+      - https://hecate.example.com/auth/callback
+```
+
+**2. The cluster.** Kubernetes has to trust the same issuer, or a token Dex
+happily issues is one the API server has never heard of. On EKS:
+
+One `--oidc` value, on one line: it is a comma-separated structure, and a
+backslash continuation inside it joins only while the trailing backslash
+survives whatever edits the line on its way to a terminal.
+
+```console
+$ aws eks associate-identity-provider-config --cluster-name <cluster> --region <region> \
+    --oidc 'identityProviderConfigName=dex,issuerUrl=https://dex.example.com,clientId=hecate,usernameClaim=email,groupsClaim=groups'
+```
+
+`clientId` is the same `hecate` Dex knows and Hecate presents. It is not a
+separate registration: the cluster validates the token's `aud`, and a different
+value here rejects every token with an error that names none of this.
+
+Association takes around fifteen minutes. Confirm it rather than assuming:
+
+```console
+$ aws eks describe-identity-provider-config --cluster-name <cluster> \
+    --identity-provider-config type=oidc,name=dex \
+    --query 'identityProviderConfig.oidc.status'
+"ACTIVE"
+```
+
+**3. Hecate.**
+
+```yaml
+api:
+  oidc:
+    enabled: true
+    issuer: https://dex.example.com
+    clientID: hecate
+    redirectURL: https://hecate.example.com/auth/callback
+    clientSecretRef:
+      name: hecate-oidc     # a Secret whose `clientSecret` key holds it
+      # key: clientSecret   # the default; set it if your Secret names it otherwise
+```
+
+**4. Grant somebody something.** Signing in gets a token the cluster trusts and
+nothing else — see [RBAC.md](RBAC.md). With `usernameClaim=email` the subject is
+the email address, so a binding names `promoter@example.com` and not `promoter`.
+
+#### `storage.type: memory` will lock every user out
+
+Dex with `memory` storage generates a fresh signing keypair on every restart,
+and a restart is what a Helm upgrade, a node eviction or a Spot reclaim does to
+it. **EKS caches the provider's JWKS when the config is associated and does not
+re-fetch it**, so the new keys are ones the cluster will not accept. Every login
+then fails with a signature error naming no cause, and waiting does not fix it.
+
+Recovering means `disassociate-identity-provider-config` and associating again
+— about twenty-five minutes, with every login failing throughout. Using
+`kubernetes` storage keeps the keys across restarts and the problem never
+arises. This is the single most expensive mistake available on this page.
+
+### Okta, Entra, Google, Keycloak
+
+**Not written yet, deliberately**, and for the reason above: a recipe written
+from documentation rather than from a working deployment is how a project ends
+up with instructions that are confidently wrong — which is the problem recipes
+exist to solve, made worse by carrying our name.
+
+The configuration in this page is provider-agnostic and is what all of them
+need; what a recipe adds is the specific clicking-through. Tracked in #52;
+contributions from anyone running one are welcome, and the useful contribution
+is the diff between this page and what you actually had to do.
