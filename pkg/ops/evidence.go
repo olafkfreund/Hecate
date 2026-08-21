@@ -33,6 +33,11 @@ type Evidence struct {
 	// Verdict is the change gate's answer, with its controls, attestation
 	// counts, approvals and segregation-of-duties finding.
 	Verdict *fides.ChangeVerdict `json:"verdict,omitempty"`
+	// Change is the ITSM change request governing this crossing, when one has
+	// been checked. Carried alongside the verdict rather than inside it: the
+	// verdict is Fides' judgement of the evidence, and this is the ticket a
+	// person opens when they disagree with it.
+	Change *fides.ChangeRequest `json:"change,omitempty"`
 	// ApprovedIn lists the approvals Hecate itself recorded, which is not the
 	// same list as Fides' — a Gate that does not use Fides still has approvers,
 	// and they belong in the answer to "who allowed it".
@@ -101,6 +106,14 @@ func (o *Ops) Evidence(ctx context.Context, namespace, bundleName string) (*Evid
 		return nil, fmt.Errorf("reading the change-gate verdict: %w", err)
 	}
 	ev.Verdict = verdict
+
+	// Best effort, and deliberately after the verdict is set. Most trails carry
+	// no ITSM check, and an evidence panel that failed because one is absent
+	// would be wrong about almost every crossing — while one that silently drops
+	// the verdict because the change lookup failed would be worse.
+	if change, err := c.ChangeRequestFor(ctx, trail); err == nil {
+		ev.Change = change
+	}
 	return ev, nil
 }
 

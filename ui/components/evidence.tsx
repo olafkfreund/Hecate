@@ -1,7 +1,7 @@
 "use client";
 
 import { ShieldCheck, ShieldAlert, ShieldQuestion } from "lucide-react";
-import { api, type Control, type Evidence } from "@/lib/api";
+import { api, type ChangeRequest, type Control, type Evidence } from "@/lib/api";
 import { useApi } from "@/components/loader";
 
 /**
@@ -53,6 +53,8 @@ export function EvidencePanel({ namespace, bundle }: { namespace: string; bundle
         </span>
       </Line>
       {v.summary && <p className="mt-1 text-sm text-[var(--muted-foreground)]">{v.summary}</p>}
+
+      <Change change={ev.change} />
 
       <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
         <Stat label="Controls passed" value={v.passed?.length ?? 0} />
@@ -148,6 +150,54 @@ function Controls({ title, controls }: { title: string; controls?: Control[] }) 
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+/**
+ * Change is the ITSM ticket this crossing is governed by.
+ *
+ * Beside the verdict rather than inside it: the verdict is Fides' judgement of
+ * the evidence, and this is the ticket a person opens when they disagree with
+ * it — or when the judgement is "hold" and the next step is somebody else's
+ * approval queue.
+ *
+ * Nothing at all when no ITSM check was recorded, which is most crossings. A
+ * panel with a permanently empty "Change" row is one people stop reading.
+ */
+function Change({ change }: { change?: ChangeRequest }) {
+  if (!change) return null;
+
+  // "The change does not exist" and "the change is not approved" are different
+  // answers with different fixes, and only one of them is somebody's to sign.
+  if (!change.found) {
+    return (
+      <p className="mt-3 text-sm text-[var(--destructive)]">
+        The change request named for this crossing does not exist in ServiceNow.
+      </p>
+    );
+  }
+
+  const approved = change.approval === "approved";
+  return (
+    // Labelled, because a bare row of words — "CHG0033184 approved scheduled
+    // risk 3" — is a list of facts with nothing saying what they are about.
+    <div
+      aria-label="Change request"
+      className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm"
+    >
+      <span className="font-mono font-medium">{change.number}</span>
+      {change.short_description && (
+        <span className="text-[var(--muted-foreground)]">{change.short_description}</span>
+      )}
+      <span className={approved ? "text-[var(--healthy)]" : "text-[var(--unknown)]"}>
+        {change.approval}
+      </span>
+      <span className="text-[var(--muted-foreground)]">{change.state}</span>
+      {/* A change can be approved and still not actionable, which is the one
+          combination the approval word alone describes wrongly. */}
+      {change.on_hold && <span className="text-[var(--unknown)]">on hold</span>}
+      {change.risk && <span className="text-[var(--muted-foreground)]">risk {change.risk}</span>}
     </div>
   );
 }

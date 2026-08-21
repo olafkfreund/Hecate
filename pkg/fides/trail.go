@@ -452,3 +452,101 @@ func (c *Client) RecordApproval(ctx context.Context, trail string, a Approval) e
 
 // approvalKindSession is the stored kind the change gate counts as human.
 const approvalKindSession = "session"
+
+// ChangeRequest is the ITSM change this crossing is governed by.
+//
+// Read from the trail's `servicenow-change` attestation rather than from
+// ServiceNow. That is the deliberate choice: the attestation is what the gate
+// judged, hash-chained into the ledger at the moment of judgement, and a live
+// lookup can disagree with it — a change closed since the crossing would make
+// an audit trail claim a decision nobody made. Hecate also needs no ServiceNow
+// credentials of its own this way, and there is no second client to keep in
+// step with Fides'.
+type ChangeRequest struct {
+	// Number is the CHG record, e.g. CHG0033184.
+	Number string `json:"number"`
+	// State is the readable label — new, assess, authorize, scheduled,
+	// implement, review, closed — normalised by Fides from ServiceNow's codes.
+	State string `json:"state"`
+	// Approval is ServiceNow's own word: "approved", "requested",
+	// "not requested", "rejected".
+	Approval string `json:"approval"`
+	// Risk is ServiceNow's risk as a string, because that is what it sends.
+	Risk string `json:"risk"`
+	// OnHold is why a change that looks approved still is not actionable.
+	OnHold bool `json:"on_hold"`
+	// ShortDescription is the ticket's own title.
+	ShortDescription string `json:"short_description"`
+	// Found is false when ServiceNow had no such change. Kept because "the
+	// change does not exist" and "the change is not approved" are different
+	// answers with different fixes.
+	Found bool `json:"found"`
+
+	// Compliant is whether the attestation satisfied the type's rules — Fides'
+	// judgement, not a field of the change itself.
+	Compliant bool `json:"-"`
+	// At is when it was attested, so a reader can tell a fresh check from one
+	// made a fortnight ago.
+	At string `json:"-"`
+}
+
+// attestationRef is one attestation as the search endpoint lists it: metadata
+// only, with no payload.
+type attestationRef struct {
+	ID          string `json:"id"`
+	TypeName    string `json:"type_name"`
+	IsCompliant bool   `json:"is_compliant"`
+	CreatedAt   string `json:"created_at"`
+}
+
+// ChangeRequestFor reads the change this trail's crossing is governed by, or
+// nil when no ITSM check has been recorded.
+//
+// Two calls because the search endpoint answers with metadata and not payloads:
+// one to find the newest servicenow-change attestation, one to read it. The
+// alternative is asking ServiceNow directly, which needs credentials Hecate
+// does not have and answers a different question — see ChangeRequest.
+func (c *Client) ChangeRequestFor(ctx context.Context, trail string) (*ChangeRequest, error) {
+	if trail == "" {
+		return nil, errors.New("fides: no trail to read a change from")
+	}
+
+	var found []attestationRef
+	if err := c.get(ctx,
+		"api/v1/search/attestations?type=servicenow-change&trail="+url.QueryEscape(trail),
+		&found); err != nil {
+		return nil, err
+	}
+	if len(found) == 0 {
+		// Not an error. Most trails have no ITSM check, and reporting that as a
+		// failure would be wrong about almost every crossing.
+		return nil, nil
+	}
+
+	// Newest first. Fides orders by created_at descending, but a caller reading
+	// "the change governing this crossing" must not depend on that — an older
+	// attestation naming a closed change would be a confidently wrong answer.
+	newest := found[0]
+	for _, a := range found[1:] {
+		if a.CreatedAt > newest.CreatedAt {
+			newest = a
+		}
+	}
+
+	var detail struct {
+		Payload     json.RawMessage `json:"payload"`
+		IsCompliant bool            `json:"is_compliant"`
+		CreatedAt   string          `json:"created_at"`
+	}
+	if err := c.get(ctx, "api/v1/attestations/"+url.PathEscape(newest.ID), &detail); err != nil {
+		return nil, err
+	}
+
+	var cr ChangeRequest
+	if err := json.Unmarshal(detail.Payload, &cr); err != nil {
+		return nil, fmt.Errorf("fides: the servicenow-change attestation is not a change: %w", err)
+	}
+	cr.Compliant = detail.IsCompliant
+	cr.At = detail.CreatedAt
+	return &cr, nil
+}

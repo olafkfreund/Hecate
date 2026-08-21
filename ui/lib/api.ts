@@ -591,6 +591,23 @@ export interface ChangeVerdict {
 }
 
 /** Everything Fides holds about a Bundle. Mirrors pkg/ops.Evidence. */
+/**
+ * ChangeRequest is the ITSM change governing a crossing, as attested.
+ *
+ * Read from the trail's servicenow-change attestation rather than live from
+ * ServiceNow: the attestation is what the gate judged, and a change closed
+ * since would make the record claim a decision nobody made.
+ */
+export interface ChangeRequest {
+  number: string;
+  state: string;
+  approval: string;
+  risk?: string;
+  on_hold: boolean;
+  short_description?: string;
+  found: boolean;
+}
+
 export interface Evidence {
   bundle: string;
   namespace: string;
@@ -598,6 +615,8 @@ export interface Evidence {
   trail?: string;
   gate?: string;
   verdict?: ChangeVerdict;
+  /** The ITSM change governing this crossing, when one was checked. */
+  change?: ChangeRequest;
   approvedIn?: BundleApproval[];
   /** Why there is nothing to show. Empty is not the same as a clean bill. */
   unavailable?: string;
