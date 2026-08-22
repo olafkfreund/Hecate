@@ -67,8 +67,8 @@ function GateCard({ gate, namespace }: { gate: Gate; namespace: string }) {
         {/* How long it has been there. A Gate holding the same Bundle for three
             weeks and one that took it a minute ago look identical otherwise,
             and the difference is most of what "is this current?" means. */}
-        {current?.since && ago(current.since) && (
-          <span className="text-[var(--muted-foreground)]"> · {ago(current.since)}</span>
+        {current?.enteredAt && ago(current.enteredAt) && (
+          <span className="text-[var(--muted-foreground)]"> · {ago(current.enteredAt)}</span>
         )}
       </p>
 

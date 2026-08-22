@@ -119,6 +119,11 @@ generate: ## Regenerate deepcopy, CRDs and RBAC from the API and controller mark
 	@# API (#117), and go:embed cannot reach outside its own package. Copied
 	@# rather than symlinked because embed does not follow symlinks either.
 	cp $(CHART_DIR)/crds/*.yaml pkg/crds/
+	@# The field names the API sends, so ui/lib/api.ts can be checked against
+	@# them rather than trusted. That file mirrors these types by hand and has
+	@# drifted once already, silently, because nothing validates a response
+	@# against a schema in the browser.
+	go run ./cmd/apishape > ui/test/apishape.json
 
 build: ## Build the controller and the CLI
 	go build -o bin/hecate-controller ./cmd/hecate-controller

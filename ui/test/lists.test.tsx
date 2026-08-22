@@ -30,7 +30,7 @@ describe("the Gates list", () => {
       suspend: false,
     },
     status: {
-      current: { bundle: "podtato-head-fa9", since: recently },
+      current: { bundle: "podtato-head-fa9", enteredAt: recently },
       health: { status: "Degraded", issues: ["HelmRelease has not reconciled for 40m"] },
       eligible: ["podtato-head-fb1", "podtato-head-fc2"],
     },
