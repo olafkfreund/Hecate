@@ -8,7 +8,13 @@ export type Health = "Healthy" | "Progressing" | "Degraded" | "Unknown" | "NotAp
 
 export interface GateOccupant {
   bundle?: string;
-  since?: string;
+  /** When it entered. Named for the Go field: `since` was invented here, was
+   *  never sent, and silently rendered nothing for three releases. */
+  enteredAt?: string;
+  digest?: string;
+  passage?: string;
+  actor?: string;
+  verified?: boolean;
 }
 
 export interface HealthReport {

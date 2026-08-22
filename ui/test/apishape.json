@@ -1,0 +1,233 @@
+{
+  "Admission": [
+    "after",
+    "from",
+    "requireApproval"
+  ],
+  "Artifact": [
+    "chart",
+    "commit",
+    "image"
+  ],
+  "AuditEntry": [
+    "actor",
+    "at",
+    "bundle",
+    "detail",
+    "digest",
+    "evidence",
+    "gate",
+    "kind",
+    "passage",
+    "verified"
+  ],
+  "Beacon": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec",
+    "status"
+  ],
+  "Blocker": [
+    "detail",
+    "fix",
+    "kind"
+  ],
+  "Bundle": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec",
+    "status"
+  ],
+  "BundleApproval": [
+    "actor",
+    "at",
+    "gate"
+  ],
+  "ChangeRequest": [
+    "approval",
+    "found",
+    "number",
+    "on_hold",
+    "risk",
+    "short_description",
+    "state"
+  ],
+  "ChangeVerdict": [
+    "approvals",
+    "approved",
+    "attestations",
+    "failed",
+    "missing_evidence",
+    "passed",
+    "recommendation",
+    "risk_level",
+    "risk_score",
+    "segregation_of_duties",
+    "summary",
+    "waived"
+  ],
+  "Control": [
+    "approved_by",
+    "control",
+    "expires_at",
+    "name",
+    "reason",
+    "reasons",
+    "waived_reasons"
+  ],
+  "Day": [
+    "crossed",
+    "date",
+    "failed"
+  ],
+  "Evidence": [
+    "approvedIn",
+    "bundle",
+    "change",
+    "digest",
+    "gate",
+    "namespace",
+    "trail",
+    "unavailable",
+    "verdict"
+  ],
+  "EvidenceRef": [
+    "blockers",
+    "risk",
+    "trail",
+    "url",
+    "verdict"
+  ],
+  "Explanation": [
+    "blockers",
+    "current",
+    "eligible",
+    "evidence",
+    "gate",
+    "health",
+    "namespace",
+    "state",
+    "summary",
+    "waiting"
+  ],
+  "FluxResource": [
+    "detail",
+    "health",
+    "kind",
+    "lastHandled",
+    "missing",
+    "name",
+    "namespace",
+    "revision",
+    "suspended"
+  ],
+  "Gate": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec",
+    "status"
+  ],
+  "GateCrossing": [
+    "actor",
+    "at",
+    "gate",
+    "passage",
+    "reason"
+  ],
+  "GateOccupant": [
+    "actor",
+    "bundle",
+    "digest",
+    "enteredAt",
+    "passage",
+    "verified"
+  ],
+  "GateSummary": [
+    "current",
+    "eligible",
+    "health",
+    "issues",
+    "name",
+    "running",
+    "suspended"
+  ],
+  "HealthReport": [
+    "details",
+    "issues",
+    "observedAt",
+    "since",
+    "status"
+  ],
+  "ImageArtifact": [
+    "digest",
+    "repo",
+    "tag"
+  ],
+  "NamespaceOverview": [
+    "gates",
+    "namespace"
+  ],
+  "Overview": [
+    "activity",
+    "namespaces",
+    "totals"
+  ],
+  "Passage": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec",
+    "status"
+  ],
+  "Preflight": [
+    "bundle",
+    "compliant",
+    "missing",
+    "policies",
+    "unknown"
+  ],
+  "Settings": [
+    "clusters",
+    "fides",
+    "home",
+    "identity",
+    "telemetry",
+    "version"
+  ],
+  "StepStatus": [
+    "as",
+    "attempts",
+    "finishedAt",
+    "message",
+    "output",
+    "phase",
+    "reason",
+    "startedAt",
+    "uses"
+  ],
+  "Totals": [
+    "degraded",
+    "eligible",
+    "failed",
+    "gates",
+    "healthy",
+    "progressing",
+    "running",
+    "suspended",
+    "unknown"
+  ],
+  "Waiting": [
+    "bundle",
+    "kind",
+    "reason"
+  ],
+  "WatchSource": [
+    "chart",
+    "git",
+    "image",
+    "provider"
+  ]
+}
