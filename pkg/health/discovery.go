@@ -2,6 +2,7 @@ package health
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -55,7 +56,7 @@ func CheckFluxAPIs(d APIGroupLister) ([]string, error) {
 				"%s is not served by this cluster: the Flux component that provides %s "+
 					"is not installed, and a Gate watching one will report Unknown",
 				group, strings.Join(kindsFor(gv), ", ")))
-		case !contains(versions, version):
+		case !slices.Contains(versions, version):
 			warnings = append(warnings, fmt.Sprintf(
 				"%s serves %s but Hecate defaults to %s for %s: set apiVersion explicitly "+
 					"on those watches, and expect this Flux to need a newer Hecate",
@@ -91,13 +92,4 @@ func kindsFor(gv string) []string {
 	}
 	sort.Strings(kinds)
 	return kinds
-}
-
-func contains(haystack []string, needle string) bool {
-	for _, v := range haystack {
-		if v == needle {
-			return true
-		}
-	}
-	return false
 }
