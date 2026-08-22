@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -341,17 +342,10 @@ func dedupe(in []string) []string {
 	if len(in) == 0 {
 		return nil
 	}
-	seen := map[string]struct{}{}
-	out := in[:0]
-	for _, v := range in {
-		if _, ok := seen[v]; ok {
-			continue
-		}
-		seen[v] = struct{}{}
-		out = append(out, v)
-	}
-	sort.Strings(out)
-	return out
+	// Sort first: Compact removes *consecutive* repeats, so unsorted input
+	// would keep any duplicate that was not already adjacent.
+	slices.Sort(in)
+	return slices.Compact(in)
 }
 
 // clusterRefName pulls `clusterRef.name` out of a health check's `with` blob.

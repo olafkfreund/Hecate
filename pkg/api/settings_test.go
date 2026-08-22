@@ -77,3 +77,35 @@ func TestHomeClusterHandlesAnIPv6ServiceAddress(t *testing.T) {
 		t.Errorf("server is %q, want https://[fd00::1]:443", got.Server)
 	}
 }
+
+func TestDedupeSortsAndRemovesRepeats(t *testing.T) {
+	// Written against the hand-rolled implementation before replacing it with
+	// slices.Sort + slices.Compact, so "the replacement is equivalent" is a
+	// thing the suite can answer rather than a thing I asserted.
+	for _, tc := range []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{"repeats collapse", []string{"b", "a", "b", "a"}, []string{"a", "b"}},
+		{"already unique still sorts", []string{"c", "a", "b"}, []string{"a", "b", "c"}},
+		{"single value", []string{"only"}, []string{"only"}},
+		// Empty answers nil, which matters only because the field is omitempty
+		// and both spellings serialise away — recorded so a change to it is a
+		// decision rather than a surprise.
+		{"empty", []string{}, nil},
+		{"nil", nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := dedupe(tc.in)
+			if len(got) != len(tc.want) {
+				t.Fatalf("dedupe(%v) = %v, want %v", tc.in, got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("dedupe(%v) = %v, want %v", tc.in, got, tc.want)
+				}
+			}
+		})
+	}
+}

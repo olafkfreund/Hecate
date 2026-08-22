@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -221,19 +220,4 @@ func writeRPCError(w http.ResponseWriter, status int, id json.RawMessage, code i
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(errorReply(id, code, message, nil))
-}
-
-// LocalOrigins are the origins a server bound to loopback should allow.
-//
-// Provided because assembling them by hand is where the mistake happens: a
-// browser sends `http://localhost:3000` and `http://127.0.0.1:3000` as distinct
-// origins, and an allowlist naming one rejects the other for reasons nobody
-// enjoys diagnosing.
-func LocalOrigins(port string) []string {
-	return []string{
-		"http://" + net.JoinHostPort("localhost", port),
-		"http://" + net.JoinHostPort("127.0.0.1", port),
-		// JoinHostPort adds the brackets; passing them produces [[::1]].
-		"http://" + net.JoinHostPort("::1", port),
-	}
 }

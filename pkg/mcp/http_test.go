@@ -270,24 +270,3 @@ func TestHTTPRefusesAMalformedOriginAtConstruction(t *testing.T) {
 		t.Fatal("a bare host was accepted as an origin")
 	}
 }
-
-func TestLocalOriginsNamesEveryLoopbackSpelling(t *testing.T) {
-	got := LocalOrigins("3000")
-
-	// A browser sends http://localhost:3000 and http://127.0.0.1:3000 as
-	// distinct origins, and an allowlist naming one turns the other away for
-	// reasons nobody enjoys diagnosing.
-	want := map[string]bool{
-		"http://localhost:3000": true,
-		"http://127.0.0.1:3000": true,
-		"http://[::1]:3000":     true,
-	}
-	if len(got) != len(want) {
-		t.Fatalf("got %v", got)
-	}
-	for _, o := range got {
-		if !want[o] {
-			t.Errorf("unexpected origin %q", o)
-		}
-	}
-}
