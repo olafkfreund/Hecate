@@ -117,17 +117,36 @@ jobs:
       # A rollout that "succeeded" and left the old pods serving is the failure
       # this catches: rollout status is satisfied by the new ReplicaSet being
       # ready, not by every pod running the image we asked for.
-      - name: Check every pod is on the new image
+      #
+      # Terminating pods are excluded, and that distinction is the whole point.
+      # rollout status returns as soon as the new ReplicaSet is ready, while the
+      # old pods are still shutting down — so a check that counted them failed
+      # on every healthy deploy. A pod being replaced has a deletionTimestamp; a
+      # pod still serving the old image does not, and only the second is a
+      # problem. The first version of this step conflated them and failed its
+      # own first run.
+      #
+      # Polled rather than read once, because "the old pods have gone" is a
+      # thing that becomes true shortly after the rollout, not at the instant it
+      # returns.
+      - name: Check every serving pod is on the new image
         run: |
           set -euo pipefail
           want='${{ steps.name.outputs.tag }}'
-          running=$(kubectl -n "$NAMESPACE" get pods \
-            -o jsonpath='{range .items[*]}{.spec.containers[0].image}{"\n"}{end}' | sort -u)
-          echo "$running"
-          if [ "$running" != "$want" ]; then
-            echo "::error::pods are running $running, expected only $want"
-            exit 1
-          fi
+          for _ in $(seq 1 30); do
+            # go-template rather than jsonpath: kubectl's jsonpath dialect has
+            # no negation, so `!@.metadata.deletionTimestamp` is a parse error
+            # rather than a filter that quietly matches everything.
+            running=$(kubectl -n "$NAMESPACE" get pods -o go-template='{{range .items}}{{if not .metadata.deletionTimestamp}}{{(index .spec.containers 0).image}}{{"\n"}}{{end}}{{end}}' | sort -u)
+            if [ "$running" = "$want" ]; then
+              echo "every serving pod is on $want"
+              exit 0
+            fi
+            echo "waiting; currently serving:"; echo "$running"
+            sleep 5
+          done
+          echo "::error::pods are still serving $running, expected only $want"
+          exit 1
 
       # The rollout can succeed against a build that cannot serve. This is the
       # cheapest thing that fails when it has, and it goes in the front door —
