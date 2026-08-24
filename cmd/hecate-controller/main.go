@@ -175,21 +175,14 @@ func run() error {
 	checkers.MustRegister(fluxChecker)
 
 	stepRunners := passage.NewRegistry()
-	stepRunners.MustRegister(steps.NewFluxWait(fluxChecker))
-	stepRunners.MustRegister(steps.NewGitClone(mgr.GetClient()))
-	stepRunners.MustRegister(steps.NewGitCommit())
-	stepRunners.MustRegister(steps.NewGitPush(mgr.GetClient()))
-	stepRunners.MustRegister(steps.NewEditYAML())
-	stepRunners.MustRegister(steps.NewSetImage())
-	stepRunners.MustRegister(steps.NewRenderKustomize())
-	stepRunners.MustRegister(steps.NewRenderHelm())
-	stepRunners.MustRegister(steps.NewOCIPush(mgr.GetClient()))
-	stepRunners.MustRegister(steps.NewOCIPull(mgr.GetClient()))
-	stepRunners.MustRegister(steps.NewGitPullRequest(mgr.GetClient()))
-	stepRunners.MustRegister(steps.NewFluxReconcile(mgr.GetClient(), !opts.noCrossNS))
-	stepRunners.MustRegister(steps.NewHTTP(mgr.GetClient()))
-	stepRunners.MustRegister(steps.NewEvidenceGate(mgr.GetClient(), opts.fidesServer))
-	stepRunners.MustRegister(steps.NewCommitStatus(mgr.GetClient()))
+	for _, r := range steps.All(steps.Deps{
+		Client:         mgr.GetClient(),
+		FluxChecker:    fluxChecker,
+		CrossNamespace: !opts.noCrossNS,
+		FidesServer:    opts.fidesServer,
+	}) {
+		stepRunners.MustRegister(r)
+	}
 
 	if err := (&beacon.Reconciler{
 		Client:   mgr.GetClient(),

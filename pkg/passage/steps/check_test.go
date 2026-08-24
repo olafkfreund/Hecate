@@ -12,24 +12,9 @@ import (
 )
 
 // all is every step Hecate ships, which is what the controller registers.
-func all() []passage.Runner {
-	return []passage.Runner{
-		NewFluxWait(nil),
-		NewFluxReconcile(nil, false),
-		NewGitClone(nil),
-		NewGitCommit(),
-		NewGitPush(nil),
-		NewGitPullRequest(nil),
-		NewEditYAML(),
-		NewSetImage(),
-		NewRenderKustomize(),
-		NewRenderHelm(),
-		NewOCIPush(nil),
-		NewOCIPull(nil),
-		NewHTTP(nil),
-		NewEvidenceGate(nil, ""),
-	}
-}
+// all is every step, from the same list the controller wires from. Enumerating
+// a second copy here is what let commit-status go unchecked.
+func all() []passage.Runner { return All(Deps{}) }
 
 // The value of checking configuration is that it is uniform: a Gate author
 // should not have to know which steps happen to be checked. A step added later
@@ -54,6 +39,9 @@ func TestAMisspeltFieldIsRefusedAndNamed(t *testing.T) {
 		{NewGitClone(nil), `{"repo":"https://example.test/x.git","brunch":"main"}`},
 		{NewSetImage(), `{"path":"repo/k.yaml","image":"a/b","tagg":"1.0"}`},
 		{NewHTTP(nil), `{"url":"https://x.test","sucessIf":"status == 200"}`},
+		// commit-status was exempt from this until its checker was named
+		// CheckConfig rather than Check, so this field went in silently.
+		{NewCommitStatus(nil), `{"state":"Pending","contxt":"deploy"}`},
 	} {
 		checker, ok := tc.runner.(passage.ConfigChecker)
 		if !ok {

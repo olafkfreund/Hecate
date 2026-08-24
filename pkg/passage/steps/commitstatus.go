@@ -2,6 +2,7 @@ package steps
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -71,9 +72,9 @@ func NewCommitStatus(c client.Client) *CommitStatus {
 // Name implements passage.Runner.
 func (s *CommitStatus) Name() string { return StepCommitStatus }
 
-// Check implements passage.Checker, so a Gate is refused at admission rather
-// than part-way through a crossing.
-func (s *CommitStatus) Check(raw []byte) error {
+// CheckConfig implements passage.ConfigChecker, so a Gate is refused at
+// admission rather than part-way through a crossing.
+func (s *CommitStatus) CheckConfig(raw json.RawMessage) error {
 	cfg, err := passage.CheckConfig[CommitStatusConfig](raw)
 	if err != nil {
 		return err
