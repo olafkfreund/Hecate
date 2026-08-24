@@ -43,6 +43,7 @@ const defaultHTTPTimeout = 30 * time.Second
 
 // HTTPConfig is the `with:` block of an http step.
 type HTTPConfig struct {
+	// URL is what to call.
 	URL string `json:"url"`
 	// Method defaults to GET, or POST when a body is given.
 	Method string `json:"method,omitempty"`
@@ -61,8 +62,10 @@ type HTTPConfig struct {
 	//
 	// Written without `${{ }}`, because those are substituted before the step
 	// runs and there is no response yet at that point.
-	SuccessIf string           `json:"successIf,omitempty"`
-	Timeout   *metav1.Duration `json:"timeout,omitempty"`
+	SuccessIf string `json:"successIf,omitempty"`
+	// Timeout bounds the call. Empty is 30 seconds, so a hung endpoint does not
+	// hold a worker.
+	Timeout *metav1.Duration `json:"timeout,omitempty"`
 }
 
 // SecretHeader is one header whose value comes from a Secret.

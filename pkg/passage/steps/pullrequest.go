@@ -58,8 +58,11 @@ type GitPullRequestConfig struct {
 	// which is the one git-clone was pointed at.
 	Base string `json:"base,omitempty"`
 
-	Title  string   `json:"title,omitempty"`
-	Body   string   `json:"body,omitempty"`
+	// Title is the pull request's title. Empty is generated from the Passage.
+	Title string `json:"title,omitempty"`
+	// Body is the description. Empty is generated from what is being promoted.
+	Body string `json:"body,omitempty"`
+	// Labels are applied on creation. A label added later is not removed.
 	Labels []string `json:"labels,omitempty"`
 
 	// WaitForMerge holds the Passage open until the pull request merges.
@@ -72,6 +75,9 @@ type GitPullRequestConfig struct {
 	// PollInterval overrides how often an open pull request is re-read.
 	PollInterval *metav1.Duration `json:"pollInterval,omitempty"`
 
+	// CredentialsRef names a Secret holding an API token, or a GitHub App's
+	// keys. Opening a pull request needs API access, which push access alone
+	// does not give.
 	CredentialsRef *v1alpha1.LocalSecretRef `json:"credentialsRef,omitempty"`
 }
 

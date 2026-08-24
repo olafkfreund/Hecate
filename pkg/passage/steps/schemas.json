@@ -1,0 +1,675 @@
+{
+  "commit-status": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/olafkfreund/hecate/pkg/passage/steps/commit-status-config",
+    "properties": {
+      "sha": {
+        "type": "string",
+        "description": "SHA is the commit to report on. Empty reads HEAD from the checkout,\nwhich is the commit git-commit made and git-push published."
+      },
+      "path": {
+        "type": "string",
+        "description": "Path is the checkout to read the repository and HEAD from, relative to\nthe Passage work dir."
+      },
+      "repo": {
+        "type": "string",
+        "description": "Repo overrides the repository URL. Empty reads it from the checkout's\norigin remote."
+      },
+      "provider": {
+        "type": "string",
+        "description": "Provider is `github` or `gitlab`. Empty is inferred from the host."
+      },
+      "baseURL": {
+        "type": "string",
+        "description": "BaseURL is the API root, for GitHub Enterprise Server and self-managed\nGitLab."
+      },
+      "context": {
+        "type": "string",
+        "description": "Context names the check. Empty is `hecate/\u003cgate\u003e`, so two Gates reporting\non the same commit do not overwrite each other."
+      },
+      "state": {
+        "type": "string",
+        "description": "State overrides the outcome. Empty reports what actually happened, which\nis almost always what you want; set `Pending` on a step at the top of a\nPassage to show the crossing has started."
+      },
+      "description": {
+        "type": "string",
+        "description": "Description overrides the one-line summary."
+      },
+      "targetURL": {
+        "type": "string",
+        "description": "TargetURL is where a human goes for detail."
+      },
+      "credentialsRef": {
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "description": "CredentialsRef names a Secret holding an API token, or a GitHub App's\nkeys. Required: reporting a status needs API access, which is not the\nsame thing as push access."
+      }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "description": "CommitStatusConfig is the `with:` block of a commit-status step."
+  },
+  "edit-yaml": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/olafkfreund/hecate/pkg/passage/steps/edit-yaml-config",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Path is the file to edit, relative to the Passage work dir — so a file in\nthe default checkout is `repo/apps/prod/values.yaml`."
+      },
+      "edits": {
+        "items": {
+          "properties": {
+            "key": {
+              "type": "string",
+              "description": "Key is a dotted path: `image.tag`, `spec.replicas`, `images[0].newTag`."
+            },
+            "value": {
+              "description": "Value is a string, number or boolean."
+            }
+          },
+          "additionalProperties": false,
+          "type": "object",
+          "description": "FieldEdit sets one field to one value."
+        },
+        "type": "array",
+        "description": "Edits are applied in order, all or nothing."
+      }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "description": "EditYAMLConfig is the `with:` block of an edit-yaml step."
+  },
+  "evidence-gate": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/olafkfreund/hecate/pkg/passage/steps/evidence-gate-config",
+    "properties": {
+      "gates": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array",
+        "description": "Gates selects which checks apply. Empty runs none, which is a mistake\nworth reporting rather than a quiet pass.\n\nA dev Gate can run none of them and production all four."
+      },
+      "policy": {
+        "type": "string",
+        "description": "Policy is the Fides policy name for the `assert` gate. Empty asks Fides\nfor every policy that applies to the artifact."
+      },
+      "maxRisk": {
+        "type": "integer",
+        "description": "MaxRisk fails the crossing when the change gate's risk score exceeds it,\nletting a team be stricter than Fides' own verdict. 0-100."
+      },
+      "reportArtifacts": {
+        "type": "boolean",
+        "description": "ReportArtifacts records every image digest in the Bundle against the\ntrail, so a change gate sees the whole release rather than the one\nartifact whose trail was looked up.\n\nOff by default, and deliberately: Fides upserts on the digest and\noverwrites the trail link, so this claims the other images belong to\n*this* trail. That is true when one CI run built them all and wrong when\nthey came from different builds — which only the operator knows."
+      },
+      "holdTimeout": {
+        "properties": {
+          "Duration": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "description": "HoldTimeout bounds how long a held change may wait before the crossing\nfails. Default 24h."
+      },
+      "pollInterval": {
+        "properties": {
+          "Duration": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "description": "PollInterval is how often a held change is re-read. Default 1m."
+      }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "description": "EvidenceGateConfig is the `with:` block of an evidence-gate step."
+  },
+  "flux-reconcile": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/olafkfreund/hecate/pkg/passage/steps/flux-reconcile-config",
+    "properties": {
+      "resources": {
+        "items": {
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "apiVersion": {
+              "type": "string",
+              "description": "APIVersion overrides the default for Kind."
+            },
+            "name": {
+              "type": "string"
+            },
+            "namespace": {
+              "type": "string",
+              "description": "Namespace defaults to the Gate's namespace."
+            }
+          },
+          "additionalProperties": false,
+          "type": "object",
+          "description": "FluxResource identifies one Flux object."
+        },
+        "type": "array",
+        "description": "Resources are the Flux objects to nudge — usually the GitRepository the\ncommit went to, and sometimes the Kustomization that consumes it."
+      },
+      "clusterRef": {
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "description": "ClusterRef names a Secret holding a kubeconfig for the cluster these\nresources live in. Empty is the cluster Hecate runs in.\n\nThe same field flux-wait and the Flux health check take, and it is here\nso a Gate can nudge the cluster it then waits on. Without it a remote\npromotion could be waited for but not prompted, so it moved at the remote\nFlux's own interval while the local one was nudged — the asymmetry showed\nup as remote environments simply being slower, for no reason anyone could\nsee in the Gate.\n\nThe namespace rule is not relaxed by crossing a cluster boundary: a step\nthat can annotate any namespace's Kustomization can trigger any tenant's\ndeployment, and that is as true remotely as locally."
+      }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "description": "FluxReconcileConfig is the `with:` block of a flux-reconcile step."
+  },
+  "flux-wait": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/olafkfreund/hecate/pkg/health/flux-config",
+    "properties": {
+      "resources": {
+        "items": {
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "apiVersion": {
+              "type": "string",
+              "description": "APIVersion overrides the default for Kind."
+            },
+            "name": {
+              "type": "string"
+            },
+            "namespace": {
+              "type": "string",
+              "description": "Namespace defaults to the Gate's namespace."
+            }
+          },
+          "additionalProperties": false,
+          "type": "object",
+          "description": "FluxResource identifies one Flux object."
+        },
+        "type": "array",
+        "description": "Resources are the Flux objects to assess."
+      },
+      "expectedRevision": {
+        "type": "string",
+        "description": "ExpectedRevision, when set, requires Flux to have applied this revision.\nUsually wired from an earlier step: ${{ steps.commit.sha }}."
+      },
+      "failAfter": {
+        "type": "string",
+        "description": "FailAfter is a Go duration bounding how long a resource may be un-Ready\nbefore it is reported Degraded rather than Progressing. Default 10m."
+      },
+      "clusterRef": {
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "description": "ClusterRef names a Secret holding a kubeconfig for the cluster these\nresources live in. Empty is the cluster Hecate runs in.\n\nThe namespace rule is unchanged by this: a Gate in `team-a` watching a\nremote cluster is still restricted to `team-a` there. Otherwise a\ncluster reference becomes the way around the tenant boundary (#85, D11)\n— add a kubeconfig, watch everything everywhere.\n\n+optional"
+      }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "description": "FluxConfig is the `with:` block of a Flux health check."
+  },
+  "git-clone": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/olafkfreund/hecate/pkg/passage/steps/git-clone-config",
+    "properties": {
+      "repo": {
+        "type": "string",
+        "description": "Repo is the repository to clone, as an HTTPS URL."
+      },
+      "branch": {
+        "type": "string",
+        "description": "Branch is what to check out. Empty clones the repository's default\nbranch; naming one also limits the clone to that branch alone."
+      },
+      "path": {
+        "type": "string",
+        "description": "Path is where the working tree goes, relative to the Passage work dir."
+      },
+      "depth": {
+        "type": "integer",
+        "description": "Depth limits history. Zero clones everything; 1 is enough to commit on\ntop of the tip and is much faster on a large repository."
+      },
+      "credentialsRef": {
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "description": "CredentialsRef names a Secret holding the credential to clone with. A\npublic repository needs none."
+      }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "description": "GitCloneConfig is the `with:` block of a git-clone step."
+  },
+  "git-commit": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/olafkfreund/hecate/pkg/passage/steps/git-commit-config",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Path is the checkout to commit in, relative to the Passage work dir."
+      },
+      "message": {
+        "type": "string",
+        "description": "Message is the commit message."
+      },
+      "paths": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array",
+        "description": "Paths limits what is staged. Empty stages every change."
+      },
+      "author": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "description": "Author defaults to Hecate itself."
+      },
+      "allowEmpty": {
+        "type": "boolean",
+        "description": "AllowEmpty commits even with no changes. Off by default: an empty commit\nusually means an earlier edit step did nothing, which is worth noticing\nrather than burying under a commit that changes no files."
+      }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "description": "GitCommitConfig is the `with:` block of a git-commit step."
+  },
+  "git-pull-request": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/olafkfreund/hecate/pkg/passage/steps/git-pull-request-config",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Path is the checkout to read the repository and base branch from,\nrelative to the Passage work dir."
+      },
+      "repo": {
+        "type": "string",
+        "description": "Repo overrides the repository URL. Empty reads it from the checkout's\norigin remote, which is where git-clone put it."
+      },
+      "provider": {
+        "type": "string",
+        "description": "Provider is `github` or `gitlab`. Empty is inferred from the host, which\nonly works for the public hosts — an appliance must say which it is."
+      },
+      "baseURL": {
+        "type": "string",
+        "description": "BaseURL is the API root, for GitHub Enterprise Server and self-managed\nGitLab."
+      },
+      "head": {
+        "type": "string",
+        "description": "Head is the branch to merge. Empty uses the branch git-push creates with\n`toNewBranch`, so the common flow needs no wiring."
+      },
+      "base": {
+        "type": "string",
+        "description": "Base is the branch to merge into. Empty uses the checked-out branch,\nwhich is the one git-clone was pointed at."
+      },
+      "title": {
+        "type": "string",
+        "description": "Title is the pull request's title. Empty is generated from the Passage."
+      },
+      "body": {
+        "type": "string",
+        "description": "Body is the description. Empty is generated from what is being promoted."
+      },
+      "labels": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array",
+        "description": "Labels are applied on creation. A label added later is not removed."
+      },
+      "waitForMerge": {
+        "type": "boolean",
+        "description": "WaitForMerge holds the Passage open until the pull request merges.\n\nA pointer so that not saying anything means true. A crossing that\nsucceeds the moment a pull request opens would mark the Bundle as having\ncleared the environment before any human looked at it, which is the\nopposite of what asking for review means."
+      },
+      "pollInterval": {
+        "properties": {
+          "Duration": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "description": "PollInterval overrides how often an open pull request is re-read."
+      },
+      "credentialsRef": {
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "description": "CredentialsRef names a Secret holding an API token, or a GitHub App's\nkeys. Opening a pull request needs API access, which push access alone\ndoes not give."
+      }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "description": "GitPullRequestConfig is the `with:` block of a git-pull-request step."
+  },
+  "git-push": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/olafkfreund/hecate/pkg/passage/steps/git-push-config",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Path is the checkout to push from, relative to the Passage work dir."
+      },
+      "branch": {
+        "type": "string",
+        "description": "Branch overrides the target branch. Empty pushes the checked-out branch."
+      },
+      "toNewBranch": {
+        "type": "boolean",
+        "description": "ToNewBranch pushes to a fresh branch named after the Passage, for flows\nthat open a pull request rather than committing to the trunk."
+      },
+      "force": {
+        "type": "boolean",
+        "description": "Force pushes even when the remote branch has moved on, discarding what is\nthere. Off by default, because on a shared branch that is someone else's\nwork."
+      },
+      "credentialsRef": {
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "description": "CredentialsRef names a Secret holding the credential to push with. Push\naccess, which is not the same thing as the API token a status or pull\nrequest needs."
+      }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "description": "GitPushConfig is the `with:` block of a git-push step."
+  },
+  "http": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/olafkfreund/hecate/pkg/passage/steps/http-config",
+    "properties": {
+      "url": {
+        "type": "string",
+        "description": "URL is what to call."
+      },
+      "method": {
+        "type": "string",
+        "description": "Method defaults to GET, or POST when a body is given."
+      },
+      "headers": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "type": "object",
+        "description": "Headers are sent as written. Put nothing secret here: a Gate is a normal\nobject that anyone with read access can see."
+      },
+      "secretHeaders": {
+        "items": {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "prefix": {
+              "type": "string",
+              "description": "Prefix goes in front of the secret value, for schemes like \"Bearer \"."
+            },
+            "secretRef": {
+              "properties": {
+                "name": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "type": "object"
+            },
+            "key": {
+              "type": "string",
+              "description": "Key in the Secret. Defaults to \"token\"."
+            }
+          },
+          "additionalProperties": false,
+          "type": "object",
+          "description": "SecretHeader is one header whose value comes from a Secret."
+        },
+        "type": "array",
+        "description": "SecretHeaders are read from Secrets at call time, which is where a token\nbelongs."
+      },
+      "body": {
+        "properties": {},
+        "additionalProperties": false,
+        "type": "object",
+        "description": "Body is sent as JSON."
+      },
+      "expectStatus": {
+        "items": {
+          "type": "integer"
+        },
+        "type": "array",
+        "description": "ExpectStatus lists acceptable status codes. Empty accepts any 2xx."
+      },
+      "successIf": {
+        "type": "string",
+        "description": "SuccessIf is a condition over `status`, `body` and `json`, evaluated\nafter the response arrives.\n\nWritten without `${{ }}`, because those are substituted before the step\nruns and there is no response yet at that point."
+      },
+      "timeout": {
+        "properties": {
+          "Duration": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "description": "Timeout bounds the call. Empty is 30 seconds, so a hung endpoint does not\nhold a worker."
+      }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "description": "HTTPConfig is the `with:` block of an http step."
+  },
+  "oci-pull": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/olafkfreund/hecate/pkg/passage/steps/oci-pull-config",
+    "properties": {
+      "repo": {
+        "type": "string",
+        "description": "Repo is the source repository."
+      },
+      "tag": {
+        "type": "string",
+        "description": "Tag or Digest identifies what to pull. A digest is exact; a tag can move."
+      },
+      "digest": {
+        "type": "string",
+        "description": "Digest pins exactly. Set this or Tag, not both."
+      },
+      "out": {
+        "type": "string",
+        "description": "Out is where to unpack it, relative to the Passage work dir."
+      },
+      "insecure": {
+        "type": "boolean",
+        "description": "Insecure allows a plain-HTTP registry. Always opt-in: falling back\nsilently would send registry credentials in clear."
+      },
+      "credentialsRef": {
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "description": "CredentialsRef names a Secret holding registry credentials. Empty uses the\nambient keychain, which is what a workload identity provides."
+      }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "description": "OCIPullConfig is the `with:` block of an oci-pull step."
+  },
+  "oci-push": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/olafkfreund/hecate/pkg/passage/steps/oci-push-config",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Path is the directory to package, relative to the Passage work dir."
+      },
+      "repo": {
+        "type": "string",
+        "description": "Repo is the target repository, e.g. ghcr.io/acme/manifests."
+      },
+      "tag": {
+        "type": "string",
+        "description": "Tag is what to publish it as."
+      },
+      "source": {
+        "type": "string",
+        "description": "Source and Revision are recorded as annotations, and are what an\nOCIRepository reports as the revision it applied — so this is what makes\na deployment traceable back to what produced it."
+      },
+      "revision": {
+        "type": "string",
+        "description": "Revision is what an OCIRepository reports as the revision it applied."
+      },
+      "insecure": {
+        "type": "boolean",
+        "description": "Insecure allows a plain-HTTP registry. Always opt-in: falling back\nsilently would send registry credentials in clear."
+      },
+      "credentialsRef": {
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "description": "CredentialsRef names a Secret holding registry credentials. Empty uses the\nambient keychain, which is what a workload identity provides."
+      }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "description": "OCIPushConfig is the `with:` block of an oci-push step."
+  },
+  "render-helm": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/olafkfreund/hecate/pkg/passage/steps/render-helm-config",
+    "properties": {
+      "chart": {
+        "type": "string",
+        "description": "Chart is the chart directory, relative to the Passage work dir.\n\nA directory in the checkout, not a repository reference: what is rendered\nhas to be what was reviewed, and a chart pulled at render time could\ndiffer between the pull request and the crossing."
+      },
+      "out": {
+        "type": "string",
+        "description": "Out is where to write the rendered YAML, relative to the work dir."
+      },
+      "valuesFiles": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array",
+        "description": "ValuesFiles are values files to apply in order, relative to the work dir."
+      },
+      "values": {
+        "description": "Values are inline values, applied last so a step can override a file."
+      },
+      "releaseName": {
+        "type": "string",
+        "description": "ReleaseName is the release the templates see as .Release.Name."
+      },
+      "namespace": {
+        "type": "string",
+        "description": "Namespace is what the templates see as .Release.Namespace. Empty uses the\nGate's own namespace, which is the usual intent."
+      },
+      "includeCRDs": {
+        "type": "boolean",
+        "description": "IncludeCRDs renders the chart's crds/ directory too. Off by default,\nmatching `helm template`."
+      },
+      "kubeVersion": {
+        "type": "string",
+        "description": "KubeVersion is what .Capabilities.KubeVersion reports. Empty uses Helm's\ndefault rather than the cluster's: rendering must not depend on which\ncluster the controller happens to be running in, or the same commit would\nrender differently in two places."
+      },
+      "apiVersions": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array",
+        "description": "APIVersions is what .Capabilities.APIVersions reports, for charts that\nbranch on whether an API is available."
+      }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "description": "RenderHelmConfig is the `with:` block of a render-helm step."
+  },
+  "render-kustomize": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/olafkfreund/hecate/pkg/passage/steps/render-kustomize-config",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Path is the kustomization directory, relative to the Passage work dir."
+      },
+      "out": {
+        "type": "string",
+        "description": "Out is where to write the rendered YAML, relative to the work dir. It is\na file, not a directory: the whole build is one document stream, and\nsplitting it per resource would make the git diff a rename storm the\nfirst time anything is reordered."
+      },
+      "loadRestrictionsNone": {
+        "type": "boolean",
+        "description": "LoadRestrictionsNone allows the kustomization to reference files outside\nits own directory.\n\nOff by default, matching kustomize's own default and Flux's: a build that\ncan read anywhere in the checkout can read a file the author did not mean\nto publish."
+      }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "description": "RenderKustomizeConfig is the `with:` block of a render-kustomize step."
+  },
+  "set-image": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/olafkfreund/hecate/pkg/passage/steps/set-image-config",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Path is the kustomization to edit, relative to the Passage work dir."
+      },
+      "image": {
+        "type": "string",
+        "description": "Image is the repository to repin, matched against the `name:` of an entry\nin the file's `images:` list."
+      },
+      "tag": {
+        "type": "string",
+        "description": "Tag and Digest are what to pin it to. Leave both empty to take them from\nthe Bundle being promoted, which is the usual case."
+      },
+      "digest": {
+        "type": "string",
+        "description": "Digest pins exactly, where a tag can be moved under you."
+      }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "description": "SetImageConfig is the `with:` block of a set-image step."
+  }
+}

@@ -43,6 +43,9 @@ type CommitStatusConfig struct {
 	// TargetURL is where a human goes for detail.
 	TargetURL string `json:"targetURL,omitempty"`
 
+	// CredentialsRef names a Secret holding an API token, or a GitHub App's
+	// keys. Required: reporting a status needs API access, which is not the
+	// same thing as push access.
 	CredentialsRef *v1alpha1.LocalSecretRef `json:"credentialsRef,omitempty"`
 }
 

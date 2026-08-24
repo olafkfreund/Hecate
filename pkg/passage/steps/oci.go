@@ -62,11 +62,14 @@ type OCIPushConfig struct {
 	// Source and Revision are recorded as annotations, and are what an
 	// OCIRepository reports as the revision it applied — so this is what makes
 	// a deployment traceable back to what produced it.
-	Source   string `json:"source,omitempty"`
+	Source string `json:"source,omitempty"`
+	// Revision is what an OCIRepository reports as the revision it applied.
 	Revision string `json:"revision,omitempty"`
 	// Insecure allows a plain-HTTP registry. Always opt-in: falling back
 	// silently would send registry credentials in clear.
-	Insecure       bool                     `json:"insecure,omitempty"`
+	Insecure bool `json:"insecure,omitempty"`
+	// CredentialsRef names a Secret holding registry credentials. Empty uses the
+	// ambient keychain, which is what a workload identity provides.
 	CredentialsRef *v1alpha1.LocalSecretRef `json:"credentialsRef,omitempty"`
 }
 
@@ -159,12 +162,17 @@ type OCIPullConfig struct {
 	// Repo is the source repository.
 	Repo string `json:"repo"`
 	// Tag or Digest identifies what to pull. A digest is exact; a tag can move.
-	Tag    string `json:"tag,omitempty"`
+	Tag string `json:"tag,omitempty"`
+	// Digest pins exactly. Set this or Tag, not both.
 	Digest string `json:"digest,omitempty"`
 	// Out is where to unpack it, relative to the Passage work dir.
 	Out string `json:"out"`
 
-	Insecure       bool                     `json:"insecure,omitempty"`
+	// Insecure allows a plain-HTTP registry. Always opt-in: falling back
+	// silently would send registry credentials in clear.
+	Insecure bool `json:"insecure,omitempty"`
+	// CredentialsRef names a Secret holding registry credentials. Empty uses the
+	// ambient keychain, which is what a workload identity provides.
 	CredentialsRef *v1alpha1.LocalSecretRef `json:"credentialsRef,omitempty"`
 }
 

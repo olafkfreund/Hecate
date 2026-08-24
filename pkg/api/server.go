@@ -62,6 +62,10 @@ func (s *Server) Handler() http.Handler {
 	// namespace list, so it is authenticated here and authorised in the handler.
 	mux.Handle("GET /api/v1alpha1/settings", s.authenticated(s.settings))
 
+	// The step catalogue and what each step's `with:` block accepts. Same answer
+	// in every namespace, so it is not addressed by one.
+	mux.Handle("GET /api/v1alpha1/steps", s.authenticated(s.stepSchemas))
+
 	// Every Gate the caller can see, in every namespace they can see it in.
 	// Authenticated rather than guarded: see the note on overview.
 	mux.Handle("GET /api/v1alpha1/overview", s.authenticated(s.overview))
