@@ -87,14 +87,24 @@ spec:
           resources: {{- toYaml .Values.resources | nindent 12 }}
           securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
           volumeMounts:
-            # The only writable path, which is what lets the root filesystem be
+            # Writable paths, which is what lets the root filesystem be
             # read-only. Contents are disposable (D19).
             - name: work
               mountPath: {{ .Values.hecate.workRoot }}
+            # Scratch space for code that needs a real file. The SSH host-key
+            # checker is one: golang.org/x/crypto parses known_hosts from a
+            # path, so a Secret carrying known_hosts is unusable without
+            # somewhere to write it — which made SSH git credentials fail on
+            # this chart's own hardened default.
+            - name: tmp
+              mountPath: /tmp
       volumes:
         - name: work
           emptyDir:
             sizeLimit: {{ .Values.hecate.workDirSizeLimit }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.hecate.tmpDirSizeLimit }}
       {{- with .Values.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}
       {{- end }}

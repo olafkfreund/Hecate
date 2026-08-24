@@ -46,6 +46,13 @@ hecate:
   workRoot: /var/lib/hecate/passages
   workDirSizeLimit: 1Gi
 
+  # /tmp, for code that needs a real file rather than a buffer. Small on
+  # purpose: nothing here is meant to be large or to outlive the step that
+  # wrote it. It exists because the root filesystem is read-only, and a
+  # hardened container with nowhere to write is one where SSH host-key
+  # verification cannot run.
+  tmpDirSizeLimit: 16Mi
+
   logLevel: info
   # json in production; console is only readable during development.
   logFormat: json
