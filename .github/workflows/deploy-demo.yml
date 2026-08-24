@@ -1,0 +1,152 @@
+name: Deploy demo
+
+# Puts main on the demo cluster, so what people are shown is what the code says
+# (#175 shipped and the portal kept serving the previous build until someone
+# noticed and rolled it by hand).
+#
+# **Why the demo and not production.** There is one environment here and it is a
+# showcase: disposable, holding nothing, and rebuilt from git. Anything with
+# users in it should get an approval gate before this workflow is pointed at it.
+#
+# **Why on push to main rather than on a tag.** Releases are tagged and that is
+# the path for the published image; the demo wants whatever main says, because
+# a demo that lags main shows people a product that no longer exists. Every
+# commit here has already passed the pull request checks.
+
+on:
+  push:
+    branches: [main]
+    # Documentation-only commits change nothing that runs. Deploying them costs
+    # a five-minute image build to roll out identical bytes.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit, branch or tag to deploy (default: main)'
+        required: false
+
+concurrency:
+  # One deploy at a time, and a queued one is superseded rather than run: the
+  # cluster only has a latest, so rolling out an older commit after a newer one
+  # would be a deploy that goes backwards.
+  group: deploy-demo
+  cancel-in-progress: true
+
+env:
+  CLUSTER: hecate-demo
+  AWS_REGION: eu-west-2
+  NAMESPACE: hecate-system
+  IMAGE: ghcr.io/${{ github.repository_owner }}/hecate-controller
+
+jobs:
+  deploy:
+    name: Build and roll out
+    # Never from a fork: this holds a credential to a real cluster, and a fork's
+    # push cannot reach it anyway. Said explicitly so the failure is a skip
+    # rather than a confusing permissions error.
+    if: github.repository == 'olafkfreund/Hecate'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # ghcr
+      id-token: write   # AWS, via OIDC
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      # The tag is the commit, so what is running can always be traced back to
+      # what produced it. `demo` moves as well, for anything that wants to say
+      # "whatever the demo is on" without knowing a sha.
+      - name: Name the image
+        id: name
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse --short HEAD)
+          echo "tag=${{ env.IMAGE }}:demo.$sha" >> "$GITHUB_OUTPUT"
+          echo "moving=${{ env.IMAGE }}:demo" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # amd64 only: the demo runs on one cluster whose nodes are amd64, and
+      # building the arm64 half would double the time to publish something
+      # nothing pulls. The release workflow builds both.
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.name.outputs.tag }}
+            ${{ steps.name.outputs.moving }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Assume the deploy role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::796973489124:role/hecate-github-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Reach the cluster
+        run: aws eks update-kubeconfig --name "$CLUSTER" --region "$AWS_REGION"
+
+      # set image rather than a chart upgrade, deliberately. The demo's
+      # Deployments carry cluster-specific configuration — Fides credentials,
+      # OIDC, the ingress host — that does not live in this repository, and a
+      # helm upgrade from these defaults would quietly drop it. Rolling the
+      # image changes the one thing a build changes.
+      - name: Roll out
+        run: |
+          set -euo pipefail
+          kubectl -n "$NAMESPACE" set image deploy/hecate controller=${{ steps.name.outputs.tag }}
+          kubectl -n "$NAMESPACE" set image deploy/hecate-api api=${{ steps.name.outputs.tag }}
+          kubectl -n "$NAMESPACE" rollout status deploy/hecate --timeout=5m
+          kubectl -n "$NAMESPACE" rollout status deploy/hecate-api --timeout=5m
+
+      # A rollout that "succeeded" and left the old pods serving is the failure
+      # this catches: rollout status is satisfied by the new ReplicaSet being
+      # ready, not by every pod running the image we asked for.
+      - name: Check every pod is on the new image
+        run: |
+          set -euo pipefail
+          want='${{ steps.name.outputs.tag }}'
+          running=$(kubectl -n "$NAMESPACE" get pods \
+            -o jsonpath='{range .items[*]}{.spec.containers[0].image}{"\n"}{end}' | sort -u)
+          echo "$running"
+          if [ "$running" != "$want" ]; then
+            echo "::error::pods are running $running, expected only $want"
+            exit 1
+          fi
+
+      # The rollout can succeed against a build that cannot serve. This is the
+      # cheapest thing that fails when it has, and it goes in the front door —
+      # so it covers the ingress and its certificate as well as the app.
+      #
+      # From the runner rather than a pod in the cluster: an in-cluster check
+      # would need permission to create pods, and a deploy credential that can
+      # run a container is a much larger thing to leave in CI than one that can
+      # change an image.
+      - name: Ask the portal what it is
+        run: |
+          set -euo pipefail
+          host=$(kubectl -n "$NAMESPACE" get ingress -o jsonpath='{.items[0].spec.rules[0].host}')
+          if [ -z "$host" ]; then
+            echo "no ingress on the demo — skipping the front-door check"
+            exit 0
+          fi
+          echo "checking https://$host/healthz"
+          body=$(curl -sS --fail --max-time 30 --retry 5 --retry-delay 5 \
+            --retry-all-errors "https://$host/healthz")
+          echo "$body"
+          echo "$body" | grep -q '"status":"ok"'
