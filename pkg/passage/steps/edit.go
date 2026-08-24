@@ -447,7 +447,8 @@ type SetImageConfig struct {
 	Image string `json:"image"`
 	// Tag and Digest are what to pin it to. Leave both empty to take them from
 	// the Bundle being promoted, which is the usual case.
-	Tag    string `json:"tag,omitempty"`
+	Tag string `json:"tag,omitempty"`
+	// Digest pins exactly, where a tag can be moved under you.
 	Digest string `json:"digest,omitempty"`
 }
 

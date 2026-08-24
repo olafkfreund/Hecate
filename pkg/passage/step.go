@@ -242,6 +242,19 @@ type ConfigChecker interface {
 	CheckConfig(raw json.RawMessage) error
 }
 
+// ConfigDescriber is implemented by a step that can name the Go type its
+// `with:` block decodes into.
+//
+// It exists so a schema can be generated from the same struct CheckConfig
+// decodes into, rather than written by hand beside it. A hand-written schema is
+// one that drifts, and it would drift silently: nothing fails when a form
+// offers a field the step does not read.
+//
+// Returns a zero value, used for its type only.
+type ConfigDescriber interface {
+	ConfigType() any
+}
+
 // StepProblem is one thing wrong with a Gate's step list.
 type StepProblem struct {
 	// Index is the step's position, which is how an author finds it: steps have

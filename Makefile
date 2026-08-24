@@ -124,6 +124,10 @@ generate: ## Regenerate deepcopy, CRDs and RBAC from the API and controller mark
 	@# drifted once already, silently, because nothing validates a response
 	@# against a schema in the browser.
 	go run ./cmd/apishape > ui/test/apishape.json
+	@# A JSON Schema per step, generated from the same config structs CheckConfig
+	@# decodes into (#114). Committed rather than reflected at runtime: the field
+	@# descriptions are the Go doc comments, and reading those needs the source.
+	go run ./cmd/stepschema > pkg/passage/steps/schemas.json
 
 build: ## Build the controller and the CLI
 	go build -o bin/hecate-controller ./cmd/hecate-controller

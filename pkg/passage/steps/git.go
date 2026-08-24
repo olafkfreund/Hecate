@@ -126,13 +126,18 @@ func openRepo(dir string) (*git.Repository, error) {
 
 // GitCloneConfig is the `with:` block of a git-clone step.
 type GitCloneConfig struct {
-	Repo   string `json:"repo"`
+	// Repo is the repository to clone, as an HTTPS URL.
+	Repo string `json:"repo"`
+	// Branch is what to check out. Empty clones the repository's default
+	// branch; naming one also limits the clone to that branch alone.
 	Branch string `json:"branch,omitempty"`
 	// Path is where the working tree goes, relative to the Passage work dir.
 	Path string `json:"path,omitempty"`
 	// Depth limits history. Zero clones everything; 1 is enough to commit on
 	// top of the tip and is much faster on a large repository.
-	Depth          int                      `json:"depth,omitempty"`
+	Depth int `json:"depth,omitempty"`
+	// CredentialsRef names a Secret holding the credential to clone with. A
+	// public repository needs none.
 	CredentialsRef *v1alpha1.LocalSecretRef `json:"credentialsRef,omitempty"`
 }
 
@@ -233,7 +238,9 @@ func (g *GitClone) obtain(
 
 // GitCommitConfig is the `with:` block of a git-commit step.
 type GitCommitConfig struct {
-	Path    string `json:"path,omitempty"`
+	// Path is the checkout to commit in, relative to the Passage work dir.
+	Path string `json:"path,omitempty"`
+	// Message is the commit message.
 	Message string `json:"message"`
 	// Paths limits what is staged. Empty stages every change.
 	Paths []string `json:"paths,omitempty"`
@@ -393,13 +400,20 @@ func signature(author *GitAuthor, startedAt time.Time) *object.Signature {
 
 // GitPushConfig is the `with:` block of a git-push step.
 type GitPushConfig struct {
+	// Path is the checkout to push from, relative to the Passage work dir.
 	Path string `json:"path,omitempty"`
 	// Branch overrides the target branch. Empty pushes the checked-out branch.
 	Branch string `json:"branch,omitempty"`
 	// ToNewBranch pushes to a fresh branch named after the Passage, for flows
 	// that open a pull request rather than committing to the trunk.
-	ToNewBranch    bool                     `json:"toNewBranch,omitempty"`
-	Force          bool                     `json:"force,omitempty"`
+	ToNewBranch bool `json:"toNewBranch,omitempty"`
+	// Force pushes even when the remote branch has moved on, discarding what is
+	// there. Off by default, because on a shared branch that is someone else's
+	// work.
+	Force bool `json:"force,omitempty"`
+	// CredentialsRef names a Secret holding the credential to push with. Push
+	// access, which is not the same thing as the API token a status or pull
+	// request needs.
 	CredentialsRef *v1alpha1.LocalSecretRef `json:"credentialsRef,omitempty"`
 }
 
