@@ -105,7 +105,7 @@ func TestCommitStatusHonoursAnExplicitState(t *testing.T) {
 // An unknown state is a Gate that will never work. Refusing at admission beats
 // discovering it after the commit is already pushed.
 func TestCommitStatusRefusesAnUnknownStateAtAdmission(t *testing.T) {
-	err := NewCommitStatus(nil).Check([]byte(`{"state":"Greenish"}`))
+	err := NewCommitStatus(nil).CheckConfig([]byte(`{"state":"Greenish"}`))
 	if err == nil || !strings.Contains(err.Error(), "Greenish") {
 		t.Fatalf("err = %v, want one naming the bad state", err)
 	}
