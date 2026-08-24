@@ -2,16 +2,16 @@
 
 import { CircleAlert, CircleCheck, Eye, Package, PauseCircle, Timer } from "lucide-react";
 import { api, type Beacon, type WatchSource } from "@/lib/api";
-import { Panel, useLiveApi, useNamespace } from "@/components/loader";
+import { Panel, useLiveAll } from "@/components/loader";
+import { NamespaceGroups } from "@/components/groups";
 import { Card, Grid, Meta, Note, Pill, ago } from "@/components/card";
 import { useQueryParam } from "@/lib/browser";
 import { BeaconDetail } from "./detail";
 
 export default function Beacons() {
-  const ns = useNamespace();
   const selected = useQueryParam("name", "");
   if (selected) return <BeaconDetail />;
-  return <BeaconList ns={ns} />;
+  return <BeaconList />;
 }
 
 /**
@@ -32,8 +32,8 @@ export function describeWatch(w: WatchSource): string {
   return "unknown source";
 }
 
-function BeaconList({ ns }: { ns: string }) {
-  const state = useLiveApi(() => api.beacons(ns), [ns]);
+function BeaconList() {
+  const state = useLiveAll(() => api.beacons(), []);
 
   return (
     <div>
@@ -44,20 +44,30 @@ function BeaconList({ ns }: { ns: string }) {
 
       <div className="mt-6">
         <Panel state={state}>
-          {(beacons) =>
-            beacons.length === 0 ? (
-              <p className="text-sm text-[var(--muted-foreground)]">
-                No Beacons in <code>{ns}</code>. Nothing here emits Bundles, so no Gate has
-                anything to admit.
-              </p>
-            ) : (
-              <Grid>
-                {beacons.map((b: Beacon) => (
-                  <BeaconCard key={b.metadata.name} beacon={b} namespace={ns} />
-                ))}
-              </Grid>
-            )
-          }
+          {(beacons) => (
+            <NamespaceGroups
+              items={beacons}
+              namespaceOf={(b: Beacon) => b.metadata.namespace}
+              empty={
+                <p className="text-sm text-[var(--muted-foreground)]">
+                  No Beacons anywhere you can read. Nothing emits Bundles, so no
+                  Gate has anything to admit.
+                </p>
+              }
+            >
+              {(group) => (
+                <Grid>
+                  {group.map((b: Beacon) => (
+                    <BeaconCard
+                      key={`${b.metadata.namespace}/${b.metadata.name}`}
+                      beacon={b}
+                      namespace={b.metadata.namespace}
+                    />
+                  ))}
+                </Grid>
+              )}
+            </NamespaceGroups>
+          )}
         </Panel>
       </div>
     </div>

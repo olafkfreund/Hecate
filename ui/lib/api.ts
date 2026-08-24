@@ -319,6 +319,8 @@ const base = (ns: string) => `/api/v1alpha1/namespaces/${encodeURIComponent(ns)}
 export type AuditEntry = {
   at: string;
   kind: "crossed" | "refused" | "running" | "approved";
+  /** Which namespace it happened in. A Gate name is not unique across them. */
+  namespace: string;
   gate: string;
   bundle?: string;
   digest?: string;
@@ -385,7 +387,14 @@ export const api = {
    * mean the page quietly disagreeing with itself depending on what was still
    * in the cluster when it loaded.
    */
-  audit: (ns: string) => get<AuditEntry[]>(`${base(ns)}/audit`),
+  /**
+   * audit is what happened, newest first, across every namespace you can read.
+   *
+   * Not per-namespace: an audit answers "what happened", and making that a
+   * question about one namespace at a time meant you could only ask it about a
+   * place you had already guessed.
+   */
+  audit: () => get<AuditEntry[]>("/api/v1alpha1/audit"),
   grants: () => get<{ grants: Grant[] }>("/api/v1alpha1/rbac/grants"),
 
   /**
@@ -416,7 +425,15 @@ export const api = {
   setEvidence: (ns: string, gate: string, body: { serverURL: string; fidesEnvironment: string; credentialsRef?: string }) =>
     put<{ gate: string; note: string }>(`${base(ns)}/gates/${encodeURIComponent(gate)}/evidence`, body),
 
-  gates: (ns: string) => get<Gate[]>(`${base(ns)}/gates`),
+  /**
+   * gates, bundles, beacons and passages are every one you can read, grouped by
+   * namespace by the server.
+   *
+   * One call rather than a request per namespace: the cost of a cluster-wide
+   * List is the same whether you can see one namespace or forty, while a loop
+   * would make the page slower the more of the cluster you are trusted with.
+   */
+  gates: () => get<Gate[]>("/api/v1alpha1/gates"),
   gate: (ns: string, name: string) => get<Gate>(`${base(ns)}/gates/${encodeURIComponent(name)}`),
   explain: (ns: string, name: string) =>
     get<Explanation>(`${base(ns)}/gates/${encodeURIComponent(name)}/explain`),
@@ -455,16 +472,16 @@ export const api = {
       `${base(ns)}/gates/${encodeURIComponent(gate)}/flux/reconcile`,
       { kind, name },
     ),
-  bundles: (ns: string) => get<Bundle[]>(`${base(ns)}/bundles`),
+  bundles: () => get<Bundle[]>("/api/v1alpha1/bundles"),
   bundle: (ns: string, name: string) =>
     get<Bundle>(`${base(ns)}/bundles/${encodeURIComponent(name)}`),
   evidence: (ns: string, name: string) =>
     get<Evidence>(`${base(ns)}/bundles/${encodeURIComponent(name)}/evidence`),
-  passages: (ns: string) => get<Passage[]>(`${base(ns)}/passages`),
+  passages: () => get<Passage[]>("/api/v1alpha1/passages"),
   passage: (ns: string, name: string) =>
     get<Passage>(`${base(ns)}/passages/${encodeURIComponent(name)}`),
 
-  beacons: (ns: string) => get<Beacon[]>(`${base(ns)}/beacons`),
+  beacons: () => get<Beacon[]>("/api/v1alpha1/beacons"),
   beacon: (ns: string, name: string) =>
     get<Beacon>(`${base(ns)}/beacons/${encodeURIComponent(name)}`),
 

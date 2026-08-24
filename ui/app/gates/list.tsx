@@ -2,15 +2,15 @@
 
 import { CircleDot, Clock, PauseCircle, Zap } from "lucide-react";
 import { api, type Gate } from "@/lib/api";
-import { Panel, useLiveApi, useNamespace } from "@/components/loader";
+import { Panel, useLiveAll } from "@/components/loader";
+import { NamespaceGroups } from "@/components/groups";
 import { HealthDot, healthEdge } from "@/components/health";
 import { PipelineGraph } from "@/components/graph";
 import { Card, Grid, Meta, Note, Pill, ago } from "@/components/card";
 
 /** Every Gate in one namespace: the pipeline, then each Gate in detail. */
 export function GateList() {
-  const ns = useNamespace();
-  const state = useLiveApi(() => api.gates(ns), [ns]);
+  const state = useLiveAll(() => api.gates(), []);
 
   return (
     <div>
@@ -21,22 +21,38 @@ export function GateList() {
 
       <div className="mt-6">
         <Panel state={state}>
-          {(gates) =>
-            gates.length === 0 ? (
-              <p className="text-sm text-[var(--muted-foreground)]">
-                No Gates in <code>{ns}</code>.
-              </p>
-            ) : (
-              <div className="space-y-8">
-                <PipelineGraph gates={gates} namespace={ns} />
-                <Grid>
-                  {gates.map((g: Gate) => (
-                    <GateCard key={g.metadata.name} gate={g} namespace={ns} />
-                  ))}
-                </Grid>
-              </div>
-            )
-          }
+          {(gates) => (
+            <NamespaceGroups
+              items={gates}
+              namespaceOf={(g: Gate) => g.metadata.namespace}
+              empty={
+                <p className="text-sm text-[var(--muted-foreground)]">
+                  No Gates anywhere you can read. Either none exist yet, or your
+                  Kubernetes user cannot see the namespaces holding them — Hecate
+                  does not decide this; the cluster does.
+                </p>
+              }
+            >
+              {(group, namespace) => (
+                <div className="space-y-6">
+                  {/* One pipeline per namespace, not one for the cluster: a
+                      Gate's `after` names Gates beside it, so a single diagram
+                      spanning namespaces would draw a flow that does not
+                      exist. */}
+                  <PipelineGraph gates={group} namespace={namespace} />
+                  <Grid>
+                    {group.map((g: Gate) => (
+                      <GateCard
+                        key={`${g.metadata.namespace}/${g.metadata.name}`}
+                        gate={g}
+                        namespace={g.metadata.namespace}
+                      />
+                    ))}
+                  </Grid>
+                </div>
+              )}
+            </NamespaceGroups>
+          )}
         </Panel>
       </div>
     </div>

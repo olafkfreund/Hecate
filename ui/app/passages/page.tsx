@@ -2,20 +2,20 @@
 
 import { CircleCheck, CircleX, Clock, ListChecks, Loader2, OctagonX, Timer, User } from "lucide-react";
 import { api, type Passage } from "@/lib/api";
-import { Panel, useLiveApi, useNamespace } from "@/components/loader";
+import { Panel, useLiveAll } from "@/components/loader";
+import { NamespaceGroups } from "@/components/groups";
 import { useQueryParam } from "@/lib/browser";
 import { took } from "@/lib/timeline";
 import { Card, Meta, Note, Pill, Rows, ago } from "@/components/card";
 import { PassageDetail } from "./detail";
 
 export default function Passages() {
-  const ns = useNamespace();
   const selected = useQueryParam("name", "");
   // One route, two views — the same shape as Bundles, and for the same reason:
   // a static export cannot have /passages/[name] without knowing every Passage
   // name at build time, and they are generated per crossing.
   if (selected) return <PassageDetail />;
-  return <PassageList ns={ns} />;
+  return <PassageList />;
 }
 
 /** The colour and word for each Passage phase. */
@@ -27,8 +27,8 @@ const phases: Record<string, { tone: "good" | "bad" | "busy" | "warn" | "quiet";
   Pending: { tone: "quiet", Icon: Clock },
 };
 
-function PassageList({ ns }: { ns: string }) {
-  const state = useLiveApi(() => api.passages(ns), [ns]);
+function PassageList() {
+  const state = useLiveAll(() => api.passages(), []);
 
   return (
     <div>
@@ -39,21 +39,32 @@ function PassageList({ ns }: { ns: string }) {
 
       <div className="mt-6">
         <Panel state={state}>
-          {(passages) =>
-            passages.length === 0 ? (
-              <p className="text-sm text-[var(--muted-foreground)]">
-                No Passages in <code>{ns}</code>.
-              </p>
-            ) : (
-              // One column, not a grid: a failure message is a paragraph, and
-              // three of them side by side is three columns of small print.
-              <Rows>
-                {passages.map((p: Passage) => (
-                  <PassageCard key={p.metadata.name} passage={p} namespace={ns} />
-                ))}
-              </Rows>
-            )
-          }
+          {(passages) => (
+            <NamespaceGroups
+              items={passages}
+              namespaceOf={(p: Passage) => p.metadata.namespace}
+              empty={
+                <p className="text-sm text-[var(--muted-foreground)]">
+                  No Passages anywhere you can read. Nothing has attempted a
+                  crossing yet.
+                </p>
+              }
+            >
+              {(group) => (
+                // One column, not a grid: a failure message is a paragraph, and
+                // three of them side by side is three columns of small print.
+                <Rows>
+                  {group.map((p: Passage) => (
+                    <PassageCard
+                      key={`${p.metadata.namespace}/${p.metadata.name}`}
+                      passage={p}
+                      namespace={p.metadata.namespace}
+                    />
+                  ))}
+                </Rows>
+              )}
+            </NamespaceGroups>
+          )}
         </Panel>
       </div>
     </div>

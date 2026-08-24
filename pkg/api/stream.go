@@ -77,6 +77,38 @@ func (s *Server) stream(action Action, h streamHandler) http.Handler {
 	})
 }
 
+// streamAuthenticated is stream for a route with no namespace in its path.
+//
+// Authorising would mean asking "may you read cluster-wide?", which is the trap
+// overview and the cluster-wide lists both avoid: a team-scoped operator has no
+// reason to hold that right, and refusing them live updates on their own pages
+// would be precisely backwards.
+//
+// Safe because of what the stream is. It carries a notification and never a
+// resource, so the page refetches through the filtered endpoints and sees only
+// what it may. What a caller can infer from this is "something, somewhere,
+// changed" — no name, no namespace, no count — which is the same inference the
+// existing per-namespace stream already grants for one namespace.
+func (s *Server) streamAuthenticated(h streamHandler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authCtx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+
+		subject, err := s.Auth.Authenticate(authCtx, r)
+		if err != nil {
+			if errors.Is(err, ErrUnauthenticated) {
+				w.Header().Set("WWW-Authenticate", `Bearer realm="hecate"`)
+				writeError(w, http.StatusUnauthorized, "authentication required")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		h(r.Context(), subject, w, r)
+	})
+}
+
 // watchNamespace tells a browser when something in a namespace has changed, so
 // a page can reload itself instead of being reloaded by hand.
 //

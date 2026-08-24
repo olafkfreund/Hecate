@@ -3,7 +3,8 @@
 import { ArrowRight, CheckCircle2, Clock, ShieldCheck, XCircle } from "lucide-react";
 
 import { api, AuditEntry } from "@/lib/api";
-import { Panel, useLiveApi, useNamespace } from "@/components/loader";
+import { Panel, useLiveAll } from "@/components/loader";
+import { NamespaceTag } from "@/components/groups";
 
 /**
  * The audit trail: what happened, to what, on whose say-so, and against which
@@ -15,20 +16,19 @@ import { Panel, useLiveApi, useNamespace } from "@/components/loader";
  * usually the question being asked when someone opens it.
  */
 export default function AuditPage() {
-  const namespace = useNamespace();
   // Panel and useApi rather than this page's own loading state, which is what
   // it had: the sign-in prompt, the forbidden explanation and the error box all
   // live in Panel, so a page loading by hand shows raw error text to someone
   // whose session merely expired — a dead end on the one page an auditor is
   // most likely to arrive at cold.
-  const state = useLiveApi(() => api.audit(namespace), [namespace]);
+  const state = useLiveAll(() => api.audit(), []);
 
   return (
     <div className="space-y-6">
       <header>
         <h1 className="text-2xl font-semibold">Audit</h1>
         <p className="text-[var(--muted-foreground)]">
-          Every crossing, refusal and approval in {namespace}, newest first.
+          Every crossing, refusal and approval you can see, newest first.
         </p>
       </header>
 
@@ -36,17 +36,22 @@ export default function AuditPage() {
         {(entries: AuditEntry[]) =>
           entries.length === 0 ? (
             <p className="text-[var(--muted-foreground)]">
-              Nothing has crossed a Gate in {namespace} yet.
+              Nothing has crossed a Gate anywhere you can read yet.
             </p>
           ) : (
             <ol className="space-y-3">
               {entries.map((e, i) => (
                 <li
-                  key={`${e.passage ?? e.bundle}-${e.at}-${i}`}
+                  key={`${e.namespace}/${e.passage ?? e.bundle}-${e.at}-${i}`}
                   className="rounded-lg border border-[var(--border)] p-3"
                 >
+                  {/* Tagged rather than grouped, unlike every other list: this
+                      page is ordered by time, and time is the question it
+                      answers. Grouping by namespace would sort the answer into
+                      piles that each have to be read separately. */}
                   <div className="flex flex-wrap items-center gap-2">
                     <Marker kind={e.kind} />
+                    <NamespaceTag namespace={e.namespace} />
                     <span className="font-medium">{e.bundle ?? "—"}</span>
                     <ArrowRight className="size-4 text-[var(--muted-foreground)]" aria-hidden />
                     <span className="font-medium">{e.gate}</span>

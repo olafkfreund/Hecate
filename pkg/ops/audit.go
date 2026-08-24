@@ -31,10 +31,14 @@ const (
 
 // AuditEntry is one thing that happened, in terms an auditor asks about.
 type AuditEntry struct {
-	At     metav1.Time `json:"at"`
-	Kind   AuditKind   `json:"kind"`
-	Gate   string      `json:"gate"`
-	Bundle string      `json:"bundle,omitempty"`
+	At   metav1.Time `json:"at"`
+	Kind AuditKind   `json:"kind"`
+	// Namespace is which one this happened in. Carried on every entry because
+	// an audit spanning namespaces has no other way to say, and a Gate name is
+	// not unique across them.
+	Namespace string `json:"namespace"`
+	Gate      string `json:"gate"`
+	Bundle    string `json:"bundle,omitempty"`
 	// Digest is what actually shipped. The Bundle name is a label; this is the
 	// content address, and it is the only field that answers "which bits".
 	Digest string `json:"digest,omitempty"`
@@ -80,10 +84,15 @@ func (o *Ops) Audit(ctx context.Context, namespace string) ([]AuditEntry, error)
 		return nil, err
 	}
 
-	// Passages indexed by name so a history entry can borrow their detail.
+	// Passages indexed by namespace and name so a history entry can borrow
+	// their detail. Keyed by both because this may be listing every namespace
+	// at once, where two Gates can each have a Passage of the same name and a
+	// name-only index would lend one namespace's evidence to another's
+	// crossing.
+	key := func(namespace, name string) string { return namespace + "/" + name }
 	byName := make(map[string]*v1alpha1.Passage, len(passages))
 	for i := range passages {
-		byName[passages[i].Name] = &passages[i]
+		byName[key(passages[i].Namespace, passages[i].Name)] = &passages[i]
 	}
 
 	entries := []AuditEntry{}
@@ -93,7 +102,8 @@ func (o *Ops) Audit(ctx context.Context, namespace string) ([]AuditEntry, error)
 		g := &gates[i]
 		for _, occ := range g.Status.History {
 			e := AuditEntry{
-				At: occ.EnteredAt, Kind: AuditCrossed, Gate: g.Name,
+				At: occ.EnteredAt, Kind: AuditCrossed,
+				Namespace: g.Namespace, Gate: g.Name,
 				Bundle: occ.Bundle, Digest: occ.Digest, Actor: occ.Actor,
 				Passage: occ.Passage, Verified: occ.Verified,
 			}
@@ -101,11 +111,11 @@ func (o *Ops) Audit(ctx context.Context, namespace string) ([]AuditEntry, error)
 			// a crossing whose Passage has aged out keeps the fact and loses
 			// the link. Saying less is better than implying the link was never
 			// there.
-			if p := byName[occ.Passage]; p != nil {
+			if p := byName[key(g.Namespace, occ.Passage)]; p != nil {
 				e.Evidence = p.Status.Evidence
 			}
 			if occ.Passage != "" {
-				recorded[occ.Passage] = struct{}{}
+				recorded[key(g.Namespace, occ.Passage)] = struct{}{}
 			}
 			entries = append(entries, e)
 		}
@@ -113,12 +123,13 @@ func (o *Ops) Audit(ctx context.Context, namespace string) ([]AuditEntry, error)
 
 	for i := range passages {
 		p := &passages[i]
-		if _, done := recorded[p.Name]; done {
+		if _, done := recorded[key(p.Namespace, p.Name)]; done {
 			// Already present from history, with the outcome the Gate recorded.
 			continue
 		}
 		e := AuditEntry{
-			Gate: p.Spec.Gate, Bundle: p.Spec.Bundle, Actor: p.Spec.Actor,
+			Namespace: p.Namespace,
+			Gate:      p.Spec.Gate, Bundle: p.Spec.Bundle, Actor: p.Spec.Actor,
 			Passage: p.Name, Detail: p.Status.Message, Evidence: p.Status.Evidence,
 		}
 		switch p.Status.Phase {
@@ -145,7 +156,8 @@ func (o *Ops) Audit(ctx context.Context, namespace string) ([]AuditEntry, error)
 		b := &bundles[i]
 		for _, a := range b.Status.ApprovedFor {
 			entries = append(entries, AuditEntry{
-				At: a.At, Kind: AuditApproved, Gate: a.Gate,
+				At: a.At, Kind: AuditApproved,
+				Namespace: b.Namespace, Gate: a.Gate,
 				Bundle: b.Name, Digest: b.Spec.Digest, Actor: a.Actor,
 			})
 		}

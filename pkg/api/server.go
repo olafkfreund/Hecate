@@ -66,6 +66,16 @@ func (s *Server) Handler() http.Handler {
 	// in every namespace, so it is not addressed by one.
 	mux.Handle("GET /api/v1alpha1/steps", s.authenticated(s.stepSchemas))
 
+	// Cluster-wide lists: every namespace the caller can read, in one call.
+	// What the screens use, now that they show everything rather than one
+	// namespace picked from a list. See clusterwide.go for why these are
+	// authenticated rather than guarded.
+	mux.Handle("GET /api/v1alpha1/gates", s.authenticated(s.allGates))
+	mux.Handle("GET /api/v1alpha1/bundles", s.authenticated(s.allBundles))
+	mux.Handle("GET /api/v1alpha1/beacons", s.authenticated(s.allBeacons))
+	mux.Handle("GET /api/v1alpha1/passages", s.authenticated(s.allPassages))
+	mux.Handle("GET /api/v1alpha1/audit", s.authenticated(s.allAudit))
+
 	// Every Gate the caller can see, in every namespace they can see it in.
 	// Authenticated rather than guarded: see the note on overview.
 	mux.Handle("GET /api/v1alpha1/overview", s.authenticated(s.overview))
@@ -103,6 +113,11 @@ func (s *Server) Handler() http.Handler {
 	// because that is what it lets you infer.
 	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/watch",
 		s.stream(ActionRead, s.watchNamespace))
+
+	// The same stream, cluster-wide: "something you can see changed". The
+	// handler needs no variant — PathValue("namespace") is "" on this route,
+	// and an empty namespace is already how a List means every namespace.
+	mux.Handle("GET /api/v1alpha1/watch", s.streamAuthenticated(s.watchNamespace))
 
 	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/passages",
 		s.guard(ActionRead, s.listPassages))
