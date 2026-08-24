@@ -2,23 +2,23 @@
 
 import { Boxes, CircleCheck, CircleX, Clock, ShieldCheck } from "lucide-react";
 import { api, type Bundle } from "@/lib/api";
-import { Panel, useLiveApi, useNamespace } from "@/components/loader";
+import { Panel, useLiveAll } from "@/components/loader";
 import { Card, Grid, Meta, Note, Pill, ago } from "@/components/card";
+import { NamespaceGroups } from "@/components/groups";
 import { useQueryParam } from "@/lib/browser";
 import { BundleDetail } from "./detail";
 
 export default function Bundles() {
-  const ns = useNamespace();
   const selected = useQueryParam("name", "");
   // One route, two views. A static export cannot have /bundles/[name] without
   // knowing every Bundle at build time, and Bundle names are content
   // addresses — there is no knowing them.
   if (selected) return <BundleDetail />;
-  return <BundleList ns={ns} />;
+  return <BundleList />;
 }
 
-function BundleList({ ns }: { ns: string }) {
-  const state = useLiveApi(() => api.bundles(ns), [ns]);
+function BundleList() {
+  const state = useLiveAll(() => api.bundles(), []);
 
   return (
     <div>
@@ -29,19 +29,30 @@ function BundleList({ ns }: { ns: string }) {
 
       <div className="mt-6">
         <Panel state={state}>
-          {(bundles) =>
-            bundles.length === 0 ? (
-              <p className="text-sm text-[var(--muted-foreground)]">
-                No Bundles in <code>{ns}</code>.
-              </p>
-            ) : (
-              <Grid>
-                {bundles.map((b: Bundle) => (
-                  <BundleCard key={b.metadata.name} bundle={b} namespace={ns} />
-                ))}
-              </Grid>
-            )
-          }
+          {(bundles) => (
+            <NamespaceGroups
+              items={bundles}
+              namespaceOf={(b: Bundle) => b.metadata.namespace}
+              empty={
+                <p className="text-sm text-[var(--muted-foreground)]">
+                  No Bundles anywhere you can read. Either none exist yet, or your
+                  Kubernetes user cannot see the namespaces holding them.
+                </p>
+              }
+            >
+              {(group) => (
+                <Grid>
+                  {group.map((b: Bundle) => (
+                    <BundleCard
+                      key={`${b.metadata.namespace}/${b.metadata.name}`}
+                      bundle={b}
+                      namespace={b.metadata.namespace}
+                    />
+                  ))}
+                </Grid>
+              )}
+            </NamespaceGroups>
+          )}
         </Panel>
       </div>
     </div>

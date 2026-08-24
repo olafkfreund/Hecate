@@ -8,6 +8,7 @@ const entries: AuditEntry[] = [
   {
     at: "2026-08-20T10:00:00Z",
     kind: "refused",
+    namespace: "acme",
     gate: "production",
     bundle: "podinfo-6b2",
     detail: "change gate held: risk 71",
@@ -16,6 +17,7 @@ const entries: AuditEntry[] = [
   {
     at: "2026-08-20T09:00:00Z",
     kind: "crossed",
+    namespace: "acme",
     gate: "staging",
     bundle: "podinfo-6b2",
     actor: "ada@example.com",

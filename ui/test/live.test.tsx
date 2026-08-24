@@ -77,7 +77,24 @@ describe("live updates", () => {
     await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
   });
 
-  it("watches the namespace on screen, not some other one", async () => {
+  // A list page spans every namespace, so it watches every namespace. Watching
+  // one would leave it stale whenever anything moved anywhere else — and the
+  // failure would be invisible, because a page that quietly stops updating
+  // looks exactly like a page where nothing has happened.
+  it("watches every namespace, not one of them", async () => {
+    withEventSource();
+    window.history.replaceState({}, "", "/passages/");
+    vi.spyOn(api, "passages").mockResolvedValue([]);
+
+    render(<Passages />);
+
+    await waitFor(() => expect(FakeEventSource.opened.length).toBe(1));
+    expect(FakeEventSource.opened[0]).toBe("/api/v1alpha1/watch");
+  });
+
+  // A stale `?namespace=` in someone's bookmark must not narrow what they see:
+  // the pages no longer take one, so a leftover parameter is not an instruction.
+  it("ignores a namespace left in the URL", async () => {
     withEventSource();
     window.history.replaceState({}, "", "/passages/?namespace=team-b");
     vi.spyOn(api, "passages").mockResolvedValue([]);
@@ -85,7 +102,7 @@ describe("live updates", () => {
     render(<Passages />);
 
     await waitFor(() => expect(FakeEventSource.opened.length).toBe(1));
-    expect(FakeEventSource.opened[0]).toContain("/namespaces/team-b/watch");
+    expect(FakeEventSource.opened[0]).not.toContain("team-b");
   });
 
   it("closes the stream when the page goes away", async () => {

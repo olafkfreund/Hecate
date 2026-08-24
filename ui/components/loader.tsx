@@ -58,6 +58,19 @@ export function useLiveApi<T>(load: () => Promise<T>, deps: unknown[]): State<T>
   return useApi(load, [...deps, changes]);
 }
 
+/**
+ * useLiveAll is useLiveApi for a page that spans every namespace.
+ *
+ * Which is most of them: the list pages show the whole cluster the viewer can
+ * read, so watching one namespace would leave them stale whenever anything
+ * moved anywhere else — the failure being invisible, because a page that
+ * quietly stops updating looks exactly like a page where nothing happened.
+ */
+export function useLiveAll<T>(load: () => Promise<T>, deps: unknown[]): State<T> {
+  const changes = useLive();
+  return useApi(load, [...deps, changes]);
+}
+
 /** Panel renders loading, the sign-in prompt, an error, or the children. */
 export function Panel<T>({
   state,

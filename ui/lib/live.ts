@@ -15,14 +15,19 @@ import { useEffect, useState } from "react";
  * exactly the behaviour every page had before this existed. Live updates are an
  * improvement on a working page, never a requirement for one.
  */
-export function useLive(namespace: string): number {
+export function useLive(namespace?: string): number {
   const [changes, setChanges] = useState(0);
 
   useEffect(() => {
     // EventSource cannot set headers, so this rides the session cookie the
     // browser attaches on its own — which is the same credential the API reads
     // from the Authorization header, arriving by the other route it supports.
-    const url = `/api/v1alpha1/namespaces/${encodeURIComponent(namespace)}/watch`;
+    // No namespace means every namespace the viewer can read, which is what
+    // the list pages want now that they show all of them at once. The
+    // per-namespace stream stays for the detail pages, which are about one.
+    const url = namespace
+      ? `/api/v1alpha1/namespaces/${encodeURIComponent(namespace)}/watch`
+      : "/api/v1alpha1/watch";
 
     let source: EventSource;
     try {

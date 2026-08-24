@@ -114,23 +114,14 @@ describe("the states that are not data", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: /sign in/i })).toBeDefined());
   });
 
-  it("says an empty namespace is empty, rather than showing nothing at all", async () => {
-    atNamespace("/gates/?namespace=empty");
+  it("says empty is empty, rather than showing nothing at all", async () => {
+    atNamespace("/gates/");
     vi.spyOn(api, "gates").mockResolvedValue([]);
 
     render(<Gates />);
 
-    await waitFor(() => expect(screen.getByText(/No Gates in/)).toBeDefined());
-  });
-
-  it("reads the namespace from the URL, not from a hydration-time default", async () => {
-    atNamespace("/gates/?namespace=uidemo");
-    const gates = vi.spyOn(api, "gates").mockResolvedValue(fixtures.gates);
-
-    render(<Gates />);
-
-    // The bug that shipped: the namespace was frozen at the fallback, so the
-    // page queried "default" while the URL said otherwise.
-    await waitFor(() => expect(gates).toHaveBeenCalledWith("uidemo"));
+    // And says why it might be empty. "No Gates" alone reads as Hecate being
+    // broken to someone whose RBAC simply does not reach any yet.
+    await waitFor(() => expect(screen.getByText(/No Gates anywhere you can read/)).toBeDefined());
   });
 });

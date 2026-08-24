@@ -74,12 +74,12 @@ describe("the Bundle detail page", () => {
   });
 
   it("is the list when no Bundle is named", async () => {
-    window.history.replaceState({}, "", "/bundles/?namespace=uidemo");
+    window.history.replaceState({}, "", "/bundles/");
     const list = vi.spyOn(api, "bundles").mockResolvedValue(fixtures.bundles);
 
     render(<Bundles />);
 
-    await waitFor(() => expect(list).toHaveBeenCalledWith("uidemo"));
+    await waitFor(() => expect(list).toHaveBeenCalledWith());
   });
 });
 

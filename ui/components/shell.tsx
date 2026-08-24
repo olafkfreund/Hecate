@@ -5,8 +5,7 @@ import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 import { Activity, DoorOpen, LayoutDashboard, Package, Radio, Route, ShieldCheck, Moon, Sun, Monitor, Cog, ScrollText } from "lucide-react";
-import { setQueryParam, useHydrated, useQueryParam } from "@/lib/browser";
-import { api } from "@/lib/api";
+import { useHydrated } from "@/lib/browser";
 
 // Ordered the way a Bundle travels: a Beacon sees a version, emits a Bundle, a
 // Gate admits it, a Passage carries it. Someone learning the model reads the
@@ -24,7 +23,6 @@ const nav = [
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
-  useLandingNamespace();
 
   return (
     <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-6">
@@ -59,12 +57,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
+        {/* No namespace picker. Every page shows every namespace the viewer
+            can read, grouped — see NamespaceGroups. A picker made "what is
+            happening" a question you could only ask about a place you had
+            already guessed, and it hid the answer everywhere else. */}
         <div className="ml-auto flex items-center gap-3">
-          {/* Not on the Overview: it spans every namespace, so a picker there
-              would be a control that changes nothing — and a control that
-              appears to do nothing is read as broken rather than as not
-              applicable. */}
-          {path !== "/" && <Namespace />}
           <ThemeToggle />
         </div>
       </header>
@@ -75,109 +72,6 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <Version />
       </footer>
     </div>
-  );
-}
-
-/**
- * useLandingNamespace moves an addressless visit to a namespace that has
- * something in it.
- *
- * Arriving with no `?namespace=` used to mean `default`, and `default` is
- * almost never where anyone's Gates are — so the first thing every page said
- * to a new arrival was that there was nothing to see. The API already knows
- * which namespaces hold Gates or Beacons, because the picker is built from
- * exactly that list; landing is now decided by the same answer rather than by
- * a constant that was only ever a placeholder.
- *
- * A namespace named in the URL always wins and is never touched. That is the
- * whole point of keeping it there: a link to a Gate has to open on that Gate
- * for whoever it was sent to, not on whichever namespace their server happened
- * to list first.
- */
-function useLandingNamespace() {
-  useEffect(() => {
-    // Already somewhere specific — a shared link, or a picker choice. Leave it.
-    if (new URLSearchParams(window.location.search).has("namespace")) return;
-
-    let live = true;
-    api
-      .namespaces()
-      .then((r) => {
-        // Sorted server-side, so this is stable between loads rather than
-        // whichever namespace the cluster happened to return first.
-        const first = r.namespaces?.[0];
-        if (live && first) setQueryParam("namespace", first);
-      })
-      // Quiet, like the picker's own discovery. Failing to find a better
-      // namespace leaves the page on `default`, which is exactly where it was
-      // before this existed — a worse landing spot, not a broken page.
-      .catch(() => {});
-    return () => {
-      live = false;
-    };
-  }, []);
-}
-
-/**
- * Namespace is where you are looking.
- *
- * Kept in the URL query rather than in component state so a link to a Gate in
- * one namespace is a link someone else can open — a dashboard whose address bar
- * does not describe what is on screen cannot be shared, which is most of what
- * people do with one.
- */
-function Namespace() {
-  const current = useQueryParam("namespace", "default");
-  const [known, setKnown] = useState<string[] | null>(null);
-
-  // Discovered from the API rather than typed from memory. The old control was
-  // a text box, which meant the only way to find the namespace your Gates were
-  // in was to already know it — and the default landing namespace is `default`,
-  // which almost never holds any.
-  useEffect(() => {
-    let live = true;
-    api
-      .namespaces()
-      .then((r) => live && setKnown(r.namespaces ?? []))
-      // Deliberately quiet. A failed lookup leaves the select holding just the
-      // current namespace, which is exactly as usable as the text box this
-      // replaced — degrading to the old behaviour beats an error banner over a
-      // page that otherwise works.
-      .catch(() => live && setKnown([]));
-    return () => {
-      live = false;
-    };
-  }, []);
-
-  // The current namespace is always an option even when discovery has not
-  // returned or does not include it: a select whose value is absent from its
-  // options renders blank, and someone following a shared link would see the
-  // page describing one namespace and the picker naming none.
-  const options = Array.from(new Set([current, ...(known ?? [])])).sort();
-
-  function go(next: string) {
-    if (next === current) return;
-    const url = new URL(window.location.href);
-    url.searchParams.set("namespace", next);
-    window.location.href = url.toString();
-  }
-
-  return (
-    <label className="flex items-center gap-2 text-sm text-[var(--muted-foreground)]">
-      <span className="sr-only">Namespace</span>
-      <select
-        value={current}
-        onChange={(e) => go(e.target.value)}
-        className="w-40 rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-[var(--foreground)]"
-        aria-label="Namespace"
-      >
-        {options.map((ns) => (
-          <option key={ns} value={ns} className="bg-[var(--background)]">
-            {ns}
-          </option>
-        ))}
-      </select>
-    </label>
   );
 }
 
