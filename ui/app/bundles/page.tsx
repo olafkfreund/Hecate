@@ -61,9 +61,21 @@ function BundleList() {
 
 function BundleCard({ bundle, namespace }: { bundle: Bundle; namespace: string }) {
   const cleared = bundle.status?.cleared ?? [];
-  const blocked = bundle.status?.blocked ?? [];
   const approved = bundle.status?.approvedFor ?? [];
   const artifacts = bundle.spec.artifacts ?? [];
+
+  // Refusals the Bundle has not since overturned.
+  //
+  // A refusal is a permanent record and should be: an audit trail of what
+  // shipped is a deployment log, and what makes it an audit trail is that it
+  // also holds what was stopped. But a Bundle that was refused at a Gate on
+  // Monday and crossed it on Tuesday is not a Bundle with a problem, and the
+  // card said it was — red edge and all, for ever, because it only asked
+  // whether `blocked` was empty.
+  const blocked = (bundle.status?.blocked ?? []).filter(
+    (b) => !cleared.some((c) => c.gate === b.gate && Date.parse(c.at) > Date.parse(b.at)),
+  );
+  const latest = blocked[blocked.length - 1];
 
   // How far it has actually got, which is the question every Bundle row is
   // opened to answer and the one thing the old row never said.
@@ -102,9 +114,15 @@ function BundleCard({ bundle, namespace }: { bundle: Bundle; namespace: string }
             approved for {approved.map((a) => a.gate).join(", ")}
           </Pill>
         )}
-        {blocked.length > 0 && (
+        {/* "refused at", not "blocked at", and dated. A refusal is something
+            that happened; "blocked" reads as a state that still holds, so a
+            crossing someone gave up on ten days ago looked like an incident in
+            progress. The Gate may well admit it now — nothing here can say, and
+            claiming otherwise is what made the old wording wrong. */}
+        {latest && (
           <Pill icon={CircleX} tone="bad">
-            blocked at {blocked[blocked.length - 1].gate}
+            refused at {latest.gate}
+            {ago(latest.at) && ` · ${ago(latest.at)}`}
           </Pill>
         )}
         {ago(bundle.metadata.creationTimestamp) && (
@@ -114,9 +132,7 @@ function BundleCard({ bundle, namespace }: { bundle: Bundle; namespace: string }
 
       {/* Why it stopped. A Bundle sitting still is the common case someone
           opens this page for, and the reason lived a click away. */}
-      {blocked.length > 0 && blocked[blocked.length - 1].reason && (
-        <Note tone="bad">{blocked[blocked.length - 1].reason}</Note>
-      )}
+      {latest?.reason && <Note tone="bad">{latest.reason}</Note>}
     </Card>
   );
 }
