@@ -1,0 +1,181 @@
+# The Hecate demo: one image, three environments, dev -> qa -> production.
+#
+# This file is the demo. It used to live only as state someone had typed into a
+# cluster, which is how the demo silently lost its fleet repo for a week — there
+# was nothing to reapply from, and no way to see what it was meant to be. So it
+# is declared here, applied from here, and reproducible from here:
+#
+#   kubectl apply -f demo/flux.yaml
+#   kubectl apply -f demo/pipeline.yaml
+#
+# Prerequisites on the cluster:
+#   - namespace `demo`
+#   - Secret `github-fleet-auth`: an SSH deploy key with write access to
+#     github.com/olafkfreund/hecate-demo-fleet
+#   - Secret `fides-credentials`: for the production Gate's evidence lookups
+#
+# There is no pipeline object. The graph is implied by what each Gate admits:
+# qa admits only Bundles that cleared dev, production only those that cleared
+# qa. The topology cannot drift out of sync with the Gates.
+---
+apiVersion: hecate.dev/v1alpha1
+kind: Beacon
+metadata:
+  name: podtato-head
+  namespace: demo
+spec:
+  interval: 2m
+  watch:
+    - image:
+        repo: ghcr.io/podtato-head/podtato-server
+        select: SemVer
+        constraint: ^0.3.0
+        # Exclude the mutable tags that otherwise cause surprise crossings.
+        ignore: [latest, main]
+
+---
+apiVersion: hecate.dev/v1alpha1
+kind: Gate
+metadata:
+  name: dev
+  namespace: demo
+spec:
+  # No `after`, so dev is the entry point: it takes Bundles straight from the
+  # Beacon, and does so without being asked.
+  admits:
+    - from: { beacon: podtato-head }
+  auto: true
+  passage:
+    steps:
+      - uses: git-clone
+        with:
+          repo: git@github.com:olafkfreund/hecate-demo-fleet.git
+          branch: main
+          credentialsRef:
+            name: github-fleet-auth
+      - uses: set-image
+        with:
+          path: repo/apps/dev/kustomization.yaml
+          image: ghcr.io/podtato-head/podtato-server
+      - uses: git-commit
+        as: commit
+        with:
+          message: "dev: podtato-head ${{ bundle.image('ghcr.io/podtato-head/podtato-server').tag }}"
+      - uses: git-push
+        with:
+          # Each git step resolves its own credentials — git-push does not
+          # inherit git-clone's. Omitting this pushes anonymously and fails
+          # after the commit is already made.
+          credentialsRef:
+            name: github-fleet-auth
+      - uses: flux-wait
+        with:
+          resources:
+            - { kind: Kustomization, name: podtato-dev, namespace: demo }
+          # Wait for the commit this Passage just pushed, not merely for
+          # "Ready" — otherwise a stale green from the previous revision passes.
+          expectedRevision: ${{ steps.commit.sha }}
+          failAfter: 10m
+
+---
+apiVersion: hecate.dev/v1alpha1
+kind: Gate
+metadata:
+  name: qa
+  namespace: demo
+spec:
+  admits:
+    - from: { beacon: podtato-head }
+      after: [dev]
+  auto: true
+  passage:
+    steps:
+      - uses: git-clone
+        with:
+          repo: git@github.com:olafkfreund/hecate-demo-fleet.git
+          branch: main
+          credentialsRef:
+            name: github-fleet-auth
+      - uses: set-image
+        with:
+          path: repo/apps/qa/kustomization.yaml
+          image: ghcr.io/podtato-head/podtato-server
+      - uses: git-commit
+        as: commit
+        with:
+          message: "qa: podtato-head ${{ bundle.image('ghcr.io/podtato-head/podtato-server').tag }}"
+      - uses: git-push
+        with:
+          credentialsRef:
+            name: github-fleet-auth
+      - uses: flux-wait
+        with:
+          resources:
+            - { kind: Kustomization, name: podtato-qa, namespace: demo }
+          expectedRevision: ${{ steps.commit.sha }}
+          failAfter: 10m
+
+---
+apiVersion: hecate.dev/v1alpha1
+kind: Gate
+metadata:
+  name: production
+  namespace: demo
+spec:
+  admits:
+    - from: { beacon: podtato-head }
+      after: [qa]
+      # The demo's climax. Nothing crosses here until a human says so, and
+      # approving is a separate permission from promoting — one person is not
+      # meant to hold both.
+      requireApproval: true
+  # Evidence is configured but not enforced as a step, and the distinction is
+  # the point: this lets the UI ask Fides what it thinks of a Bundle *before*
+  # anyone presses Cross, without that answer blocking the crossing.
+  evidence:
+    serverURL: https://fides.13.134.88.9.nip.io
+    fidesEnvironment: bcdcf8ce-93cf-4b95-9929-a2a5049d2941
+    credentialsRef:
+      name: fides-credentials
+  passage:
+    steps:
+      # An `evidence-gate` step belongs here, and is deliberately absent.
+      #
+      # Against the Fides organisation this demo has, it can never pass: that
+      # org adopts ~20 controls, one of them segregation-of-duties, and the
+      # whole demo chain is a single identity. The control is right to refuse.
+      # But on the critical path it makes production permanently unreachable,
+      # and a demo that ends on a red card has demonstrated nothing.
+      #
+      # Turn it on against an org whose controls a demo trail can satisfy:
+      #
+      #   - uses: evidence-gate
+      #     with:
+      #       gates: [assert, policy, change]
+      #       maxRisk: 30
+      #       holdTimeout: 2h
+      - uses: git-clone
+        with:
+          repo: git@github.com:olafkfreund/hecate-demo-fleet.git
+          branch: main
+          credentialsRef:
+            name: github-fleet-auth
+      - uses: set-image
+        with:
+          path: repo/apps/production/kustomization.yaml
+          image: ghcr.io/podtato-head/podtato-server
+      - uses: git-commit
+        as: commit
+        with:
+          message: "production: podtato-head ${{ bundle.image('ghcr.io/podtato-head/podtato-server').tag }}"
+      - uses: git-push
+        with:
+          credentialsRef:
+            name: github-fleet-auth
+      - uses: flux-wait
+        with:
+          resources:
+            - { kind: Kustomization, name: podtato-production, namespace: demo }
+          expectedRevision: ${{ steps.commit.sha }}
+          # Production rollouts are slower; allow longer before calling it wedged.
+          failAfter: 20m
