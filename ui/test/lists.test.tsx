@@ -139,7 +139,9 @@ describe("the Bundles list", () => {
     // The question every Bundle row is opened to answer, and the one thing the
     // old row never said.
     await waitFor(() => expect(screen.getByText("in staging")).toBeDefined());
-    expect(container.textContent).toContain("blocked at production");
+    // "refused at", not "blocked at": it is an event, and one that may be old.
+    // See test/refusal.test.tsx for why the tense matters.
+    expect(container.textContent).toContain("refused at production");
     expect(screen.getByText(/segregation-of-duties/)).toBeDefined();
     expect(container.textContent).toContain("approved for production");
   });
