@@ -2,18 +2,24 @@
 #
 # The repository is public and read anonymously — no secretRef. That is the
 # point: the read path has no credential to expire, rotate or lose, so the only
-# credential in the demo is the SSH deploy key Hecate writes with.
+# credential in the demo is the SSH deploy key Hecate writes with. The previous
+# arrangement was an in-cluster Gitea whose storage was an emptyDir, and every
+# reschedule took the fleet repo with it.
+#
+# These live in `demo` rather than `flux-system` so that one namespace holds the
+# whole demo: the Gates, the Bundles, and the Flux objects their flux-wait steps
+# watch.
 #
 #   kubectl apply -f demo/flux.yaml
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: GitRepository
 metadata:
-  name: hecate-demo-fleet
-  namespace: flux-system
+  name: fleet
+  namespace: demo
 spec:
   interval: 1m
-  url: https://github.com/olafkfreund/hecate-demo-fleet
+  url: https://github.com/olafkfreund/hecate-demo-fleet.git
   ref:
     branch: main
 ---
@@ -21,48 +27,40 @@ apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
   name: podtato-dev
-  namespace: flux-system
+  namespace: demo
 spec:
-  interval: 5m
-  # Short retry so a promotion's flux-wait settles in demo time, not in Flux's
-  # default backoff.
-  retryInterval: 30s
+  interval: 1m
   path: ./apps/dev
   prune: true
-  wait: true
-  timeout: 3m
+  timeout: 5m
   sourceRef:
     kind: GitRepository
-    name: hecate-demo-fleet
+    name: fleet
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
   name: podtato-qa
-  namespace: flux-system
+  namespace: demo
 spec:
-  interval: 5m
-  retryInterval: 30s
+  interval: 1m
   path: ./apps/qa
   prune: true
-  wait: true
-  timeout: 3m
+  timeout: 5m
   sourceRef:
     kind: GitRepository
-    name: hecate-demo-fleet
+    name: fleet
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
   name: podtato-production
-  namespace: flux-system
+  namespace: demo
 spec:
-  interval: 5m
-  retryInterval: 30s
+  interval: 1m
   path: ./apps/production
   prune: true
-  wait: true
-  timeout: 3m
+  timeout: 5m
   sourceRef:
     kind: GitRepository
-    name: hecate-demo-fleet
+    name: fleet
