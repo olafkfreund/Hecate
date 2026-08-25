@@ -1,0 +1,165 @@
+# The Hecate demo: one image, three environments, dev -> qa -> production.
+#
+# This file is the demo. It used to live only as state someone had typed into a
+# cluster, which is how the demo silently lost its fleet repo for a week — so it
+# is declared here, applied from here, and reproducible from here:
+#
+#   kubectl apply -f demo/pipeline.yaml
+#
+# Prerequisites on the cluster:
+#   - namespace `demo`, with Secret `github-fleet-auth` holding an SSH deploy
+#     key with write access to github.com/olafkfreund/hecate-demo-fleet
+#   - a Flux Kustomization per environment, reading apps/<env> from that repo
+#
+# There is no pipeline object. The graph is implied by what each Gate admits:
+# qa admits only Bundles that cleared dev, production only those that cleared
+# qa. The topology cannot drift out of sync with the Gates.
+---
+apiVersion: hecate.dev/v1alpha1
+kind: Beacon
+metadata:
+  name: podtato-head
+  namespace: demo
+spec:
+  interval: 2m
+  watch:
+    - image:
+        repo: ghcr.io/podtato-head/podtato-server
+        select: SemVer
+        constraint: ^0.3.0
+        ignore: [latest, main]
+
+---
+apiVersion: hecate.dev/v1alpha1
+kind: Gate
+metadata:
+  name: dev
+  namespace: demo
+spec:
+  # No `after`, so dev is the entry point: it takes Bundles straight from the
+  # Beacon, and does so without being asked.
+  admits:
+    - from: { beacon: podtato-head }
+  auto: true
+  passage:
+    steps:
+      - uses: git-clone
+        with:
+          repo: git@github.com:olafkfreund/hecate-demo-fleet.git
+          branch: main
+          credentialsRef:
+            name: github-fleet-auth
+      - uses: set-image
+        with:
+          path: repo/apps/dev/kustomization.yaml
+          image: ghcr.io/podtato-head/podtato-server
+      - uses: git-commit
+        as: commit
+        with:
+          message: "dev: podtato-server ${{ bundle.image('ghcr.io/podtato-head/podtato-server').tag }}"
+      - uses: git-push
+        with:
+          # Each git step resolves its own credentials — git-push does not
+          # inherit git-clone's. Omitting this pushes anonymously and fails
+          # after the commit is already made.
+          credentialsRef:
+            name: github-fleet-auth
+      - uses: flux-wait
+        with:
+          resources:
+            - { kind: Kustomization, name: podtato-dev, namespace: flux-system }
+          # Wait for the commit this Passage just pushed, not merely for
+          # "Ready" — otherwise a stale green from the previous revision passes.
+          expectedRevision: ${{ steps.commit.sha }}
+
+---
+apiVersion: hecate.dev/v1alpha1
+kind: Gate
+metadata:
+  name: qa
+  namespace: demo
+spec:
+  admits:
+    - from: { beacon: podtato-head }
+      after: [dev]
+  auto: true
+  passage:
+    steps:
+      - uses: git-clone
+        with:
+          repo: git@github.com:olafkfreund/hecate-demo-fleet.git
+          branch: main
+          credentialsRef:
+            name: github-fleet-auth
+      - uses: set-image
+        with:
+          path: repo/apps/qa/kustomization.yaml
+          image: ghcr.io/podtato-head/podtato-server
+      - uses: git-commit
+        as: commit
+        with:
+          message: "qa: podtato-server ${{ bundle.image('ghcr.io/podtato-head/podtato-server').tag }}"
+      - uses: git-push
+        with:
+          credentialsRef:
+            name: github-fleet-auth
+      - uses: flux-wait
+        with:
+          resources:
+            - { kind: Kustomization, name: podtato-qa, namespace: flux-system }
+          expectedRevision: ${{ steps.commit.sha }}
+
+---
+apiVersion: hecate.dev/v1alpha1
+kind: Gate
+metadata:
+  name: production
+  namespace: demo
+spec:
+  admits:
+    - from: { beacon: podtato-head }
+      after: [qa]
+      # The demo's climax. Nothing crosses here until a human says so, and
+      # approving is a separate permission from promoting.
+      requireApproval: true
+  passage:
+    steps:
+      # An evidence-gate belongs here, and is deliberately absent.
+      #
+      # Pointed at the Fides organisation this demo has, it can never pass: that
+      # org adopts ~20 controls, one of which is segregation-of-duties, and the
+      # whole demo chain is a single identity. The control is right to refuse —
+      # but with it on the critical path production is unreachable and the demo
+      # ends on a red card having shown nothing.
+      #
+      # Turn it on against an org whose controls a demo trail can satisfy:
+      #
+      #   - uses: evidence-gate
+      #     with:
+      #       gates: [assert]
+      #       maxRisk: 30
+      - uses: git-clone
+        with:
+          repo: git@github.com:olafkfreund/hecate-demo-fleet.git
+          branch: main
+          credentialsRef:
+            name: github-fleet-auth
+      - uses: set-image
+        with:
+          path: repo/apps/production/kustomization.yaml
+          image: ghcr.io/podtato-head/podtato-server
+      - uses: git-commit
+        as: commit
+        with:
+          message: "production: podtato-server ${{ bundle.image('ghcr.io/podtato-head/podtato-server').tag }}"
+      - uses: git-push
+        with:
+          credentialsRef:
+            name: github-fleet-auth
+      - uses: flux-wait
+        with:
+          resources:
+            - { kind: Kustomization, name: podtato-production, namespace: flux-system }
+          expectedRevision: ${{ steps.commit.sha }}
+          # Production rollouts are slower; allow longer before calling it wedged.
+          failAfter: 20m

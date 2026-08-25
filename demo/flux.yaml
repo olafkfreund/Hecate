@@ -1,0 +1,68 @@
+# What Flux reads, for the demo's three environments.
+#
+# The repository is public and read anonymously — no secretRef. That is the
+# point: the read path has no credential to expire, rotate or lose, so the only
+# credential in the demo is the SSH deploy key Hecate writes with.
+#
+#   kubectl apply -f demo/flux.yaml
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: hecate-demo-fleet
+  namespace: flux-system
+spec:
+  interval: 1m
+  url: https://github.com/olafkfreund/hecate-demo-fleet
+  ref:
+    branch: main
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: podtato-dev
+  namespace: flux-system
+spec:
+  interval: 5m
+  # Short retry so a promotion's flux-wait settles in demo time, not in Flux's
+  # default backoff.
+  retryInterval: 30s
+  path: ./apps/dev
+  prune: true
+  wait: true
+  timeout: 3m
+  sourceRef:
+    kind: GitRepository
+    name: hecate-demo-fleet
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: podtato-qa
+  namespace: flux-system
+spec:
+  interval: 5m
+  retryInterval: 30s
+  path: ./apps/qa
+  prune: true
+  wait: true
+  timeout: 3m
+  sourceRef:
+    kind: GitRepository
+    name: hecate-demo-fleet
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: podtato-production
+  namespace: flux-system
+spec:
+  interval: 5m
+  retryInterval: 30s
+  path: ./apps/production
+  prune: true
+  wait: true
+  timeout: 3m
+  sourceRef:
+    kind: GitRepository
+    name: hecate-demo-fleet
