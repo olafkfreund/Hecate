@@ -25,3 +25,7 @@ result-*
 # placeholder that keeps `go build ./...` working is committed instead.
 pkg/api/ui/*
 !pkg/api/ui/.gitkeep
+
+# Coding agents check out branches into worktrees here. They are whole copies
+# of this repository, so an unlucky `git add -A` commits the tree into itself.
+.claude/worktrees/
