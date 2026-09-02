@@ -122,4 +122,30 @@ rules:
   - apiGroups: ["source.toolkit.fluxcd.io"]
     resources: ["gitrepositories", "ocirepositories", "helmcharts", "helmrepositories", "buckets"]
     verbs: ["get", "list", "patch"]
+---
+{{/*
+  An author can open a pull request that proposes a Gate's step list
+  (hecate#172). It never writes to this cluster — no rule here grants create,
+  update or patch on any Hecate resource — the write lands in a fleet
+  repository as a pull request, for a human to review before it becomes a
+  Gate at all.
+
+  Checked against "create gates" (ActionAuthorPassage) because a merged pull
+  request is exactly what creating a Gate's spec.passage would be, and that is
+  the equivalent right. Its own role for the same reason flux-operator is its
+  own role: a bigger and more distinct grant than anything promoter or
+  approver carry, so deliberately unbound by default.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "hecate.fullname" . }}-author
+  labels: {{- include "hecate.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["hecate.dev"]
+    resources: ["beacons", "bundles", "gates", "passages"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["hecate.dev"]
+    resources: ["gates"]
+    verbs: ["create"]
 {{- end }}

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/olafkfreund/hecate/pkg/ops"
+	"github.com/olafkfreund/hecate/pkg/passage"
+	"github.com/olafkfreund/hecate/pkg/provider"
 )
 
 // Server is Hecate's HTTP API.
@@ -23,6 +25,20 @@ type Server struct {
 	// already hold a Kubernetes token — which is every CLI and script, and is
 	// why this is optional rather than required.
 	Login *Login
+	// Steps is the same step Registry the controller validates a Gate's step
+	// list against, so authorPassage refuses the same `with:` blocks admission
+	// would (hecate#172 scope item 4). Nil skips the check rather than
+	// panicking — every production wiring sets it; a test that only needs the
+	// rest of the route table should not have to build one.
+	Steps *passage.Registry
+
+	// providers builds a git host's API client. Nil is provider.New; a test
+	// overrides it to avoid a network call, the same seam GitPullRequest uses.
+	providers func(provider.Kind, provider.Config) (provider.Provider, error)
+	// publish clones a repository, commits one file and pushes a new branch.
+	// Nil is gitPublish; a test overrides it so authorPassage's request
+	// handling can be checked without a real git remote.
+	publish func(context.Context, publishRequest) (string, error)
 }
 
 // Handler returns the routes.
@@ -132,6 +148,12 @@ func (s *Server) Handler() http.Handler {
 		s.guard(ActionApprove, s.approve))
 	mux.Handle("POST /api/v1alpha1/namespaces/{namespace}/passages/{name}/abort",
 		s.guard(ActionAbort, s.abort))
+
+	// Author a Passage: render the composed step list to YAML, commit it to a
+	// branch, and open a pull request through pkg/provider (hecate#172 stage
+	// 2). Never touches the cluster — see authorPassage.
+	mux.Handle("POST /api/v1alpha1/namespaces/{namespace}/passages/author",
+		s.guard(ActionAuthorPassage, s.authorPassage))
 
 	// What a Gate's crossings actually depend on, and the three things an
 	// operator does to it when something is wrong.
@@ -448,7 +470,18 @@ func (e *BadRequest) Error() string { return e.Reason }
 func writeOpsError(w http.ResponseWriter, err error) {
 	var badRequest *BadRequest
 	var forbidden *Forbidden
+	var problems *stepProblemsError
+	var exists *pathExistsError
 	switch {
+	case errors.As(err, &problems):
+		// Structured, not just a message: the form that sent this needs to
+		// point at which step is wrong, the same way a Gate's own admission
+		// would (hecate#172 scope item 4).
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error":    problems.Error(),
+			"status":   strings.ToLower(http.StatusText(http.StatusBadRequest)),
+			"problems": problems.dto(),
+		})
 	case errors.As(err, &badRequest):
 		writeError(w, http.StatusBadRequest, badRequest.Error())
 	case errors.As(err, &forbidden):
@@ -458,6 +491,12 @@ func writeOpsError(w http.ResponseWriter, err error) {
 		// this case a refusal is reported as a server fault, which sends
 		// someone debugging Hecate when the answer is "you may not do that".
 		writeError(w, http.StatusForbidden, forbidden.Error())
+	case errors.As(err, &exists):
+		// 409, the same as ops.IsRefused below: the request was well-formed,
+		// and what refused it is the state of the target repository, not the
+		// input. Retrying with overwrite:true — a different request — is the
+		// right response, which is what 409 says.
+		writeError(w, http.StatusConflict, exists.Error())
 	case ops.IsNotFound(err):
 		writeError(w, http.StatusNotFound, err.Error())
 	case ops.IsRefused(err):

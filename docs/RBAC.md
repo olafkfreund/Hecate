@@ -23,6 +23,7 @@ need them.
 | `hecate-promoter` | viewer, plus `create`/`update` on `passages` | asking a Gate to cross a Bundle, and aborting one |
 | `hecate-approver` | viewer, plus `update` on `bundles/status` | signing off a Bundle for a Gate |
 | `hecate-poker` | `update` on `beacons`, and nothing else | a CI job telling a Beacon to look now |
+| `hecate-author` | viewer, plus `create` on `gates` | opening a pull request that proposes a Gate's step list (#172) — grants no write to this cluster at all; the write lands in a fleet repository, for a human to review |
 
 Verified against a real API server rather than asserted — bind each role to a
 service account and ask:
