@@ -1,6 +1,7 @@
 "use client";
 
-import { CircleCheck, CircleX, Clock, ListChecks, Loader2, OctagonX, Timer, User } from "lucide-react";
+import Link from "next/link";
+import { CircleCheck, CircleX, Clock, ListChecks, Loader2, OctagonX, Plus, Timer, User } from "lucide-react";
 import { api, type Passage } from "@/lib/api";
 import { Panel, useLiveAll } from "@/components/loader";
 import { NamespaceGroups } from "@/components/groups";
@@ -32,10 +33,21 @@ function PassageList() {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold tracking-tight">Passages</h1>
-      <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-        One attempt to move one Bundle through one Gate.
-      </p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">Passages</h1>
+          <p className="mt-1 text-sm text-[var(--muted-foreground)]">
+            One attempt to move one Bundle through one Gate.
+          </p>
+        </div>
+        <Link
+          href="/passages/new/"
+          className="flex items-center gap-1.5 rounded-md border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--secondary)]"
+        >
+          <Plus size={15} aria-hidden />
+          Author a Passage
+        </Link>
+      </div>
 
       <div className="mt-6">
         <Panel state={state}>

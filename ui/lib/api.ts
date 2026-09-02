@@ -220,6 +220,27 @@ export interface FluxResource {
   missing: boolean;
 }
 
+/**
+ * StepSchema is one step's `with:` block, as JSON Schema.
+ *
+ * Recursive rather than flattened, because the real schemas nest — an
+ * `http` step's `secretHeaders` is an array of objects, one of whose fields
+ * is itself an object (`secretRef`). Pinned to what `invopop/jsonschema`
+ * actually emits (`pkg/passage/steps/schema.go`), not the wider spec: no
+ * `enum`, no `oneOf`, no `$ref` — the generator does not produce them today,
+ * and a type that accepted them would be a promise the form does not keep.
+ */
+export interface StepSchema {
+  type?: "string" | "integer" | "number" | "boolean" | "array" | "object";
+  description?: string;
+  properties?: Record<string, StepSchema>;
+  required?: string[];
+  items?: StepSchema;
+  /** `true`/`false` bars extra keys; an object schema means "a map of this
+   *  shape" (only string-valued maps occur today, e.g. `http.headers`). */
+  additionalProperties?: boolean | StepSchema;
+}
+
 /** Unauthenticated is thrown when the API says the caller is not signed in. */
 export class Unauthenticated extends Error {
   constructor() {
@@ -368,6 +389,17 @@ export const api = {
   namespaces: () => get<{ namespaces: string[] }>("/api/v1alpha1/namespaces"),
 
   settings: () => get<Settings>("/api/v1alpha1/settings"),
+
+  /**
+   * stepSchemas is the catalogue a Passage author picks from: every step
+   * `uses` can name, keyed the same way, each with its `with:` block as JSON
+   * Schema (#114).
+   *
+   * Not namespaced — see the handler's own comment — and not live: the
+   * catalogue is the controller's build, not cluster state, so there is
+   * nothing for `useLiveApi` to watch for.
+   */
+  stepSchemas: () => get<Record<string, StepSchema>>("/api/v1alpha1/steps"),
 
   /**
    * overview is every Gate this person can see, in one call.
