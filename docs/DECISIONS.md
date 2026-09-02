@@ -1941,3 +1941,96 @@ and the job goes red before the drift comparison ever runs. Softening only the
 reach the evidence" a hard failure while "there is a stale but honest
 evidence-based claim" is a visible warning. Collapsing those two into one
 lenient path would have undone the property D57 exists to protect.
+
+---
+
+## D58 — Authoring a pull request takes a repo and a path as form fields, not a derived target
+
+*2026-09-02 — #172*
+
+Stage 2 of #172 opens a pull request for the Passage a browser session
+composed (stage 1, #187). A pull request needs a target — repository, file
+path, branch — and Hecate cannot derive one reliably.
+
+**Flux ownership labels are not there to read.** The obvious source would be
+the Gate's own `kustomize.toolkit.fluxcd.io/*` labels, tracing back to the
+`GitRepository` that applied it. Checked against the live demo cluster rather
+than assumed: its Gates carry
+`kubectl.kubernetes.io/last-applied-configuration` and no Flux ownership
+labels at all, because they were applied by hand. A default that only works
+when a Gate happens to be Flux-managed is a default that silently stops
+working the first time an operator debugs by hand — which is exactly when a
+wrong repository would be most dangerous to guess.
+
+**The fleet repo is not the config repo, and conflating them opens a pull
+request against the wrong repository.** A Gate's `git-clone` step names the
+repository its own crossings write *application* manifests into — in this
+repo's own demo, `hecate-demo-fleet`. That is not the same repository as the
+one holding the Gate's own YAML, which in the same demo is `demo/pipeline.yaml`
+in this repository. Nothing in a running Gate says which repository holds its
+own definition; only whoever wrote it knows, because they cloned it there by
+hand or through their own CI. Deriving "the" repository from either signal
+would guess right by default and wrong exactly when it mattered.
+
+**Decision: explicit fields — `repo`, `path`, `base`, `credentialsRef` —
+remembered per browser, not derived.** The form asks for exactly what
+`git-pull-request` already asks a Gate's author to write in YAML: a
+repository, a branch, a credential. Nothing here is a new vocabulary; it is
+the same four fields `pkg/provider` has always needed, moved into a request
+body instead of a `with:` block. A derived default can be added later if a
+convention (an annotation on the Gate naming its own source, say) turns out to
+hold across enough of a fleet to be worth trusting — but that is evidence to
+gather from use, not a guess to ship on day one.
+
+**The file is replaced wholesale, not merged into an existing manifest.**
+Parsing an arbitrary YAML file well enough to update one Gate's `spec.passage`
+in place while preserving everything else an operator wrote around it is a
+second YAML engine with edge cases stage 1's hand-rolled emitter was
+deliberately built to avoid. Scope item 3 asks for "render to YAML, commit to
+a branch, open a merge request" — not "patch an existing manifest" — so the
+endpoint writes the rendered `steps:` block as the whole content of `path`.
+Authoring into an existing Gate file is real future work, not silently
+assumed here.
+
+## D59 — The pull request's YAML is rendered server-side, from the same type validation reads
+
+*2026-09-02 — #172*
+
+Stage 1 renders YAML in the browser (`ui/lib/yaml.ts`), for a `<pre>` block
+nobody else ever reads. Stage 2 commits YAML into a fleet repository, which is
+a different trust level: a git history is permanent, reviewed by a human who
+is reading the diff and not re-deriving it, and open to whatever the browser
+sent.
+
+**Two options, and only one avoids the server trusting text it did not
+produce.** The endpoint could take the composed step list as JSON and render
+YAML in Go, or take the browser's already-rendered YAML text and commit it
+as-is. The second is less code, but it means the API server writes to git
+whatever string arrived over HTTP with no server-side opinion of what it
+means — validation would have to *parse the YAML back* to check it, which is
+strictly more work than never having thrown the structure away, and a
+hand-rolled emitter bug (stage 1's is deliberately small and untested against
+edge cases beyond its own unit tests) would land in a fleet repo before anyone
+who reads Go ever saw the mistake.
+
+**Decision: the endpoint takes `steps` as JSON and renders server-side.**
+Two YAML renderers now exist — `ui/lib/yaml.ts` for the live preview stage 1
+already shipped, and a Go one here — and that is the accepted cost, not an
+oversight: the browser's copy is read by a human before anything is
+committed, so its correctness is checked on sight the way every `<pre>` block
+in this UI is; the Go copy is the one that ends up in git, so it is the one
+that has to be provably correct rather than plausible. Divergence between the
+two would show up immediately, as "the PR body doesn't match what I saw
+on-screen" — which is a bug report waiting to happen but a checkable one, not
+a silent hazard.
+
+**The render uses `v1alpha1.Step` and `sigs.k8s.io/yaml`, not a bespoke
+struct.** `Registry.Validate` already takes `[]v1alpha1.Step`, and
+`sigs.k8s.io/yaml` is already a dependency, used everywhere else in Hecate
+that turns a Go value with JSON tags into a manifest. Rendering the exact type
+validation just checked means there is no second shape for the two to
+disagree about what a step *is* — only whether its `with:` block is correct,
+which is what `Validate` exists to answer. A second, YAML-specific struct
+would reopen exactly the drift D57 and the commit-status schema bug (#171)
+were both about: two lists describing the same thing, changed in one place at
+a time.

@@ -103,6 +103,20 @@ var (
 	// without being able to read every Gate in the namespace — which is the
 	// whole grant a webhook needs.
 	ActionPoll = Action{Verb: "update", Resource: "beacons"}
+	// ActionAuthorPassage opens a pull request that proposes a Gate's step
+	// list (hecate#172, stage 2).
+	//
+	// Checked against "create gates" rather than a resource of its own: a
+	// merged pull request is exactly what creating a Gate's `spec.passage`
+	// would be, and admission cannot run before a human reviews it, so this is
+	// where the equivalent right has to be enforced. Its own Action rather
+	// than folded into ActionEditGate (which is "update", for a Gate that
+	// already exists in the cluster): granting someone the right to open a
+	// pull request against a fleet repository is a bigger and more distinct
+	// grant than letting them repoint an existing Gate at a different
+	// evidence server, and the chart leaves it unbound by default for the same
+	// reason ActionOperateFlux's role is (docs/DECISIONS.md D58).
+	ActionAuthorPassage = Action{Verb: "create", Resource: "gates"}
 )
 
 // ErrUnauthenticated means no usable credential was presented.

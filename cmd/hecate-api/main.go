@@ -30,6 +30,8 @@ import (
 	"github.com/olafkfreund/hecate/api/v1alpha1"
 	"github.com/olafkfreund/hecate/pkg/api"
 	"github.com/olafkfreund/hecate/pkg/ops"
+	"github.com/olafkfreund/hecate/pkg/passage"
+	"github.com/olafkfreund/hecate/pkg/passage/steps"
 )
 
 // version is set at build time with -ldflags.
@@ -120,10 +122,20 @@ func run(addr, certFile, keyFile string, login api.LoginConfig) error {
 		return fmt.Errorf("connecting to the cluster: %w", err)
 	}
 
+	// The same step Registry the controller validates a Gate's step list
+	// against, built with only a Client: this process runs no Passage and
+	// checks configuration, never runs a step, so the deps a live crossing
+	// needs (a FluxChecker, a Fides server) are not wired here.
+	stepRunners := passage.NewRegistry()
+	for _, r := range steps.All(steps.Deps{Client: c}) {
+		stepRunners.MustRegister(r)
+	}
+
 	server := &api.Server{
 		Ops:     ops.New(c),
 		Auth:    &api.Authenticator{Client: c},
 		Version: version,
+		Steps:   stepRunners,
 	}
 
 	// Discovery happens here, before the listener opens, so a misspelt or
