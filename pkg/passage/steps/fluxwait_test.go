@@ -109,8 +109,40 @@ func TestFluxWaitSucceedsAndHandsTheGateItsWatch(t *testing.T) {
 	if err := json.Unmarshal(res.Watch[0].With.Raw, &handed); err != nil {
 		t.Fatalf("emitted watch config is not decodable: %v", err)
 	}
-	if handed.ExpectedRevision != "9f8c1a2b" {
-		t.Errorf("the emitted watch lost expectedRevision: %+v", handed)
+	// The watch outlives this Passage; git does not stand still. A Gate
+	// pinned to the crossing's commit would report Progressing forever
+	// once a later reconcile lands on a newer revision.
+	if handed.ExpectedRevision != "" {
+		t.Errorf("the emitted watch must not pin a revision, got %q", handed.ExpectedRevision)
+	}
+}
+
+// The Gate should still watch the same resources — only the commit pin is
+// dropped, not the rest of the crossing's criteria.
+func TestFluxWaitWatchKeepsResourcesButDropsRevision(t *testing.T) {
+	cl := fake.NewClientBuilder().
+		WithScheme(newScheme()).
+		WithObjects(kustomization("podinfo", "acme", true, "main@sha1:9f8c1a2b")).
+		Build()
+	step := NewFluxWait(health.NewFluxChecker(cl))
+
+	res, err := step.Run(context.Background(), stepCtx(t, health.FluxConfig{
+		Resources:        []health.FluxResource{{Kind: "Kustomization", Name: "podinfo"}},
+		ExpectedRevision: "9f8c1a2b",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var handed health.FluxConfig
+	if err := json.Unmarshal(res.Watch[0].With.Raw, &handed); err != nil {
+		t.Fatalf("emitted watch config is not decodable: %v", err)
+	}
+	if len(handed.Resources) != 1 || handed.Resources[0].Name != "podinfo" {
+		t.Errorf("watch lost the resources to check: %+v", handed.Resources)
+	}
+	if handed.ExpectedRevision != "" {
+		t.Errorf("watch must not pin a revision: %q", handed.ExpectedRevision)
 	}
 }
 

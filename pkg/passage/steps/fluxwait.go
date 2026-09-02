@@ -98,6 +98,13 @@ func (f *FluxWait) Run(ctx context.Context, sc *passage.StepContext) (passage.St
 
 // watchFor converts the step config into a Gate health check.
 func watchFor(cfg health.FluxConfig) ([]v1alpha1.HealthCheck, error) {
+	// The step's own Evaluate above needed an exact revision match to prove
+	// this crossing. A standing Gate check does not: git keeps moving after
+	// the Passage ends, and a Gate pinned to the crossing's commit would
+	// report Progressing forever once a later reconcile lands. cfg is a
+	// value here, so this cannot affect the Evaluate call above.
+	cfg.ExpectedRevision = ""
+
 	encoded, err := json.Marshal(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("cannot encode health check: %w", err)

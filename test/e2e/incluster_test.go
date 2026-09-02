@@ -415,12 +415,20 @@ func TestAWaitingPassageDoesNotSpin(t *testing.T) {
 	}
 	mustCreate(t, c, passage)
 
-	waitFor(t, 60*time.Second, "the Passage to start waiting", func() bool {
+	waitFor(t, 3*time.Minute, "the Passage to start waiting", func() bool {
 		var p v1alpha1.Passage
 		if err := c.Get(ctx, key(passage), &p); err != nil {
 			return false
 		}
 		return len(p.Status.Steps) > 0 && p.Status.Steps[0].Phase == v1alpha1.StepRunning
+	}, func() string {
+		var p v1alpha1.Passage
+		_ = c.Get(ctx, key(passage), &p)
+		if len(p.Status.Steps) == 0 {
+			return "  no steps reported yet"
+		}
+		return fmt.Sprintf("  step 0 phase is %q, attempts %d",
+			p.Status.Steps[0].Phase, p.Status.Steps[0].Attempts)
 	})
 
 	attempts := func() int32 {

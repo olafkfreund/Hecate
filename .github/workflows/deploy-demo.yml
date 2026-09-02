@@ -68,6 +68,7 @@ jobs:
           sha=$(git rev-parse --short HEAD)
           echo "tag=${{ env.IMAGE }}:demo.$sha" >> "$GITHUB_OUTPUT"
           echo "moving=${{ env.IMAGE }}:demo" >> "$GITHUB_OUTPUT"
+          echo "version=demo.$sha" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -89,6 +90,14 @@ jobs:
           tags: |
             ${{ steps.name.outputs.tag }}
             ${{ steps.name.outputs.moving }}
+          # Without this the Dockerfile's `ARG VERSION=dev` default survives
+          # into the binary, and the portal's Settings page reports "dev" no
+          # matter what is actually running (#182). demo.<sha> matches the
+          # image tag above, not flake.nix's release version — the demo
+          # deploys main, not a release, so stamping a release version on an
+          # arbitrary main commit would be a lie in the one place someone
+          # looks to find out what is running.
+          build-args: VERSION=${{ steps.name.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
