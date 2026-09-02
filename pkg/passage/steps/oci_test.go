@@ -251,6 +251,52 @@ func TestOCIPullRefusesAnEscapingEntry(t *testing.T) {
 	}
 }
 
+// A tar entry over the size limit must be refused outright, not written
+// truncated. maxEntrySize is a package var precisely so this test can lower
+// it and prove the logic with a small fixture rather than a real 64 MiB one;
+// the production default stays 64 << 20 (asserted below).
+func TestOCIPullRefusesAnOversizeEntry(t *testing.T) {
+	if maxEntrySize != 64<<20 {
+		t.Fatalf("maxEntrySize = %d, want the production default of 64 MiB", maxEntrySize)
+	}
+
+	orig := maxEntrySize
+	maxEntrySize = 8
+	t.Cleanup(func() { maxEntrySize = orig })
+
+	body := []byte("way too big for the limit")
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := tw.WriteHeader(&tar.Header{
+		Name: "big.yaml", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	layer := static.NewLayer(buf.Bytes(), fluxContentMediaType)
+	_, err := untar(layer, dir)
+	if err == nil {
+		t.Fatal("an entry over the size limit was unpacked")
+	}
+	if !strings.Contains(err.Error(), "over the") {
+		t.Errorf("err = %v", err)
+	}
+
+	// The refusal must mean nothing landed, not a truncated file quietly left
+	// behind — that quiet leftover is the bug this guards against.
+	target := filepath.Join(dir, "big.yaml")
+	if _, statErr := os.Stat(target); !os.IsNotExist(statErr) {
+		t.Errorf("big.yaml was written to disk despite the refusal (stat err = %v)", statErr)
+	}
+}
+
 func TestOCIRefusals(t *testing.T) {
 	work := t.TempDir()
 	seedManifests(t, work)

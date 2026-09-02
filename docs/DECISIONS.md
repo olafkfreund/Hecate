@@ -2167,3 +2167,29 @@ directly. That logic still runs, unchanged, but now inside a call to
 `safepath.Join` in a different package — expect those alerts to need
 re-triaging against the new call shape rather than assuming the old dismissal
 still applies verbatim.
+
+## D65 — `oci-pull` checks both the declared and the delivered size of a tar entry
+
+**Decision:** `untar` (`pkg/passage/steps/oci.go`) refuses a tar entry two
+ways, not one. Before reading any of its body, it compares `header.Size`
+against `maxEntrySize` (64 MiB) and refuses outright if the header alone
+claims too much. It then copies the entry with `io.Copy` — not
+`io.LimitReader` — and, after the copy, compares bytes actually written
+against `header.Size` again, refusing if they disagree.
+
+The declared-size check is the one that matters: it is what closes the actual
+bug (`io.LimitReader(tr, 64<<20)` returned a clean EOF at the cap, not an
+error, so an oversize entry landed on disk truncated and `oci-pull` still
+reported success). The written-bytes check is cheap insurance underneath it —
+`archive/tar` already refuses to hand back more than `header.Size` per entry,
+so today it can only fire if that guarantee ever changes or a future edit
+reintroduces a reader that ignores it. Kept anyway: the cost is one integer
+comparison, and it means a regression here fails loudly instead of writing a
+short file that reports as whole.
+
+No cap was added on total entries or total bytes across an archive. Every
+artifact `oci-pull` reads back was produced by this codebase's own
+`oci-push` (`tarball` in the same file), not by an untrusted third party — the
+per-entry limit is the boundary that matters for content this code itself
+produced. Revisit if `oci-pull` is ever pointed at archives from outside
+Hecate's own `oci-push`.

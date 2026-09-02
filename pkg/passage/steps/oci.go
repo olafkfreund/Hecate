@@ -233,7 +233,11 @@ func (o *OCIPull) Run(ctx context.Context, sc *passage.StepContext) (passage.Ste
 			"%s: unpacking into %s: %s", StepOCIPull, cfg.Out, err)
 	}
 
-	digest, _ := image.Digest()
+	digest, err := image.Digest()
+	if err != nil {
+		return passage.StepResult{}, passage.FailTerminal(ReasonRegistryFailed,
+			"%s: %s", StepOCIPull, err)
+	}
 	return passage.StepResult{
 		Phase:   v1alpha1.StepSucceeded,
 		Message: fmt.Sprintf("pulled %s into %s (%s)", ref.String(), cfg.Out, plural(files, "file")),
@@ -324,6 +328,17 @@ func tarball(dir string, stamp time.Time) (v1.Layer, error) {
 	return static.NewLayer(buf.Bytes(), fluxContentMediaType), nil
 }
 
+// maxEntrySize is the largest single tar entry untar will write. A var, not a
+// const, so a test can lower it and prove the refusal with a small fixture
+// instead of building a real 64 MiB one. The production default is 64 MiB.
+//
+// ponytail: no cap on total entries or total bytes across the archive. An
+// artifact this pulls always comes from a push this same code produced
+// (tarball() above), so a bomb of ten million tiny files is not a threat this
+// boundary needs to defend against today. Add one if oci-pull is ever pointed
+// at archives from outside Hecate's own oci-push.
+var maxEntrySize int64 = 64 << 20
+
 // untar unpacks a layer into dir, and returns how many files it wrote.
 func untar(layer v1.Layer, dir string) (int, error) {
 	rc, err := layer.Uncompressed()
@@ -379,15 +394,36 @@ func untar(layer v1.Layer, dir string) (int, error) {
 				return files, err
 			}
 		case tar.TypeReg:
+			// Checked against the declared size before a byte is read, the same
+			// stance as the path checks above: refuse rather than normalise.
+			// io.LimitReader would have silently handed back a truncated file at
+			// the cap — a clean EOF, not an error — and the caller would have
+			// reported the pull as a success.
+			if header.Size > maxEntrySize {
+				return files, fmt.Errorf("entry %q is %d bytes, over the %d byte limit",
+					header.Name, header.Size, maxEntrySize)
+			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return files, err
 			}
-			body, err := io.ReadAll(io.LimitReader(tr, 64<<20))
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 			if err != nil {
 				return files, err
 			}
-			if err := os.WriteFile(target, body, 0o644); err != nil {
+			n, err := io.Copy(f, tr)
+			if closeErr := f.Close(); err == nil {
+				err = closeErr
+			}
+			if err != nil {
 				return files, err
+			}
+			// tar.Reader already refuses to hand back more than header.Size for
+			// this entry, so this catches the opposite fault: a stream that ends
+			// before the header's promise, which io.Copy alone would not treat as
+			// an error while it still leaves a short file on disk.
+			if n != header.Size {
+				return files, fmt.Errorf("entry %q wrote %d bytes, header declared %d",
+					header.Name, n, header.Size)
 			}
 			files++
 		}
