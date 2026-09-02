@@ -233,7 +233,11 @@ func (o *OCIPull) Run(ctx context.Context, sc *passage.StepContext) (passage.Ste
 			"%s: unpacking into %s: %s", StepOCIPull, cfg.Out, err)
 	}
 
-	digest, _ := image.Digest()
+	digest, err := image.Digest()
+	if err != nil {
+		return passage.StepResult{}, passage.FailTerminal(ReasonRegistryFailed,
+			"%s: %s", StepOCIPull, err)
+	}
 	return passage.StepResult{
 		Phase:   v1alpha1.StepSucceeded,
 		Message: fmt.Sprintf("pulled %s into %s (%s)", ref.String(), cfg.Out, plural(files, "file")),
@@ -324,6 +328,26 @@ func tarball(dir string, stamp time.Time) (v1.Layer, error) {
 	return static.NewLayer(buf.Bytes(), fluxContentMediaType), nil
 }
 
+// maxEntrySize is the largest single tar entry untar will write. maxArchiveBytes
+// and maxArchiveEntries bound the archive as a whole. All three are vars, not
+// consts, so a test can lower them and prove the refusal with a small fixture
+// instead of building a real multi-hundred-MB one. The production defaults are
+// 64 MiB per entry, 512 MiB total, 10,000 entries total.
+//
+// OCIPullConfig takes an arbitrary repo and a tag or digest, with no allowlist
+// tying it to anything this codebase pushed — and a tag can move regardless.
+// So the content untar unpacks is not trusted just because it arrived over
+// OCI: it is arbitrary, semi-trusted third-party content, and a per-entry cap
+// alone bounds nothing about the total. A million small entries, or ten
+// thousand entries just under the per-entry cap, both pass that check and can
+// still fill the work dir's disk — which on this system is the controller
+// pod's ephemeral storage, shared with everything else running there.
+var (
+	maxEntrySize      int64 = 64 << 20
+	maxArchiveBytes   int64 = 512 << 20
+	maxArchiveEntries       = 10000
+)
+
 // untar unpacks a layer into dir, and returns how many files it wrote.
 func untar(layer v1.Layer, dir string) (int, error) {
 	rc, err := layer.Uncompressed()
@@ -332,7 +356,8 @@ func untar(layer v1.Layer, dir string) (int, error) {
 	}
 	defer func() { _ = rc.Close() }()
 
-	var files int
+	var files, entries int
+	var totalBytes int64
 	tr := tar.NewReader(rc)
 	for {
 		header, err := tr.Next()
@@ -341,6 +366,15 @@ func untar(layer v1.Layer, dir string) (int, error) {
 		}
 		if err != nil {
 			return files, err
+		}
+
+		// Counted for every header, directories included, so a flood of empty
+		// directories is refused the same as a flood of files — both are the
+		// same disk-exhaustion shape once multiplied by inode/directory-entry
+		// overhead.
+		entries++
+		if entries > maxArchiveEntries {
+			return files, fmt.Errorf("archive carries more than %d entries", maxArchiveEntries)
 		}
 
 		// The archive is remote content, so it is not trusted to stay inside the
@@ -379,16 +413,44 @@ func untar(layer v1.Layer, dir string) (int, error) {
 				return files, err
 			}
 		case tar.TypeReg:
+			// Checked against the declared size before a byte is read, the same
+			// stance as the path checks above: refuse rather than normalise.
+			// io.LimitReader would have silently handed back a truncated file at
+			// the cap — a clean EOF, not an error — and the caller would have
+			// reported the pull as a success.
+			if header.Size > maxEntrySize {
+				return files, fmt.Errorf("entry %q is %d bytes, over the %d byte limit",
+					header.Name, header.Size, maxEntrySize)
+			}
+			// Checked against the declared size too, and before writing, for the
+			// same reason: catching it after the fact would mean the entry that
+			// tipped the archive over the limit already landed on disk in full.
+			if totalBytes+header.Size > maxArchiveBytes {
+				return files, fmt.Errorf("archive is over the %d byte total limit", maxArchiveBytes)
+			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return files, err
 			}
-			body, err := io.ReadAll(io.LimitReader(tr, 64<<20))
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 			if err != nil {
 				return files, err
 			}
-			if err := os.WriteFile(target, body, 0o644); err != nil {
+			n, err := io.Copy(f, tr)
+			if closeErr := f.Close(); err == nil {
+				err = closeErr
+			}
+			if err != nil {
 				return files, err
 			}
+			// tar.Reader already refuses to hand back more than header.Size for
+			// this entry, so this catches the opposite fault: a stream that ends
+			// before the header's promise, which io.Copy alone would not treat as
+			// an error while it still leaves a short file on disk.
+			if n != header.Size {
+				return files, fmt.Errorf("entry %q wrote %d bytes, header declared %d",
+					header.Name, n, header.Size)
+			}
+			totalBytes += n
 			files++
 		}
 	}

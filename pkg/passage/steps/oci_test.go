@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"fmt"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -248,6 +249,174 @@ func TestOCIPullRefusesAnEscapingEntry(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A tar entry over the size limit must be refused outright, not written
+// truncated. maxEntrySize is a package var precisely so this test can lower
+// it and prove the logic with a small fixture rather than a real 64 MiB one;
+// the production default stays 64 << 20 (asserted below).
+func TestOCIPullRefusesAnOversizeEntry(t *testing.T) {
+	if maxEntrySize != 64<<20 {
+		t.Fatalf("maxEntrySize = %d, want the production default of 64 MiB", maxEntrySize)
+	}
+
+	orig := maxEntrySize
+	maxEntrySize = 8
+	t.Cleanup(func() { maxEntrySize = orig })
+
+	body := []byte("way too big for the limit")
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := tw.WriteHeader(&tar.Header{
+		Name: "big.yaml", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	layer := static.NewLayer(buf.Bytes(), fluxContentMediaType)
+	_, err := untar(layer, dir)
+	if err == nil {
+		t.Fatal("an entry over the size limit was unpacked")
+	}
+	if !strings.Contains(err.Error(), "over the") {
+		t.Errorf("err = %v", err)
+	}
+
+	// The refusal must mean nothing landed, not a truncated file quietly left
+	// behind — that quiet leftover is the bug this guards against.
+	target := filepath.Join(dir, "big.yaml")
+	if _, statErr := os.Stat(target); !os.IsNotExist(statErr) {
+		t.Errorf("big.yaml was written to disk despite the refusal (stat err = %v)", statErr)
+	}
+}
+
+// An archive with more entries than the limit must be refused outright,
+// counting directories and files alike — a flood of either is the same
+// disk-exhaustion shape. maxArchiveEntries is a package var for the same
+// reason maxEntrySize is: a small fixture proves the logic without building a
+// real 10,000-entry archive.
+func TestOCIPullRefusesTooManyEntries(t *testing.T) {
+	if maxArchiveEntries != 10000 {
+		t.Fatalf("maxArchiveEntries = %d, want the production default of 10000", maxArchiveEntries)
+	}
+
+	orig := maxArchiveEntries
+	maxArchiveEntries = 3
+	t.Cleanup(func() { maxArchiveEntries = orig })
+
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for i := 0; i < 5; i++ {
+		name := fmt.Sprintf("file-%d.yaml", i)
+		body := []byte("x")
+		if err := tw.WriteHeader(&tar.Header{
+			Name: name, Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body)),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	layer := static.NewLayer(buf.Bytes(), fluxContentMediaType)
+	_, err := untar(layer, dir)
+	if err == nil {
+		t.Fatal("an archive over the entry limit was unpacked")
+	}
+	if !strings.Contains(err.Error(), "more than") {
+		t.Errorf("err = %v", err)
+	}
+
+	// Proof the refusal actually stopped the unpack partway through, rather
+	// than counting entries without acting on it: fewer files landed than the
+	// archive carried.
+	entries, readErr := os.ReadDir(dir)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if len(entries) >= 5 {
+		t.Errorf("all 5 entries landed despite the limit of %d", maxArchiveEntries)
+	}
+}
+
+// An archive whose entries individually pass the per-entry cap but whose sum
+// exceeds the archive-wide cap must still be refused — a per-entry limit alone
+// bounds nothing about the total. maxArchiveBytes is a package var for the
+// same testability reason as the other two limits.
+func TestOCIPullRefusesTooManyTotalBytes(t *testing.T) {
+	if maxArchiveBytes != 512<<20 {
+		t.Fatalf("maxArchiveBytes = %d, want the production default of 512 MiB", maxArchiveBytes)
+	}
+
+	origBytes, origEntries := maxArchiveBytes, maxArchiveEntries
+	maxArchiveBytes = 10
+	maxArchiveEntries = 1000 // isolate the bytes check from the entries check
+	t.Cleanup(func() { maxArchiveBytes, maxArchiveEntries = origBytes, origEntries })
+
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	// Three entries at 4 bytes each: each one is far under maxEntrySize, but
+	// the second entry alone would already be within budget (8 <= 10) while
+	// the third tips the running total over it (12 > 10).
+	for i := 0; i < 3; i++ {
+		name := fmt.Sprintf("file-%d.yaml", i)
+		body := []byte("abcd")
+		if err := tw.WriteHeader(&tar.Header{
+			Name: name, Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body)),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	layer := static.NewLayer(buf.Bytes(), fluxContentMediaType)
+	_, err := untar(layer, dir)
+	if err == nil {
+		t.Fatal("an archive over the total byte limit was unpacked")
+	}
+	if !strings.Contains(err.Error(), "total limit") {
+		t.Errorf("err = %v", err)
+	}
+
+	// The entry that would have tipped the total over the limit must not have
+	// landed at all — checked before the write, not after, so nothing beyond
+	// the limit ever touches disk.
+	var onDisk int64
+	entries, readErr := os.ReadDir(dir)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	for _, e := range entries {
+		fi, err := e.Info()
+		if err != nil {
+			t.Fatal(err)
+		}
+		onDisk += fi.Size()
+	}
+	if onDisk > maxArchiveBytes {
+		t.Errorf("%d bytes landed on disk, over the %d byte limit", onDisk, maxArchiveBytes)
+	}
+	if len(entries) >= 3 {
+		t.Errorf("all 3 entries landed despite the byte limit")
 	}
 }
 
