@@ -238,7 +238,13 @@ func TestCrossingAgainstRealAPI(t *testing.T) {
 	// than an absence. The deployed controller needs none of this: it is
 	// requeued and tries again, so a stale read costs it one interval. Only a
 	// test calling Reconcile by hand can mistake the gap for a decision.
-	waitFor(t, 30*time.Second, "staging to start a crossing", func() bool {
+	//
+	// Bounded at three minutes, not thirty seconds. Driving Reconcile by hand
+	// makes the *reconciler* fast, but it does not make kine consistent: this
+	// loop waits on the storage layer catching up, and on a loaded runner that
+	// has taken longer than thirty seconds. Same bound the deployed-controller
+	// waits in incluster_test.go use, for the same reason.
+	waitFor(t, 3*time.Minute, "staging to start a crossing", func() bool {
 		reconcileGate(t, gateReconciler, "staging")
 		return len(passagesFor(t, c, "staging")) > 0
 	}, func() string { return bundleForensics(t, c) })
@@ -312,7 +318,7 @@ func emittedBundle(t *testing.T, c client.Client, why string) *v1alpha1.Bundle {
 	ctx := context.Background()
 
 	var bundle v1alpha1.Bundle
-	waitFor(t, 60*time.Second, why, func() bool {
+	waitFor(t, 3*time.Minute, why, func() bool {
 		var b v1alpha1.Beacon
 		if err := c.Get(ctx, types.NamespacedName{Name: "app", Namespace: namespace}, &b); err != nil {
 			return false
