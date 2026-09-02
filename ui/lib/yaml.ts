@@ -23,11 +23,25 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 function needsQuoting(s: string): boolean {
   if (s === "") return true;
   if (/^\s|\s$/.test(s)) return true;
+  // C0 controls (\n, \r, \t and the rest): a raw one emitted mid-scalar
+  // breaks the line structure the whole format is built on. JSON.stringify
+  // escapes them correctly, and YAML double-quoted style understands the
+  // result.
+  if (/[\x00-\x1f]/.test(s)) return true;
   if (/^[-?:,[\]{}#&*!|>'"%@`]/.test(s)) return true;
   if (s.includes(": ") || s.endsWith(":") || s.includes(" #")) return true;
   if (/^(true|false|null|yes|no|~)$/i.test(s)) return true;
   if (/^-?\d+(\.\d+)?$/.test(s)) return true;
   return false;
+}
+
+/** key is a map key, quoted by the same rule as a scalar value: it is
+ *  author input wherever a schema's `additionalProperties` allows an
+ *  arbitrary key (`http.headers`), and an unquoted colon, leading dash or
+ *  `#` in a header name breaks the document exactly as it would in a
+ *  value. */
+function key(k: string): string {
+  return needsQuoting(k) ? JSON.stringify(k) : k;
 }
 
 function scalar(v: unknown): string {
@@ -44,22 +58,23 @@ function dumpObject(obj: Record<string, unknown>, indent: number): string[] {
   const lines: string[] = [];
   for (const k of keys) {
     const v = obj[k];
+    const kq = key(k);
     if (isPlainObject(v)) {
       if (Object.keys(v).length === 0) {
-        lines.push(`${pad(indent)}${k}: {}`);
+        lines.push(`${pad(indent)}${kq}: {}`);
       } else {
-        lines.push(`${pad(indent)}${k}:`);
+        lines.push(`${pad(indent)}${kq}:`);
         lines.push(...dumpObject(v, indent + 1));
       }
     } else if (Array.isArray(v)) {
       if (v.length === 0) {
-        lines.push(`${pad(indent)}${k}: []`);
+        lines.push(`${pad(indent)}${kq}: []`);
       } else {
-        lines.push(`${pad(indent)}${k}:`);
+        lines.push(`${pad(indent)}${kq}:`);
         lines.push(...dumpArray(v, indent));
       }
     } else {
-      lines.push(`${pad(indent)}${k}: ${scalar(v)}`);
+      lines.push(`${pad(indent)}${kq}: ${scalar(v)}`);
     }
   }
   return lines;

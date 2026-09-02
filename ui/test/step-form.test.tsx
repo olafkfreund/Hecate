@@ -71,8 +71,26 @@ describe("toYAML", () => {
     expect(toYAML("a: b")).toBe('"a: b"\n');
   });
 
+  it("quotes a string with an interior newline, so a pasted multi-line value stays one YAML scalar", () => {
+    // http.body and git-commit's message are exactly the fields an author
+    // pastes multi-line text into. An unquoted newline breaks the document —
+    // the raw line break would land in the middle of the emitted scalar.
+    expect(toYAML("line one\nline two")).toBe(JSON.stringify("line one\nline two") + "\n");
+  });
+
+  it("quotes a string with an interior tab or carriage return", () => {
+    expect(toYAML("a\tb")).toBe(JSON.stringify("a\tb") + "\n");
+    expect(toYAML("a\rb")).toBe(JSON.stringify("a\rb") + "\n");
+  });
+
   it("renders a nested map with 2-space indents", () => {
     expect(toYAML({ a: 1, b: { c: "x" } })).toBe("a: 1\nb:\n  c: x\n");
+  });
+
+  it("quotes a key that would otherwise break the document — a user-typed http.headers name", () => {
+    expect(toYAML({ "x-my-header": "ok" })).toBe("x-my-header: ok\n");
+    expect(toYAML({ "bad: key": "v" })).toBe('"bad: key": v\n');
+    expect(toYAML({ "-leading-dash": "v" })).toBe('"-leading-dash": v\n');
   });
 
   it("renders a list of scalars and a list of maps", () => {
