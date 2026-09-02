@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -19,6 +18,7 @@ import (
 	"github.com/olafkfreund/hecate/api/v1alpha1"
 	hgit "github.com/olafkfreund/hecate/pkg/git"
 	"github.com/olafkfreund/hecate/pkg/passage"
+	"github.com/olafkfreund/hecate/pkg/safepath"
 )
 
 // Step names.
@@ -92,19 +92,18 @@ func classify(err error) string {
 }
 
 // checkoutPath resolves a step's `path` against the Passage work dir, refusing
-// anything that escapes it.
+// anything that escapes it — including via a symlink already present in the
+// checkout (a fleet repo can commit one), since Steps take configuration from
+// a Gate that is not necessarily authored by whoever runs the controller.
+//
+// safepath.Join does the containment work; it is shared with the authoring
+// endpoint's gitPublish, which needed the identical guard for the identical
+// reason.
 func checkoutPath(workDir, path string) (string, error) {
 	if path == "" {
 		path = defaultCheckout
 	}
-	full := filepath.Join(workDir, path)
-	// A `path` of "../../etc" would otherwise write outside the scratch
-	// directory. Steps take configuration from a Gate, which is not necessarily
-	// authored by whoever runs the controller.
-	if rel, err := filepath.Rel(workDir, full); err != nil || strings.HasPrefix(rel, "..") {
-		return "", fmt.Errorf("path %q escapes the work directory", path)
-	}
-	return full, nil
+	return safepath.Join(workDir, path)
 }
 
 // openRepo opens an existing checkout, distinguishing "not there" from "broken".

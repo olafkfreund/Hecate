@@ -324,6 +324,50 @@ func TestPathCannotEscapeTheWorkDir(t *testing.T) {
 	}
 }
 
+// TestCheckoutPathRefusesASymlinkEscape is the case a lexical filepath.Rel
+// check cannot catch: after git-clone runs, workDir contains whatever the
+// cloned repository committed — including a symlink. A relative target (an
+// absolute one is rebased under the checkout root by go-git's own worktree
+// checkout, so it never reaches this guard) reaches outside workDir on the
+// real filesystem while still lexically containing no "..".
+func TestCheckoutPathRefusesASymlinkEscape(t *testing.T) {
+	work := t.TempDir()
+	outside := t.TempDir()
+	target := strings.Repeat("../", 12) + strings.TrimPrefix(filepath.ToSlash(outside), "/")
+	if err := os.Symlink(target, filepath.Join(work, "apps")); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := checkoutPath(work, "apps/passage.yaml")
+	if err == nil {
+		t.Fatal("expected a refusal — apps is a symlink out of the work dir")
+	}
+	if _, statErr := os.Stat(filepath.Join(outside, "passage.yaml")); !os.IsNotExist(statErr) {
+		t.Fatalf("the resolved path escaped the work dir: %s exists", filepath.Join(outside, "passage.yaml"))
+	}
+}
+
+// TestCheckoutPathKeepsANestedPath is the trap in the fix: the shared
+// safepath.Join resolves the deepest *existing* ancestor of a not-yet-created
+// path, so dropping what it walked past to get there would silently land the
+// result at workDir's root instead of the requested nested path.
+func TestCheckoutPathKeepsANestedPath(t *testing.T) {
+	work := t.TempDir()
+
+	got, err := checkoutPath(work, "apps/dev/passage.yaml")
+	if err != nil {
+		t.Fatalf("checkoutPath: %v", err)
+	}
+	realWork, err := filepath.EvalSymlinks(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(realWork, "apps", "dev", "passage.yaml")
+	if got != want {
+		t.Fatalf("checkoutPath(%q, %q) = %q, want %q", work, "apps/dev/passage.yaml", got, want)
+	}
+}
+
 func TestGitStepsRejectBadConfig(t *testing.T) {
 	work := t.TempDir()
 	for name, tc := range map[string]struct {

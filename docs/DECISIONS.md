@@ -2060,6 +2060,8 @@ not only its `[]v1alpha1.Step`, so the type the API server would validate on
 `kubectl apply` and the type this endpoint marshals are the identical Go
 value, not two structs kept in sync by hand.
 
+---
+
 ## D60 — Validation-as-feedback is authenticated only, and answers 200 either way
 
 *2026-09-02 — #172*
@@ -2123,3 +2125,45 @@ simply never rendering the JavaScript — that skips `/passages/validate`
 entirely is still refused at `/passages/author` for exactly the same reasons
 this endpoint would have shown it, because both routes call the identical
 `Registry.Validate` rather than two copies of the same rules.
+
+---
+
+## D61 — Symlink-safe path containment lives in `pkg/safepath`, not in either caller
+
+**Decision:** the filesystem-aware containment check — resolve the deepest
+existing ancestor with `EvalSymlinks`, require it inside the checkout,
+rebuild the path from what was actually proven contained — lives in
+`pkg/safepath.Join`. The Passage steps' `checkoutPath`
+(`pkg/passage/steps/git.go`) and the authoring endpoint's `gitPublish`
+(`pkg/api/author.go`, D58/D59) both call it. Neither keeps its own copy.
+
+`filepath.Rel` alone is purely lexical: it never touches the filesystem, so a
+symlink already committed into a checkout (`apps -> ../../etc`) clears it
+while the OS resolves the joined path somewhere else entirely. #191 found and
+fixed this for `gitPublish`; #194 found the identical gap in `checkoutPath`,
+copied there by precedent along with the same lexical-only guard. Two copies
+of the fix is exactly the drift D57 and the commit-status schema bug (#171)
+were both about — a second implementation would eventually disagree with the
+first about what "escapes" means, invisibly, until an audit or an incident
+found the gap one call site at a time.
+
+**A new package, not an addition to `pkg/git`.** `pkg/git` already answers one
+question — "what credentials apply to this repository?" — by design (see its
+package comment); folding in a second, unrelated question would undo that
+discipline for the same reason `pkg/ops` and `pkg/registry` exist as their own
+packages rather than as an addition to something already there (D32). Neither
+`pkg/api` nor `pkg/passage/steps` imports the other, so the helper needed a
+home both could reach without a cycle regardless.
+
+**`checkoutPath` and `gitPublish` keep their own wrapping.** `checkoutPath`
+still supplies the `defaultCheckout` fallback for an empty `path`; `gitPublish`
+still turns a refusal into its own error text. `safepath.Join` only answers
+containment — callers still own what an empty or invalid input means for them.
+
+This also changes the dataflow CodeQL sees at `pkg/api/author.go`'s three
+`go/path-injection` alerts, dismissed as false positives on the strength of
+the inline `realAncestor` + `EvalSymlinks` block that used to sit there
+directly. That logic still runs, unchanged, but now inside a call to
+`safepath.Join` in a different package — expect those alerts to need
+re-triaging against the new call shape rather than assuming the old dismissal
+still applies verbatim.
