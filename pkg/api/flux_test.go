@@ -26,11 +26,33 @@ func watchingFlux(gateName, kustomization string) *v1alpha1.Gate {
 	return g
 }
 
+// watchingKind is watchingFlux for a kind other than Kustomization — the case
+// that made a fixed `patch kustomizations` check dishonest.
+func watchingKind(gateName, kind, name string) *v1alpha1.Gate {
+	g := gate(gateName)
+	with, _ := json.Marshal(map[string]any{
+		"resources": []map[string]string{{"kind": kind, "name": name}},
+	})
+	g.Spec.Watch = []v1alpha1.HealthCheck{
+		{Uses: "flux", With: &apiextensionsv1.JSON{Raw: with}},
+	}
+	return g
+}
+
 // kustomization is a Flux object as the cluster holds it.
 func kustomization(name, namespace string, suspended bool) *unstructured.Unstructured {
+	return fluxObject("kustomize.toolkit.fluxcd.io/v1", "Kustomization", name, namespace, suspended)
+}
+
+// helmRelease is the same thing in a different API group.
+func helmRelease(name, namespace string, suspended bool) *unstructured.Unstructured {
+	return fluxObject("helm.toolkit.fluxcd.io/v2", "HelmRelease", name, namespace, suspended)
+}
+
+func fluxObject(apiVersion, kind, name, namespace string, suspended bool) *unstructured.Unstructured {
 	o := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "kustomize.toolkit.fluxcd.io/v1",
-		"kind":       "Kustomization",
+		"apiVersion": apiVersion,
+		"kind":       kind,
 		"metadata":   map[string]any{"name": name, "namespace": namespace},
 		"spec":       map[string]any{"suspend": suspended},
 		"status": map[string]any{
@@ -139,6 +161,81 @@ func TestSuspendNeedsItsOwnPermission(t *testing.T) {
 	attrs := log.last().ResourceAttributes
 	if attrs == nil || attrs.Group != "kustomize.toolkit.fluxcd.io" || attrs.Verb != "patch" {
 		t.Errorf("authorised %+v, want patch on kustomize.toolkit.fluxcd.io", attrs)
+	}
+}
+
+// TestFluxWriteAuthorisesTheKindItActuallyPatches pins the two halves
+// together: whatever group and resource the SubjectAccessReview named is the
+// group and resource that got written.
+//
+// The check used to be a constant `patch kustomizations.kustomize.toolkit
+// .fluxcd.io` whatever the Gate watched, while the patch went to whichever
+// kind the watch resolved to — so a caller holding only `patch kustomizations`
+// could suspend a HelmRelease, a different API group, through Hecate. Hecate
+// patches with its own ServiceAccount, so the API server never gets a second
+// chance to refuse.
+func TestFluxWriteAuthorisesTheKindItActuallyPatches(t *testing.T) {
+	// Both routes patch, so both have to ask about the kind they patch.
+	bodies := map[string]string{
+		"suspend":   `{"kind":"HelmRelease","name":"podinfo","suspend":true}`,
+		"reconcile": `{"kind":"HelmRelease","name":"podinfo"}`,
+	}
+	for _, route := range []string{"suspend", "reconcile"} {
+		t.Run(route, func(t *testing.T) {
+			s, log := newServer(t,
+				map[string]string{"tok": "ada"},
+				// The right the old check asked for, and nothing else.
+				grants{"ada": {"list gates": true, "patch kustomizations": true}},
+				watchingKind("production", "HelmRelease", "podinfo"),
+				helmRelease("podinfo", "acme", false),
+			)
+
+			rec := call(t, s, "tok", http.MethodPost,
+				"/api/v1alpha1/namespaces/acme/gates/production/flux/"+route, bodies[route])
+
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("got %d, want 403 — `patch kustomizations` is not the right to "+
+					"write a HelmRelease: %s", rec.Code, rec.Body.String())
+			}
+			attrs := log.last().ResourceAttributes
+			if attrs == nil || attrs.Group != "helm.toolkit.fluxcd.io" ||
+				attrs.Resource != "helmreleases" || attrs.Verb != "patch" {
+				t.Fatalf("authorised %+v, want patch helmreleases.helm.toolkit.fluxcd.io", attrs)
+			}
+		})
+	}
+}
+
+// TestFluxWriteAllowsTheKindTheCallerHolds is the same pinning from the other
+// side: the right that matches what is written is the right that works, and
+// the object that changes is the one that was authorised.
+func TestFluxWriteAllowsTheKindTheCallerHolds(t *testing.T) {
+	s, log := newServer(t,
+		map[string]string{"tok": "ada"},
+		grants{"ada": {"list gates": true, "patch helmreleases": true}},
+		watchingKind("production", "HelmRelease", "podinfo"),
+		helmRelease("podinfo", "acme", false),
+	)
+
+	rec := call(t, s, "tok", http.MethodPost,
+		"/api/v1alpha1/namespaces/acme/gates/production/flux/suspend",
+		`{"kind":"HelmRelease","name":"podinfo","suspend":true}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+
+	attrs := log.last().ResourceAttributes
+	obj := &unstructured.Unstructured{}
+	obj.SetGroupVersionKind(helmRelease("x", "acme", false).GroupVersionKind())
+	if err := s.Ops.Client.Get(t.Context(),
+		client.ObjectKey{Namespace: "acme", Name: "podinfo"}, obj); err != nil {
+		t.Fatal(err)
+	}
+	if suspended, _, _ := unstructured.NestedBool(obj.Object, "spec", "suspend"); !suspended {
+		t.Fatal("the HelmRelease was not suspended")
+	}
+	if got := obj.GroupVersionKind().Group; got != attrs.Group {
+		t.Errorf("patched group %q but authorised group %q", got, attrs.Group)
 	}
 }
 

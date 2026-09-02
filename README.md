@@ -308,9 +308,12 @@ has been recorded — never 0 for any of them.
 **There is no pipeline object** — the graph is implied by what each Gate admits, so it
 cannot drift out of sync with reality.
 
-**Hecate never talks to Flux.** A Passage writes to git; Flux syncs; Hecate reads
-`Kustomization` / `HelmRelease` status back. Git is the rendezvous, which keeps Flux
-authoritative and Hecate removable.
+**Nothing Hecate deploys goes through Flux's API.** A Passage writes to git; Flux
+syncs; Hecate reads `Kustomization` / `HelmRelease` status back. Git is the rendezvous,
+which keeps Flux authoritative and Hecate removable. The two writes that do land on a
+Flux object — the reconcile doorbell, and an operator suspending or resuming one —
+change *when* and *whether* Flux acts, never *what* it applies ([D26,
+D66](docs/DECISIONS.md)).
 
 ## What makes it different
 
@@ -412,8 +415,10 @@ rules — three months' notice once a replacement exists, and a removal that fai
 rollout rather than silently pruning fields. Read the
 [full policy](docs/DEVELOPMENT-PLAN.md#api-lifecycle) before depending on it.
 
-Hecate reads Flux resources and never writes them. The exact API versions and status
-fields it depends on are listed in
+Hecate reads Flux resources; the only writes are a reconcile annotation and the
+operator's suspend/resume, both described in [D26 and D66](docs/DECISIONS.md). Nothing
+about a promotion's *content* reaches Flux except through git. The exact API versions
+and status fields it depends on are listed in
 [the Flux compatibility surface](docs/ARCHITECTURE.md#flux-compatibility-surface) —
 that list is the blast radius of any Flux change.
 

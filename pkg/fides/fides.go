@@ -1,15 +1,34 @@
 // Package fides talks to a Fides server — the compliance system Hecate records
 // promotions in and asks for permission.
 //
-// Only the endpoints a promotion needs are here. Fides has a large API; Hecate
-// uses three parts of it:
+// Only the endpoints a promotion needs are here. Fides has a large API, and
+// Hecate uses a small part of it — but that part is not read-only, which is
+// the thing to know before reasoning about who can write to the evidence
+// chain.
+//
+// What it reads:
 //
 //   - verify a trail's attestation chain, so the tamper-evidence claim is
 //     checkable by whoever relies on it rather than asserted in documentation;
-//   - check an environment's policy against a trail;
-//   - check whether an artifact is on an environment's allowlist.
+//   - check an environment's policy against a trail (`Assert`);
+//   - check whether an artifact is on an environment's allowlist;
+//   - ask the change gate for a verdict, and read the change request behind it.
 //
-// The last two are why a Gate has to name a Fides environment at all.
+// The policy and allowlist checks are why a Gate has to name a Fides
+// environment at all.
+//
+// What it writes, all onto the trail:
+//
+//   - `Attest` records an attestation — a crossing, a verification, a refusal;
+//   - `ReportArtifact` records the image or chart a Bundle carries;
+//   - `RecordApproval` records one identity signing off in one role, on behalf
+//     of the human who gave it rather than under Hecate's own token (see
+//     docs/RBAC.md — an approval recorded as Hecate would make every
+//     four-eyes check see one identity).
+//
+// These three are the entire write surface. Anyone holding the Fides
+// credentials in a Gate's `credentialsRef` can reach all of them, so that
+// Secret is a write credential to the evidence chain and not just a read one.
 package fides
 
 import (

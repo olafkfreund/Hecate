@@ -3,7 +3,7 @@
   Roles for people, as opposed to the ClusterRole in rbac.yaml, which is what
   Hecate itself holds.
 
-  Three of them rather than one, because #74 requires that the right to cross a
+  Several of them rather than one, because #74 requires that the right to cross a
   Gate and the right to approve a crossing be separable: an approval the
   promoter can grant themselves is not an approval. They are different verbs on
   different resources, so binding one does not confer the other — and nothing in
@@ -125,16 +125,22 @@ rules:
 ---
 {{/*
   An author can open a pull request that proposes a Gate's step list
-  (hecate#172). It never writes to this cluster — no rule here grants create,
-  update or patch on any Hecate resource — the write lands in a fleet
+  (hecate#172). It never writes to this cluster: the write lands in a fleet
   repository as a pull request, for a human to review before it becomes a
   Gate at all.
 
-  Checked against "create gates" (ActionAuthorPassage) because a merged pull
-  request is exactly what creating a Gate's spec.passage would be, and that is
-  the equivalent right. Its own role for the same reason flux-operator is its
-  own role: a bigger and more distinct grant than anything promoter or
-  approver carry, so deliberately unbound by default.
+  The grant is "create gates/author" — a virtual subresource that no API
+  object answers to, so the only thing it authorises is Hecate's authoring
+  endpoint (ActionAuthorPassage). This used to be "create gates", on the
+  reasoning that a merged pull request is what creating a Gate's spec.passage
+  would be. But RBAC has no notion of "this grant only proxies an HTTP
+  endpoint": a subject bound to that role could `kubectl create -f gate.yaml`
+  straight onto the cluster, skipping the review the whole feature exists for,
+  and a hand-written Gate names the Fides evidence server it trusts. See D66.
+
+  Its own role for the same reason flux-operator is its own role: a bigger and
+  more distinct grant than anything promoter or approver carry, so
+  deliberately unbound by default.
 */}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -146,6 +152,6 @@ rules:
     resources: ["beacons", "bundles", "gates", "passages"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["hecate.dev"]
-    resources: ["gates"]
+    resources: ["gates/author"]
     verbs: ["create"]
 {{- end }}

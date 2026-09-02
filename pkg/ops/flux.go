@@ -10,6 +10,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -141,17 +142,13 @@ func (o *Ops) readFlux(ctx context.Context, ref health.FluxResource, namespace s
 
 // SetFluxSuspend suspends or resumes one Flux resource a Gate watches.
 //
-// Scoped to the Gate's own resources rather than taking a free-form reference:
-// the API's authorisation is per namespace, and a handler that suspended
-// anything it was named would let a caller who may write in one namespace
-// stop reconciliation in another simply by asking for it.
+// Takes a resource already resolved by FluxTarget rather than a kind and a
+// name. Resolving here as well would mean the caller authorised against one
+// resolution and this patched another — a Gate edited in between would move
+// the write to a different API group than the one that was checked.
 func (o *Ops) SetFluxSuspend(
-	ctx context.Context, namespace, gateName, kind, name string, suspend bool,
+	ctx context.Context, namespace string, ref health.FluxResource, suspend bool,
 ) error {
-	ref, err := o.resourceOfGate(ctx, namespace, gateName, kind, name)
-	if err != nil {
-		return err
-	}
 	patch, err := json.Marshal(map[string]any{"spec": map[string]any{"suspend": suspend}})
 	if err != nil {
 		return err
@@ -164,11 +161,9 @@ func (o *Ops) SetFluxSuspend(
 // Returns the stamp it wrote, so a caller can match it against
 // status.lastHandledReconcileAt and know its own request was the one that
 // landed rather than watching for any change and hoping.
-func (o *Ops) ReconcileFlux(ctx context.Context, namespace, gateName, kind, name string) (string, error) {
-	ref, err := o.resourceOfGate(ctx, namespace, gateName, kind, name)
-	if err != nil {
-		return "", err
-	}
+func (o *Ops) ReconcileFlux(
+	ctx context.Context, namespace string, ref health.FluxResource,
+) (string, error) {
 	// The clock, unlike the flux-reconcile step which stamps from the Passage:
 	// there a re-run must not ring the doorbell twice, here a person pressing
 	// the button twice means it twice.
@@ -183,6 +178,32 @@ func (o *Ops) ReconcileFlux(ctx context.Context, namespace, gateName, kind, name
 		return "", err
 	}
 	return stamp, nil
+}
+
+// FluxTarget resolves one of the resources a Gate watches, and the kind it
+// actually names.
+//
+// Separate from the operations below, and exported, because the caller has to
+// know what will be written *before* it is written: the API authorises against
+// the resolved group and resource, and a Gate's flux check may override the
+// apiVersion. Resolving inside each operation would leave the check guessing.
+//
+// Scoped to the Gate's own resources rather than taking a free-form reference:
+// the API's authorisation is per namespace, and an endpoint that operated on
+// anything it was named would let a caller who may write in one namespace stop
+// reconciliation in another simply by asking for it.
+func (o *Ops) FluxTarget(
+	ctx context.Context, namespace, gateName, kind, name string,
+) (health.FluxResource, schema.GroupVersionKind, error) {
+	ref, err := o.resourceOfGate(ctx, namespace, gateName, kind, name)
+	if err != nil {
+		return health.FluxResource{}, schema.GroupVersionKind{}, err
+	}
+	gvk, err := ref.GVK()
+	if err != nil {
+		return health.FluxResource{}, schema.GroupVersionKind{}, err
+	}
+	return ref, gvk, nil
 }
 
 // resourceOfGate finds a resource among the ones a Gate watches, refusing

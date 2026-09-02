@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/olafkfreund/hecate/pkg/health"
 	"github.com/olafkfreund/hecate/pkg/ops"
 	"github.com/olafkfreund/hecate/pkg/passage"
 	"github.com/olafkfreund/hecate/pkg/provider"
@@ -171,10 +172,15 @@ func (s *Server) Handler() http.Handler {
 
 	mux.Handle("GET /api/v1alpha1/namespaces/{namespace}/gates/{name}/flux",
 		s.guard(ActionRead, s.fluxResources))
+	// The two Flux writes authorise inside the handler rather than through
+	// guard(), because the Action is not a constant: what gets patched is
+	// whatever kind the Gate's watch names, and that is only known once the
+	// Gate has been read. Both handlers resolve first and authorise against
+	// the resolved group and resource — see authorizeFluxWrite.
 	mux.Handle("POST /api/v1alpha1/namespaces/{namespace}/gates/{name}/flux/suspend",
-		s.guard(ActionOperateFlux, s.suspendFlux))
+		s.authenticated(s.suspendFlux))
 	mux.Handle("POST /api/v1alpha1/namespaces/{namespace}/gates/{name}/flux/reconcile",
-		s.guard(ActionOperateFlux, s.reconcileFlux))
+		s.authenticated(s.reconcileFlux))
 
 	// Last, and on "/" so it catches everything the routes above did not.
 	// Go's mux prefers the more specific pattern, so /api/... and /healthz
@@ -238,9 +244,12 @@ func (s *Server) guard(action Action, h handler) http.Handler {
 // authenticated runs a handler for any authenticated caller, leaving
 // authorisation to the handler.
 //
-// Exists for exactly one route. A handler reached this way is responsible for
-// deciding what the subject may see, which is why it takes the Subject and why
-// there is a comment on the only user of it rather than a general invitation to
+// Exists for the handful of routes whose Action guard() cannot know: the
+// settings writes, which check resources outside the path namespace, and the
+// two Flux writes, whose resource is whatever the Gate's watch resolves to. A
+// handler reached this way is responsible for deciding what the subject may
+// do, which is why it takes the Subject and why every user of it carries a
+// comment saying what it checks instead — this is not a general invitation to
 // skip authorisation.
 func (s *Server) authenticated(h handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -539,6 +548,35 @@ func (s *Server) fluxResources(ctx context.Context, _ Subject, r *http.Request) 
 	return s.Ops.FluxResources(ctx, r.PathValue("namespace"), r.PathValue("name"))
 }
 
+// authorizeFluxWrite resolves what a Flux write would actually patch, and
+// checks the caller against that — not against a fixed guess.
+//
+// Resolution has to come first, which is why these two routes cannot use
+// guard(): a Gate's flux check may override the apiVersion, so the group and
+// resource being written are a property of the Gate, not of the route. Asking
+// for `patch kustomizations` regardless would mean a caller holding only that
+// right could suspend a HelmRelease — a different API group — through Hecate,
+// because Hecate patches with its own ServiceAccount and the API server never
+// sees the caller.
+//
+// Reading the Gate before the permission check is deliberate and is the price:
+// an authenticated caller can learn whether a Gate they named exists. The Gate
+// is read with Hecate's own credentials either way, nothing is written, and
+// the alternative is authorising against a resource that is not the one about
+// to be patched.
+func (s *Server) authorizeFluxWrite(
+	ctx context.Context, subject Subject, namespace, gate, kind, name string,
+) (health.FluxResource, error) {
+	ref, gvk, err := s.Ops.FluxTarget(ctx, namespace, gate, kind, name)
+	if err != nil {
+		return health.FluxResource{}, err
+	}
+	if err := s.Auth.Authorize(ctx, subject, ActionOperateFlux(gvk), namespace); err != nil {
+		return health.FluxResource{}, err
+	}
+	return ref, nil
+}
+
 // suspendFlux stops or restarts Flux reconciling one resource.
 //
 // The suspending is the dangerous half and the resuming is the remedy, so both
@@ -558,7 +596,11 @@ func (s *Server) suspendFlux(ctx context.Context, subject Subject, r *http.Reque
 		return nil, &BadRequest{Reason: "kind and name are required"}
 	}
 	namespace, gate := r.PathValue("namespace"), r.PathValue("name")
-	if err := s.Ops.SetFluxSuspend(ctx, namespace, gate, body.Kind, body.Name, body.Suspend); err != nil {
+	ref, err := s.authorizeFluxWrite(ctx, subject, namespace, gate, body.Kind, body.Name)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.Ops.SetFluxSuspend(ctx, namespace, ref, body.Suspend); err != nil {
 		return nil, err
 	}
 	// The actor is echoed because a suspension outlives the session that made
@@ -569,7 +611,7 @@ func (s *Server) suspendFlux(ctx context.Context, subject Subject, r *http.Reque
 	}, nil
 }
 
-func (s *Server) reconcileFlux(ctx context.Context, _ Subject, r *http.Request) (any, error) {
+func (s *Server) reconcileFlux(ctx context.Context, subject Subject, r *http.Request) (any, error) {
 	var body struct {
 		Kind string `json:"kind"`
 		Name string `json:"name"`
@@ -580,8 +622,13 @@ func (s *Server) reconcileFlux(ctx context.Context, _ Subject, r *http.Request) 
 	if body.Kind == "" || body.Name == "" {
 		return nil, &BadRequest{Reason: "kind and name are required"}
 	}
-	stamp, err := s.Ops.ReconcileFlux(ctx, r.PathValue("namespace"), r.PathValue("name"),
+	namespace := r.PathValue("namespace")
+	ref, err := s.authorizeFluxWrite(ctx, subject, namespace, r.PathValue("name"),
 		body.Kind, body.Name)
+	if err != nil {
+		return nil, err
+	}
+	stamp, err := s.Ops.ReconcileFlux(ctx, namespace, ref)
 	if err != nil {
 		return nil, err
 	}

@@ -20,6 +20,8 @@ import (
 
 	authenticationv1 "k8s.io/api/authentication/v1"
 	authorizationv1 "k8s.io/api/authorization/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -64,22 +66,6 @@ var (
 	ActionApprove = Action{Verb: "update", Resource: "bundles/status"}
 	// ActionAbort stops a running Passage.
 	ActionAbort = Action{Verb: "update", Resource: "passages"}
-	// ActionOperateFlux suspends, resumes or reconciles a Flux resource a Gate
-	// watches.
-	//
-	// Its own action, and deliberately not folded into promoting. Suspending a
-	// Kustomization stops every future deploy of it and is state git will not
-	// restore, so it outlives whoever did it — that is a bigger right than
-	// asking a Gate to cross a Bundle, which git can undo and which leaves a
-	// Passage saying who asked.
-	//
-	// Checked against Flux's own resource rather than a Hecate one, because
-	// that is what is actually being written: someone who may patch
-	// Kustomizations has this right already, and someone who may not should not
-	// gain it by having a Hecate role.
-	ActionOperateFlux = Action{
-		Verb: "patch", Group: "kustomize.toolkit.fluxcd.io", Resource: "kustomizations",
-	}
 	// coreGroup names the core API group, whose real name is the empty string.
 	// Spelled out so an Action can ask for it without being mistaken for one
 	// that never set a group at all.
@@ -106,18 +92,65 @@ var (
 	// ActionAuthorPassage opens a pull request that proposes a Gate's step
 	// list (hecate#172, stage 2).
 	//
-	// Checked against "create gates" rather than a resource of its own: a
-	// merged pull request is exactly what creating a Gate's `spec.passage`
-	// would be, and admission cannot run before a human reviews it, so this is
-	// where the equivalent right has to be enforced. Its own Action rather
+	// Checked as `create` on gates, because a merged pull request is exactly
+	// what creating a Gate's `spec.passage` would be, and admission cannot run
+	// before a human reviews it — so this is where the equivalent right has to
+	// be enforced. Against the `author` subresource, so that enforcing it does
+	// not also hand out the real write. Its own Action rather
 	// than folded into ActionEditGate (which is "update", for a Gate that
 	// already exists in the cluster): granting someone the right to open a
 	// pull request against a fleet repository is a bigger and more distinct
 	// grant than letting them repoint an existing Gate at a different
 	// evidence server, and the chart leaves it unbound by default for the same
-	// reason ActionOperateFlux's role is (docs/DECISIONS.md D58).
-	ActionAuthorPassage = Action{Verb: "create", Resource: "gates"}
+	// reason the flux-operator role is (docs/DECISIONS.md D58).
+	//
+	// The subresource is the point. "create gates" would be the same right in
+	// Hecate and a live write in Kubernetes: RBAC has no way to say "this
+	// grant only proxies an HTTP endpoint", so a role carrying it lets its
+	// holder `kubectl create -f gate.yaml` directly — and a Gate names the
+	// Fides evidence server it trusts, so a hand-written one can point at an
+	// attacker's. `gates/author` is a subresource no API object answers to, so
+	// the grant authorises this endpoint and nothing else. See D66.
+	ActionAuthorPassage = Action{Verb: "create", Resource: "gates/author"}
 )
+
+// ActionOperateFlux is the right to suspend, resume or reconcile one Flux
+// resource a Gate watches.
+//
+// Its own action, and deliberately not folded into promoting. Suspending a
+// Kustomization stops every future deploy of it and is state git will not
+// restore, so it outlives whoever did it — that is a bigger right than asking
+// a Gate to cross a Bundle, which git can undo and which leaves a Passage
+// saying who asked.
+//
+// Checked against Flux's own resource rather than a Hecate one, because that
+// is what is actually being written: someone who may patch Kustomizations has
+// this right already, and someone who may not should not gain it by having a
+// Hecate role.
+//
+// A function rather than a var because "what is actually being written" is not
+// known until the Gate's watch has been resolved. A Gate's flux check may
+// override the apiVersion — the documented escape hatch for kinds Hecate has
+// not enumerated (pkg/health.FluxResource.APIVersion) — so a fixed
+// `patch kustomizations` would authorise one group and patch another, letting
+// a caller holding only that right annotate or suspend a HelmRelease.
+//
+// The resource name is guessed from the kind rather than looked up in a
+// RESTMapper. The guess is exact for every kind Flux ships, the *group* — the
+// half that made this dishonest — is always the resolved one, and a wrong
+// guess names a resource nobody can hold and so denies. Swap in the client's
+// RESTMapper if a kind ever pluralises in a way the guess gets wrong.
+func ActionOperateFlux(gvk schema.GroupVersionKind) Action {
+	plural, _ := meta.UnsafeGuessKindToResource(gvk)
+	group := plural.Group
+	if group == "" {
+		// Empty here would mean hecate.dev, not core — see Action.Group. A
+		// core-group Flux object does not exist, but authorising against the
+		// wrong group by accident is the whole bug this function fixes.
+		group = coreGroup
+	}
+	return Action{Verb: "patch", Group: group, Resource: plural.Resource}
+}
 
 // ErrUnauthenticated means no usable credential was presented.
 var ErrUnauthenticated = errors.New("no valid credentials")
