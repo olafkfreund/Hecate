@@ -2274,6 +2274,10 @@ unchecked. Renaming a field in `AuthoredPullRequest` and re-running the test
 reproduces the failure this exists to catch: `go test`/`vitest` now fails
 loudly on an unmapped or drifted interface instead of silently passing.
 
+---
+
+## D64 — `why_stuck`'s published enums are built from `pkg/ops`, not hand-typed
+
 **Decision:** `pkg/mcp/tools.go`'s `why_stuck` `outputSchema` builds its
 `state` and `blockers[].kind` JSON Schema `enum` arrays from two new exported,
 ordered lists in `pkg/ops` — `AllStates` and `AllBlockerKinds` — rather than
