@@ -1774,3 +1774,63 @@ answer should probably still be "reuse the kubeconfig's OIDC token" rather than
 Provider sign-in recipes — Okta, Entra, Google, Keycloak — are a separate
 matter, tracked in #52 and deliberately unwritten until somebody has run one
 against a real tenant.
+
+## D56 — Ambient registry credentials are composed keychains, not k8schain
+
+**2026-09-02 · accepted · #50**
+
+`pkg/registry`'s own doc comment claimed the auth chain covered "the cloud
+keychains that cover IRSA, Workload Identity and Managed Identity". It didn't:
+line 31 built a bare `authn.DefaultKeychain`, which reads
+`~/.docker/config.json` and nothing else. `TestRegistryMatrixNeedsAmbientDockerCredentials`
+pinned this — ECR only passed the registry matrix because CI ran `docker login`
+first, not because a controller pod has any ambient identity of its own.
+
+**Decision.** Compose the per-cloud keychains go-containerregistry already
+ships — `pkg/v1/google` for GCR/Artifact Registry, plus a small keychain of our
+own for ECR — into the existing `authn.NewMultiKeychain`, rather than importing
+`github.com/google/go-containerregistry/pkg/authn/k8schain`.
+
+**What k8schain would have cost, measured rather than estimated.** `go get`-ing
+it added 27 lines to `go.mod`'s require blocks and 69 to `go.sum`: the full AWS
+SDK v2 (STS, SSO, SSOOIDC, the ECR credential-helper module and its
+`docker-credential-helpers` dependency), the full Azure SDK plus MSAL and an
+ACR credential-helper module, a `kubernetes` sub-keychain package we do not
+need — we already read the referenced Secret ourselves — and it forced
+`k8s.io/api`, `k8s.io/apimachinery` and `k8s.io/client-go` up a patch version
+each, coupling this decision to an unrelated dependency bump.
+
+**What the chosen route cost, same measurement.** 16 lines in `go.mod` (3
+direct, 13 indirect), 33 in `go.sum`: `aws-sdk-go-v2` core plus its `config`
+and `service/ecr` packages for ECR, and `cloud.google.com/go/compute/metadata`
+for Google — `golang.org/x/oauth2` was already a dependency, so
+`pkg/v1/google` cost almost nothing on its own. No `k8s.io/*` version moved.
+Roughly half the footprint of k8schain, for two of the three clouds.
+
+**Why this is also the right shape, not just the lighter one.** D4 and D55 both
+weigh the same way: prefer the primitive that already does the job over a
+larger package that does it plus things we don't need. k8schain's job is
+mostly *also reading a Kubernetes Secret and a service account's pull secrets*
+— machinery `pkg/registry` already has, in its own idiom, tested and in
+production. The only thing missing was the cloud SDK calls themselves, and
+those compose into `NewMultiKeychain` exactly like the Secret-backed keychain
+already does. No Kubernetes clientset had to be threaded through `Keychain()`
+to make this work: IRSA and Workload Identity are both ambient — an environment
+variable and a projected token file the platform sets up, not an API call — so
+the AWS and GCP keychains need no `client.Client` or `*kubernetes.Clientset` at
+all.
+
+**Azure is not wired.** Ambient Managed/Workload Identity on AKS would need
+`azidentity`, `azcore` and MSAL — a comparable cost to the AWS piece alone, and
+nothing in this tree currently runs against a real AKS cluster to prove it
+works. `pkg/registry`'s doc comment says exactly that: ECR and GCR/Artifact
+Registry are covered, Azure is not. A smaller true claim beats a larger
+unproven one. Revisit when an AKS environment exists to test against.
+
+**Unproven in CI, by construction.** No GitHub Actions runner carries EKS pod
+identity or GCP Workload Identity, so nothing in this repository's CI can
+exercise the ambient path end to end — only its narrower unit-tested pieces:
+that a Secret still wins the precedence race, and that resolving credentials
+for a non-cloud registry never touches either SDK. Proving the ambient path
+itself needs a real cluster; `TestRegistryMatrixNeedsAmbientDockerCredentials`
+now says so and skips for the two registries it can no longer honestly check.

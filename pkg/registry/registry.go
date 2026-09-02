@@ -22,13 +22,14 @@ import (
 )
 
 // Keychain builds the auth chain: the referenced Secret first, then ambient
-// credentials — docker config on disk, and the cloud keychains that cover IRSA,
-// Workload Identity and Managed Identity.
+// credentials — docker config on disk, AWS IRSA for ECR, and GCP Workload
+// Identity for GCR/Artifact Registry. Azure Managed Identity is not wired yet
+// (D56); an AKS workload still needs a referenced Secret or a docker config.
 func Keychain(
 	ctx context.Context, c client.Client, namespace string, ref *v1alpha1.LocalSecretRef,
 ) (authn.Keychain, error) {
 	if ref == nil {
-		return authn.DefaultKeychain, nil
+		return ambientKeychain(), nil
 	}
 	if c == nil {
 		return nil, fmt.Errorf("credentialsRef %q set but there is no client to read it with", ref.Name)
@@ -43,7 +44,7 @@ func Keychain(
 	if err != nil {
 		return nil, err
 	}
-	return authn.NewMultiKeychain(kc, authn.DefaultKeychain), nil
+	return authn.NewMultiKeychain(kc, ambientKeychain()), nil
 }
 
 // NameOptions are the reference-parsing options for a registry.

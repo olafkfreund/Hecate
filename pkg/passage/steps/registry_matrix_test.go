@@ -21,6 +21,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/go-containerregistry/pkg/name"
+
+	"github.com/olafkfreund/hecate/pkg/registry"
 )
 
 // matrixRepo is the repository under test, or a skip.
@@ -87,21 +91,27 @@ func TestRegistryMatrixPushAndPull(t *testing.T) {
 // Where the credentials actually come from, which is the part the in-process
 // registry can never test.
 //
-// pkg/registry says its chain covers "the cloud keychains that cover IRSA,
-// Workload Identity and Managed Identity". It does not: it builds
+// pkg/registry used to claim its chain covered "the cloud keychains that cover
+// IRSA, Workload Identity and Managed Identity" while actually building a bare
 // authn.DefaultKeychain, which reads ~/.docker/config.json and any credential
-// helper named there. On a developer's laptop that is why ECR works — someone
-// ran `aws ecr get-login-password | docker login`, leaving a twelve-hour token
-// in that file. A controller pod has no such file and no helper binary, so the
-// same push fails with no credentials at all.
+// helper named there and nothing else. D56 made that true for ECR and
+// GCR/Artifact Registry by composing real cloud keychains into the chain — so
+// this test's original premise, that no ambient credential exists anywhere, no
+// longer holds for those two.
 //
-// This asserts the actual behaviour rather than the comment. If Hecate ever
-// grows a real cloud keychain, this test fails and should be rewritten to
-// assert the opposite — which is the point of having it.
+// It still holds for everything else: a registry ambientKeychain does not
+// recognise (ghcr.io, Docker Hub, a private Harbor) must still fail without a
+// docker config, exactly as before. And it still cannot be *proven* for ECR or
+// GCR here — that needs a real EKS or GKE runner with actual workload
+// identity, which no GitHub Actions job has (#50, D56).
 func TestRegistryMatrixNeedsAmbientDockerCredentials(t *testing.T) {
 	repo, insecure := matrixRepo(t)
 	if os.Getenv("HECATE_REGISTRY_ANONYMOUS") == "true" {
 		t.Skip("this registry accepts anonymous pushes, so there is nothing to prove")
+	}
+	if host := repoHost(repo); registry.IsAmbientCloudRegistry(host) {
+		t.Skipf("%s has ambient cloud keychain support (D56); proving it needs a real "+
+			"AWS/GCP runner with workload identity, not a docker-config check — see #50", host)
 	}
 
 	// An empty DOCKER_CONFIG is what a controller pod looks like.
@@ -119,4 +129,14 @@ func TestRegistryMatrixNeedsAmbientDockerCredentials(t *testing.T) {
 			"cloud credentials, which is good; update pkg/registry's doc comment and rewrite this test")
 	}
 	t.Logf("refused without ambient credentials, as expected: %v", err)
+}
+
+// repoHost extracts the registry host from HECATE_REGISTRY_REPO, e.g.
+// "ghcr.io" from "ghcr.io/olafkfreund/hecate-ci".
+func repoHost(repo string) string {
+	ref, err := name.NewRepository(repo)
+	if err != nil {
+		return repo
+	}
+	return ref.RegistryStr()
 }
