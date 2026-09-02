@@ -304,9 +304,11 @@ func (s *Server) listNamespaces(ctx context.Context, subject Subject, _ *http.Re
 // of reach would make a cluster-wide view useless to exactly the team-scoped
 // operators it is most useful to.
 //
-// Shared by the namespace picker and the overview deliberately: two callers
-// deciding "what may this person see" separately is two chances to disagree,
-// and the one that disagreed generously would be the bug nobody notices.
+// Shared by the namespace picker, the overview and the settings screen
+// deliberately: separate callers deciding "what may this person see" is
+// separate chances to disagree, and the one that disagreed generously would
+// be the bug nobody notices — which is exactly what happened to settings
+// before it called this instead of authorizing its own copy of the loop.
 func (s *Server) visibleNamespaces(ctx context.Context, subject Subject) ([]string, error) {
 	all, err := s.Ops.Namespaces(ctx)
 	if err != nil {
@@ -380,6 +382,14 @@ func (s *Server) getBundle(ctx context.Context, _ Subject, r *http.Request) (any
 // like everything else here, by asking Kubernetes to review the bearer token,
 // so a cluster that trusts a CI provider's OIDC issuer accepts that provider's
 // workload token with nothing added and no shared secret to leak.
+// RequestedAt is what asking Flux or a Beacon to look now returns: the token
+// to match against status.lastHandledReconcileAt to tell a caller's own
+// request landed. Shared by pollBeacon and reconcileFlux, which echo the
+// identical shape rather than each building their own map[string]any (D62).
+type RequestedAt struct {
+	RequestedAt string `json:"requestedAt"`
+}
+
 func (s *Server) pollBeacon(ctx context.Context, _ Subject, r *http.Request) (any, error) {
 	token, err := s.Ops.Poll(ctx, r.PathValue("namespace"), r.PathValue("name"))
 	if err != nil {
@@ -387,7 +397,7 @@ func (s *Server) pollBeacon(ctx context.Context, _ Subject, r *http.Request) (an
 	}
 	// Echoed back so a caller can match it against status.lastHandledReconcileAt
 	// and know its own request was the one that landed.
-	return map[string]string{"requestedAt": token}, nil
+	return &RequestedAt{RequestedAt: token}, nil
 }
 
 // bundleEvidence answers "why was this allowed into production, and who
@@ -444,12 +454,19 @@ func (s *Server) approve(ctx context.Context, subject Subject, r *http.Request) 
 	return map[string]any{"bundle": bundle, "gate": body.Gate, "approvedBy": subject.Name}, nil
 }
 
+// AbortResult is what stopping a running Passage returns.
+type AbortResult struct {
+	Passage   string `json:"passage"`
+	Aborted   bool   `json:"aborted"`
+	AbortedBy string `json:"abortedBy"`
+}
+
 func (s *Server) abort(ctx context.Context, subject Subject, r *http.Request) (any, error) {
 	namespace, passage := r.PathValue("namespace"), r.PathValue("name")
 	if err := s.Ops.Abort(ctx, namespace, passage, subject.Name); err != nil {
 		return nil, err
 	}
-	return map[string]any{"passage": passage, "aborted": true, "abortedBy": subject.Name}, nil
+	return &AbortResult{Passage: passage, Aborted: true, AbortedBy: subject.Name}, nil
 }
 
 // ---------------------------------------------------------------- wiring ----
@@ -605,10 +622,18 @@ func (s *Server) suspendFlux(ctx context.Context, subject Subject, r *http.Reque
 	}
 	// The actor is echoed because a suspension outlives the session that made
 	// it, and "who stopped this" is the first question asked about one.
-	return map[string]any{
-		"kind": body.Kind, "name": body.Name,
-		"suspended": body.Suspend, "by": subject.Name,
+	return &SuspendFluxResult{
+		Kind: body.Kind, Name: body.Name,
+		Suspended: body.Suspend, By: subject.Name,
 	}, nil
+}
+
+// SuspendFluxResult is what suspending or resuming a Flux resource returns.
+type SuspendFluxResult struct {
+	Kind      string `json:"kind"`
+	Name      string `json:"name"`
+	Suspended bool   `json:"suspended"`
+	By        string `json:"by"`
 }
 
 func (s *Server) reconcileFlux(ctx context.Context, subject Subject, r *http.Request) (any, error) {
@@ -634,5 +659,5 @@ func (s *Server) reconcileFlux(ctx context.Context, subject Subject, r *http.Req
 	}
 	// Echoed so a caller can match it against status.lastHandledReconcileAt and
 	// know its own request landed.
-	return map[string]any{"requestedAt": stamp}, nil
+	return &RequestedAt{RequestedAt: stamp}, nil
 }

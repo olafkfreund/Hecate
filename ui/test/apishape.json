@@ -1,4 +1,9 @@
 {
+  "AbortResult": [
+    "aborted",
+    "abortedBy",
+    "passage"
+  ],
   "Admission": [
     "after",
     "from",
@@ -21,6 +26,30 @@
     "namespace",
     "passage",
     "verified"
+  ],
+  "AuthorPassageRequest": [
+    "base",
+    "baseURL",
+    "body",
+    "bundle",
+    "credentialsRef",
+    "gate",
+    "head",
+    "labels",
+    "name",
+    "overwrite",
+    "path",
+    "provider",
+    "repo",
+    "steps",
+    "title"
+  ],
+  "AuthoredPullRequest": [
+    "branch",
+    "number",
+    "repo",
+    "state",
+    "url"
   ],
   "Beacon": [
     "apiVersion",
@@ -68,6 +97,10 @@
     "segregation_of_duties",
     "summary",
     "waived"
+  ],
+  "ConnectClusterResult": [
+    "created",
+    "secret"
   ],
   "Control": [
     "approved_by",
@@ -155,6 +188,17 @@
     "running",
     "suspended"
   ],
+  "Grant": [
+    "binding",
+    "grantedBy",
+    "kind",
+    "role",
+    "subject"
+  ],
+  "GrantResult": [
+    "binding",
+    "created"
+  ],
   "HealthReport": [
     "details",
     "issues",
@@ -190,6 +234,13 @@
     "policies",
     "unknown"
   ],
+  "RequestedAt": [
+    "requestedAt"
+  ],
+  "SetEvidenceResult": [
+    "gate",
+    "note"
+  ],
   "Settings": [
     "clusters",
     "fides",
@@ -197,6 +248,11 @@
     "identity",
     "telemetry",
     "version"
+  ],
+  "StepProblem": [
+    "index",
+    "message",
+    "uses"
   ],
   "StepStatus": [
     "as",
@@ -208,6 +264,12 @@
     "reason",
     "startedAt",
     "uses"
+  ],
+  "SuspendFluxResult": [
+    "by",
+    "kind",
+    "name",
+    "suspended"
   ],
   "Totals": [
     "degraded",

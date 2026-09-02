@@ -76,6 +76,26 @@ var mirrored = map[string]any{
 
 	// The settings screen.
 	"Settings": api.Settings{},
+
+	// The authoring surface (hecate#172) — previously outside this map
+	// because the request type was unexported and the responses were built
+	// as map[string]any, which is exactly the shape apishape cannot see
+	// through (D62).
+	"AuthorPassageRequest": api.AuthorPassageRequest{},
+	"AuthoredPullRequest":  api.AuthoredPullRequest{},
+	"StepProblem":          api.StepProblem{},
+
+	// Wire shapes for the write endpoints, exported for the same reason:
+	// each used to be a map[string]any built inline at the call site, an
+	// ad-hoc literal apishape could not check any more than it could the
+	// authoring responses above.
+	"Grant":                api.Grant{},
+	"GrantResult":          api.GrantResult{},
+	"ConnectClusterResult": api.ConnectClusterResult{},
+	"SetEvidenceResult":    api.SetEvidenceResult{},
+	"SuspendFluxResult":    api.SuspendFluxResult{},
+	"RequestedAt":          api.RequestedAt{},
+	"AbortResult":          api.AbortResult{},
 }
 
 func main() {

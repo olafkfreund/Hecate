@@ -142,7 +142,14 @@ func (s *Server) settings(ctx context.Context, subject Subject, _ *http.Request)
 		out.Telemetry = Telemetry{Endpoint: ep, Configured: true}
 	}
 
-	namespaces, err := s.Ops.Namespaces(ctx)
+	// Only namespaces this caller may read. Settings is a read of the same
+	// objects the rest of the API guards, and a screen that leaks another
+	// team's evidence server because it is "just configuration" is still a
+	// leak. visibleNamespaces is the same filter listNamespaces and overview
+	// use: it drops a namespace the caller may not read, but fails the whole
+	// request on any other error, so an unwell API server does not present as
+	// "my namespace vanished".
+	namespaces, err := s.visibleNamespaces(ctx, subject)
 	if err != nil {
 		return nil, err
 	}
@@ -151,13 +158,6 @@ func (s *Server) settings(ctx context.Context, subject Subject, _ *http.Request)
 	byCluster := map[string]*ClusterTarget{}
 
 	for _, ns := range namespaces {
-		// Only namespaces this caller may read. Settings is a read of the same
-		// objects the rest of the API guards, and a screen that leaks another
-		// team's evidence server because it is "just configuration" is still a
-		// leak.
-		if err := s.Auth.Authorize(ctx, subject, ActionRead, ns); err != nil {
-			continue
-		}
 		gates, err := s.Ops.Gates(ctx, ns)
 		if err != nil {
 			return nil, err
@@ -213,9 +213,6 @@ func (s *Server) settings(ctx context.Context, subject Subject, _ *http.Request)
 	// into whatever the Gate walk found so a connected-but-unused cluster
 	// appears with no Gates rather than not at all.
 	for _, ns := range namespaces {
-		if err := s.Auth.Authorize(ctx, subject, ActionRead, ns); err != nil {
-			continue
-		}
 		var secrets corev1.SecretList
 		if err := s.Ops.Client.List(ctx, &secrets,
 			client.InNamespace(ns), client.MatchingLabels{ClusterLabel: "true"}); err != nil {

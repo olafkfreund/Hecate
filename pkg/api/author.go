@@ -38,9 +38,10 @@ type composedStep struct {
 	With json.RawMessage `json:"with,omitempty"`
 }
 
-// authorPassageRequest is a whole Passage manifest plus where to open a pull
-// request for it.
-type authorPassageRequest struct {
+// AuthorPassageRequest is a whole Passage manifest plus where to open a pull
+// request for it. Exported so cmd/apishape can check ui/lib/api.ts's copy
+// against the fields this endpoint actually reads (D62).
+type AuthorPassageRequest struct {
 	// Name is the Passage's metadata.name. Applying two authored Passages with
 	// the same name would collide, so this has no default — the author names
 	// it, the same as writing the YAML by hand would require.
@@ -92,6 +93,19 @@ type authorPassageRequest struct {
 	CredentialsRef string `json:"credentialsRef"`
 }
 
+// AuthoredPullRequest is what opening one returns. Exported, and a real
+// struct rather than the map[string]any this endpoint used to build by hand
+// — a renamed field in that map compiled, passed apishape (because nothing
+// there could see it), and reached the browser as `undefined` the way
+// Explanation.reason/remedy and GateOccupant.since both did (D62).
+type AuthoredPullRequest struct {
+	Number int    `json:"number"`
+	URL    string `json:"url"`
+	State  string `json:"state"`
+	Branch string `json:"branch"`
+	Repo   string `json:"repo"`
+}
+
 // pathExistsError refuses to overwrite a file that already exists on the
 // target branch — see D58.
 type pathExistsError struct{ Path string }
@@ -116,11 +130,24 @@ func (e *stepProblemsError) Error() string {
 	return "the step list would not admit: " + strings.Join(msgs, "; ")
 }
 
+// StepProblem is the JSON shape a form can point a user at: which step, and
+// why. Mirrors passage.StepProblem, whose Err is a Go error and so cannot be
+// serialised directly — this is that type's wire shape, exported for
+// cmd/apishape rather than left as the map[string]any dto() used to build,
+// which apishape could not see (D62).
+type StepProblem struct {
+	Index int `json:"index"`
+	// No omitempty: the map[string]any this replaced always sent "uses", even
+	// empty, and the wire shape must not change underneath it (D62).
+	Uses    string `json:"uses"`
+	Message string `json:"message"`
+}
+
 // dto is the JSON shape a form can point a user at: which step, and why.
-func (e *stepProblemsError) dto() []map[string]any {
-	out := make([]map[string]any, len(e.Problems))
+func (e *stepProblemsError) dto() []StepProblem {
+	out := make([]StepProblem, len(e.Problems))
 	for i, p := range e.Problems {
-		out[i] = map[string]any{"index": p.Index, "uses": p.Uses, "message": p.Err.Error()}
+		out[i] = StepProblem{Index: p.Index, Uses: p.Uses, Message: p.Err.Error()}
 	}
 	return out
 }
@@ -136,7 +163,7 @@ func (e *stepProblemsError) dto() []map[string]any {
 func (s *Server) authorPassage(ctx context.Context, subject Subject, r *http.Request) (any, error) {
 	namespace := r.PathValue("namespace")
 
-	var req authorPassageRequest
+	var req AuthorPassageRequest
 	if err := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(&req); err != nil {
 		return nil, &BadRequest{Reason: "the request body is not the expected JSON: " + err.Error()}
 	}
@@ -240,9 +267,9 @@ func (s *Server) authorPassage(ctx context.Context, subject Subject, r *http.Req
 		return nil, fmt.Errorf("opening a pull request: %w", err)
 	}
 
-	return map[string]any{
-		"number": pr.Number, "url": pr.URL, "state": string(pr.State),
-		"branch": pr.Head, "repo": repo.String(),
+	return &AuthoredPullRequest{
+		Number: pr.Number, URL: pr.URL, State: string(pr.State),
+		Branch: pr.Head, Repo: repo.String(),
 	}, nil
 }
 

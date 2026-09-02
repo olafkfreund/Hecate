@@ -430,6 +430,48 @@ export type Grant = {
   grantedBy?: string;
 };
 
+/** GrantResult is what binding a role, or finding it already bound, returns. */
+export interface GrantResult {
+  binding: string;
+  created: boolean;
+}
+
+/** ConnectClusterResult is what storing a cluster's credentials returns. */
+export interface ConnectClusterResult {
+  secret: string;
+  created: boolean;
+}
+
+/** SetEvidenceResult is what pointing a Gate at an evidence server returns. */
+export interface SetEvidenceResult {
+  gate: string;
+  note: string;
+}
+
+/** SuspendFluxResult is what suspending or resuming a Flux resource returns. */
+export interface SuspendFluxResult {
+  kind: string;
+  name: string;
+  suspended: boolean;
+  by: string;
+}
+
+/**
+ * RequestedAt is what asking Flux or a Beacon to look now returns: the token
+ * to match against status.lastHandledReconcileAt to tell a caller's own
+ * request landed.
+ */
+export interface RequestedAt {
+  requestedAt: string;
+}
+
+/** AbortResult is what stopping a running Passage returns. */
+export interface AbortResult {
+  passage: string;
+  aborted: boolean;
+  abortedBy: string;
+}
+
 export const api = {
   /**
    * namespaces is where this user can look.
@@ -491,14 +533,14 @@ export const api = {
    * eventually disagrees with the first.
    */
   grant: (subject: string, kind: string, role: string) =>
-    post<{ binding: string; created: boolean }>("/api/v1alpha1/rbac/grants", {
+    post<GrantResult>("/api/v1alpha1/rbac/grants", {
       subject,
       kind,
       role,
     }),
 
   connectCluster: (ns: string, name: string, kubeconfig: string) =>
-    post<{ secret: string; created: boolean }>(`${base(ns)}/clusters`, { name, kubeconfig }),
+    post<ConnectClusterResult>(`${base(ns)}/clusters`, { name, kubeconfig }),
 
   /**
    * setEvidence points a Gate at an evidence server.
@@ -508,7 +550,7 @@ export const api = {
    * otherwise this looks like the change being lost.
    */
   setEvidence: (ns: string, gate: string, body: { serverURL: string; fidesEnvironment: string; credentialsRef?: string }) =>
-    put<{ gate: string; note: string }>(`${base(ns)}/gates/${encodeURIComponent(gate)}/evidence`, body),
+    put<SetEvidenceResult>(`${base(ns)}/gates/${encodeURIComponent(gate)}/evidence`, body),
 
   /**
    * gates, bundles, beacons and passages are every one you can read, grouped by
@@ -546,14 +588,14 @@ export const api = {
    * restore, so it outlives whoever did it.
    */
   suspendFlux: (ns: string, gate: string, kind: string, name: string, suspend: boolean) =>
-    post<{ kind: string; name: string; suspended: boolean; by: string }>(
+    post<SuspendFluxResult>(
       `${base(ns)}/gates/${encodeURIComponent(gate)}/flux/suspend`,
       { kind, name, suspend },
     ),
 
   /** reconcileFlux asks Flux to look at one resource now. */
   reconcileFlux: (ns: string, gate: string, kind: string, name: string) =>
-    post<{ requestedAt: string }>(
+    post<RequestedAt>(
       `${base(ns)}/gates/${encodeURIComponent(gate)}/flux/reconcile`,
       { kind, name },
     ),
@@ -578,7 +620,7 @@ export const api = {
    * for any change and hoping.
    */
   poll: (ns: string, beacon: string) =>
-    post<{ requestedAt: string }>(
+    post<RequestedAt>(
       `${base(ns)}/beacons/${encodeURIComponent(beacon)}/poll`,
       {},
     ),
@@ -592,7 +634,7 @@ export const api = {
    * describes.
    */
   abort: (ns: string, passage: string) =>
-    post<{ passage: string; aborted: boolean; abortedBy: string }>(
+    post<AbortResult>(
       `${base(ns)}/passages/${encodeURIComponent(passage)}/abort`,
       {},
     ),
