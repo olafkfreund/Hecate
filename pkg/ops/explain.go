@@ -28,6 +28,12 @@ const (
 	StateFailed State = "Failed"
 )
 
+// AllStates lists every State, in the order the MCP `why_stuck` outputSchema
+// (D33) should enumerate them. It exists so that schema is built from this
+// list rather than hand-copied — see AllBlockerKinds for why that copy is
+// dangerous.
+var AllStates = []State{StateCrossing, StateReady, StateBlocked, StateIdle, StateFailed}
+
 // Explanation is why a Gate is where it is.
 //
 // The question "why is nothing crossing?" is currently answered by reading four
@@ -85,6 +91,21 @@ const (
 	BlockerUnhealthy     BlockerKind = "Unhealthy"
 	BlockerManual        BlockerKind = "AwaitingRequest"
 )
+
+// AllBlockerKinds lists every BlockerKind. It is the source the MCP
+// `why_stuck` tool's published outputSchema (D33) builds its enum from,
+// rather than hand-typing the set a second time: #30 (D49) added
+// BlockerChangeHeld here and left tools.go's copy at eleven, so a client
+// validating structuredContent against the schema rejected the answer for
+// exactly the case — a Fides change-gate hold — the tool's own description
+// advertises explaining. See D64. explain_enum_test.go checks this list
+// against the constants above by parsing this file, so a thirteenth kind
+// added here without being added there fails the build.
+var AllBlockerKinds = []BlockerKind{
+	BlockerSuspended, BlockerInvalidSteps, BlockerNoPassage, BlockerNoBundles,
+	BlockerNotApproved, BlockerUpstream, BlockerWindowClosed, BlockerPassageFailed,
+	BlockerStepWaiting, BlockerChangeHeld, BlockerUnhealthy, BlockerManual,
+}
 
 // Waiting is one Bundle that cannot cross, and why.
 type Waiting struct {
@@ -172,8 +193,8 @@ func (o *Ops) Explain(ctx context.Context, namespace, name string) (*Explanation
 			ex.Eligible = append(ex.Eligible, c.Bundle.Name)
 			continue
 		}
-		// "already in this Gate" is not a blocker — it is the goal.
-		if c.Reason == "already in this Gate" {
+		// Already current is not a blocker — it is the goal.
+		if c.Code == gate.CodeAlreadyCurrent {
 			continue
 		}
 		ex.Waiting = append(ex.Waiting, Waiting{
@@ -263,11 +284,11 @@ func waitingBlockers(waiting []Waiting) []Blocker {
 	var out []Blocker
 	for _, w := range waiting {
 		var b Blocker
-		switch {
-		case strings.HasPrefix(w.Reason, "awaiting approval"):
+		switch w.Kind {
+		case gate.CodeAwaitingApproval:
 			b = Blocker{Kind: BlockerNotApproved, Detail: w.Reason,
 				Fix: fmt.Sprintf("hecate approve %s", w.Bundle)}
-		case strings.HasPrefix(w.Reason, "has not cleared"):
+		case gate.CodeUpstreamNotCleared:
 			b = Blocker{Kind: BlockerUpstream, Detail: w.Reason,
 				Fix: "promote it through the upstream Gate first"}
 		default:

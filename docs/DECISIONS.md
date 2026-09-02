@@ -2167,3 +2167,51 @@ directly. That logic still runs, unchanged, but now inside a call to
 `safepath.Join` in a different package — expect those alerts to need
 re-triaging against the new call shape rather than assuming the old dismissal
 still applies verbatim.
+
+## D64 — `why_stuck`'s published enums are built from `pkg/ops`, not hand-typed
+
+**Decision:** `pkg/mcp/tools.go`'s `why_stuck` `outputSchema` builds its
+`state` and `blockers[].kind` JSON Schema `enum` arrays from two new exported,
+ordered lists in `pkg/ops` — `AllStates` and `AllBlockerKinds` — rather than
+listing the values a second time as a JSON string literal.
+
+D33 published this schema so a client could branch on the blocker kinds
+instead of matching prose, on the premise that they are a closed set. D49
+(#30) closed a different case — a Fides change-gate hold — by adding
+`BlockerChangeHeld` to `pkg/ops/explain.go`. Nothing connected that file to
+`pkg/mcp/tools.go`: `grep -rn "BlockerKind\|ChangeHeld" pkg/mcp/` found
+nothing before this change, and the hand-typed `enum` stayed at eleven values.
+A client validating `structuredContent` against the published schema rejected
+the answer exactly when a Gate was held by the segregation-of-duties gate —
+the project's flagship demo scenario, and the one `why_stuck`'s own
+description names.
+
+**A parsed-source test, not a third hand-copy.** `pkg/ops/explain_enum_test.go`
+parses `explain.go`'s own `const` blocks with `go/ast` and checks that every
+declared `BlockerKind`/`State` literal appears in `AllBlockerKinds`/
+`AllStates`. Go constants have no runtime existence to range over, so this is
+the only way to catch a new constant that was declared but never added to the
+list the schema is built from — a test that instead listed the twelve kinds
+itself would just be a third copy of the same set, silently exempt from
+whatever drift it exists to catch. `pkg/mcp/tools_test.go` separately checks
+the *published* schema against `ops.AllBlockerKinds`/`ops.AllStates`, so a
+mistake in how `tools.go` wires the enum together (not just what `pkg/ops`
+declares) is caught too.
+
+**Same file, same idea: prose matching replaced with code comparison.**
+`pkg/ops/explain.go` also matched `gate.Candidate.Reason` and `Waiting.Kind`
+against English (`c.Reason == "already in this Gate"`,
+`strings.HasPrefix(w.Reason, "awaiting approval")`) where `pkg/gate` already
+returns a `Code` alongside every `Reason` for exactly this reason (D21).
+Replaced with `c.Code == gate.CodeAlreadyCurrent` and a `switch w.Kind`
+comparing `gate.CodeAwaitingApproval` / `gate.CodeUpstreamNotCleared`. This one
+was already guarded by tests exercising real objects through `Explain`, so it
+is a cleanup rather than a fix — done here because it is the same file, the
+same class of bug (a string a producer already typed a code for), and the
+kind of drift this decision is otherwise about.
+
+The UI's `ui/lib/api.ts` hand-mirrors `pkg/gate.Code` as `WaitingKind` already
+(not `BlockerKind` or `State`, which stay plain `string` there) and is
+explicitly documented in that file as able to drift, generation being a
+follow-up. Out of scope here — flagged for whoever picks that up, since
+`AllBlockerKinds`/`AllStates` now make a generated union cheap.
