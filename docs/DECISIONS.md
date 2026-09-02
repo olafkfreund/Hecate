@@ -1884,3 +1884,41 @@ explaining each. Collapsing GitLab (`pkg/provider/gitlab.go` — full
 implementation, no e2e test, see #101) into either "supported" or "not
 supported" would misrepresent it either way; the exit criterion's whole point
 is that a claim of coverage should be checkable against what actually ran.
+
+**"The most recent run" was the wrong run, and PR review caught it before
+merge.** The first version read only the single latest completed run of each
+workflow. `e2e.yml`'s GitHub provider job runs only on schedule or
+`workflow_dispatch`, so an ordinary push run still *lists* it — GitHub's API
+does not omit a job whose `if:` was false, it reports it with
+`conclusion: "skipped"` and an empty `steps` array — and the generator was
+matching that empty-steps entry and erroring that the proving step was
+"missing". On this repository that made `make generate` fail on every push
+run's `make check`, which is most days.
+
+**The fix walks back, and distinguishes three outcomes rather than two.**
+`workflowIndex.findJob` searches the last `runWindow` (20) completed runs on
+main, newest first, for one where the named job's own conclusion is not
+`"skipped"` — i.e. one where it actually ran — and reads the proving step from
+that run. Three cases fall out, and only one of them is allowed to write
+nothing:
+
+- the job ran and the proving step passed → *proven*;
+- the job never ran with a real conclusion anywhere in the window → *not
+  proven*, rendered as such, not an error — a surface nobody has exercised
+  recently is a legitimate table state, which is exactly what the four-state
+  vocabulary exists for;
+- the Actions API call itself fails (network, a bad token, a rate limit) →
+  still a hard error, README.md untouched. That property did not change and
+  must not: "I could not reach the evidence" is not the same claim as "there
+  is no evidence", and only the second one is safe to print.
+
+**Reachable staleness, not fixed here.** Because the table's content comes
+from live CI history rather than only from the tree, it can change with no
+code change at all — the nightly `providers` job flakes, or (in principle,
+though not observed on this repository's actual run cadence) enough pushes
+land between two nightlies to push the last passing run out of the window.
+Either would fail `ci.yml`'s "Generated files are current" job on an unrelated
+PR, with a diff nobody there caused or can fix by editing code. That is a real
+gap in the CI wiring, not in the generator's honesty, and is deliberately left
+for a human policy call — re-run on drift, treat this job as non-blocking, or
+something else — rather than decided here.

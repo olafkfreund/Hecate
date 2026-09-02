@@ -460,8 +460,8 @@ below worth building.
 
 Legend:
 
-- ✅ proven — a CI job exercises this against the real host or registry, and the step that does the proving passed on the most recent run on `main`.
-- 🧪 configured, not yet proven — the job exists and runs, but the proving step was skipped on the most recent run, almost always because an optional credential is not set on this repository.
+- ✅ proven — a CI job exercises this against the real host or registry, and the step that does the proving passed the most recent time the job ran on `main`.
+- 🧪 configured, not yet proven — either the job ran but its proving step was skipped, almost always because an optional credential is not set on this repository, or the job did not run at all in the last 20 completed runs on `main` — e.g. a nightly-only job between nightlies.
 - 🔧 code only, no CI proof — an implementation exists in the tree but no CI job runs it against the real thing. Not the same as *proven*: nothing has checked the code is right.
 - ❌ not implemented — no code and no job.
 <!-- support-matrix:end -->
