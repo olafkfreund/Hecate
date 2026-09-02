@@ -155,6 +155,13 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1alpha1/namespaces/{namespace}/passages/author",
 		s.guard(ActionAuthorPassage, s.authorPassage))
 
+	// Validate a step list without opening anything: the form's live
+	// feedback, using the same Registry.Validate authorPassage refuses on
+	// (hecate#172 scope item 4, D60). Authenticated only, like /steps below —
+	// it reads no cluster state, so there is no namespace to guard() against
+	// and no write for a caller to be trusted with.
+	mux.Handle("POST /api/v1alpha1/passages/validate", s.authenticated(s.validatePassage))
+
 	// What a Gate's crossings actually depend on, and the three things an
 	// operator does to it when something is wrong.
 	// Would the eligible Bundles actually cross? Read access, because it is a

@@ -2059,3 +2059,67 @@ a time. D58 pushes this further than it first sounds: the endpoint renders
 not only its `[]v1alpha1.Step`, so the type the API server would validate on
 `kubectl apply` and the type this endpoint marshals are the identical Go
 value, not two structs kept in sync by hand.
+
+## D60 — Validation-as-feedback is authenticated only, and answers 200 either way
+
+*2026-09-02 — #172*
+
+Scope item 4 asks for a route the form can call as an author edits a Passage,
+so the browser and the admission path "refuse the same things for the same
+reasons." `authorPassage` (D58/D59) already runs `passage.Registry.Validate`
+before it will open a pull request — the only decision left was how a form
+gets the same answer *before* it clicks the button, and what that costs to
+expose.
+
+**Authenticated, not authorised — the same choice `/steps` already made.**
+`Validate` takes a step list and returns problems; it reads no Secret, no
+Gate, no cluster state at all, only the controller's own step catalogue held
+in `Server.Steps`. That is exactly the reasoning `stepSchemas` gives for
+being `s.authenticated` rather than `s.guard(ActionRead, ...)`: "the answer is
+the same everywhere... authenticated all the same — every other route is, and
+a route that is the exception for no reason is one nobody remembers is the
+exception." `ActionAuthorPassage` was deliberately made a bigger grant than
+reading a Gate (D58's own note: "granting someone the right to open a pull
+request... is a bigger and more distinct grant") — gating this endpoint
+behind that same right would mean an author cannot see whether their step
+list is well-formed until they are also trusted to open pull requests against
+a fleet repository, which answers a different question than the one being
+asked. Gating it behind `ActionRead` on a namespace would require a namespace
+this route has no use for — `Validate` does not touch a Gate or a Bundle, so
+there is nothing for `guard()` to authorise against, the same gap `overview`
+and `listNamespaces` have their own comments about. Authenticated-only is not
+a downgrade from author's checks: opening a pull request still requires
+`ActionAuthorPassage`, `credentialsRef`, a resolvable Secret and a real git
+remote. This route requires none of that and changes nothing, so the credential
+check alone is the right amount of gate.
+
+**Always 200, problems or not.** `authorPassage` returns `stepProblemsError`
+as an HTTP 400 because a bad step list really did refuse *that* request — it
+would have opened a pull request against real state otherwise. This endpoint
+never had a request to refuse: an author mid-edit sending a step list with
+gaps is not a mistake, it is Tuesday. Answering 400 here would mean a form
+treating "you have not finished typing" as a network failure, indistinguishable
+from an actual outage, which is precisely the wrong signal for a debounced
+live-feedback call. The response is `{"problems": [...]}`, empty when the list
+is clean — reusing `stepProblemsError.dto()`'s `{index, uses, message}` shape
+byte for byte, because that shape already exists for exactly this purpose and
+a second one would be the "two lists describing the same thing" drift D57 and
+D59 both warn about.
+
+**Debounced 500ms after the last edit, not on blur and not on every
+keystroke.** A step's `with:` block is filled in field by field; validating
+on every character would mean a request per keystroke that tells an author
+nothing new (a schema string field is not "wrong" one character at a time),
+and validating only on blur or submit would mean the row-level feedback this
+item exists for never appears until the author has already moved on or
+clicked open. A short pause after editing stops is the one signal that means
+"there is something to check now," and it costs at most one extra request
+per real pause — not one per field, not one per keystroke.
+
+**This is feedback, not a second gate.** `authorPassage` keeps running
+`Registry.Validate` itself, unconditionally, before it will touch git or a
+provider (D58/D59, unchanged by this decision). A client — hostile, buggy, or
+simply never rendering the JavaScript — that skips `/passages/validate`
+entirely is still refused at `/passages/author` for exactly the same reasons
+this endpoint would have shown it, because both routes call the identical
+`Registry.Validate` rather than two copies of the same rules.
