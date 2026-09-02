@@ -328,16 +328,25 @@ func tarball(dir string, stamp time.Time) (v1.Layer, error) {
 	return static.NewLayer(buf.Bytes(), fluxContentMediaType), nil
 }
 
-// maxEntrySize is the largest single tar entry untar will write. A var, not a
-// const, so a test can lower it and prove the refusal with a small fixture
-// instead of building a real 64 MiB one. The production default is 64 MiB.
+// maxEntrySize is the largest single tar entry untar will write. maxArchiveBytes
+// and maxArchiveEntries bound the archive as a whole. All three are vars, not
+// consts, so a test can lower them and prove the refusal with a small fixture
+// instead of building a real multi-hundred-MB one. The production defaults are
+// 64 MiB per entry, 512 MiB total, 10,000 entries total.
 //
-// ponytail: no cap on total entries or total bytes across the archive. An
-// artifact this pulls always comes from a push this same code produced
-// (tarball() above), so a bomb of ten million tiny files is not a threat this
-// boundary needs to defend against today. Add one if oci-pull is ever pointed
-// at archives from outside Hecate's own oci-push.
-var maxEntrySize int64 = 64 << 20
+// OCIPullConfig takes an arbitrary repo and a tag or digest, with no allowlist
+// tying it to anything this codebase pushed — and a tag can move regardless.
+// So the content untar unpacks is not trusted just because it arrived over
+// OCI: it is arbitrary, semi-trusted third-party content, and a per-entry cap
+// alone bounds nothing about the total. A million small entries, or ten
+// thousand entries just under the per-entry cap, both pass that check and can
+// still fill the work dir's disk — which on this system is the controller
+// pod's ephemeral storage, shared with everything else running there.
+var (
+	maxEntrySize      int64 = 64 << 20
+	maxArchiveBytes   int64 = 512 << 20
+	maxArchiveEntries       = 10000
+)
 
 // untar unpacks a layer into dir, and returns how many files it wrote.
 func untar(layer v1.Layer, dir string) (int, error) {
@@ -347,7 +356,8 @@ func untar(layer v1.Layer, dir string) (int, error) {
 	}
 	defer func() { _ = rc.Close() }()
 
-	var files int
+	var files, entries int
+	var totalBytes int64
 	tr := tar.NewReader(rc)
 	for {
 		header, err := tr.Next()
@@ -356,6 +366,15 @@ func untar(layer v1.Layer, dir string) (int, error) {
 		}
 		if err != nil {
 			return files, err
+		}
+
+		// Counted for every header, directories included, so a flood of empty
+		// directories is refused the same as a flood of files — both are the
+		// same disk-exhaustion shape once multiplied by inode/directory-entry
+		// overhead.
+		entries++
+		if entries > maxArchiveEntries {
+			return files, fmt.Errorf("archive carries more than %d entries", maxArchiveEntries)
 		}
 
 		// The archive is remote content, so it is not trusted to stay inside the
@@ -403,6 +422,12 @@ func untar(layer v1.Layer, dir string) (int, error) {
 				return files, fmt.Errorf("entry %q is %d bytes, over the %d byte limit",
 					header.Name, header.Size, maxEntrySize)
 			}
+			// Checked against the declared size too, and before writing, for the
+			// same reason: catching it after the fact would mean the entry that
+			// tipped the archive over the limit already landed on disk in full.
+			if totalBytes+header.Size > maxArchiveBytes {
+				return files, fmt.Errorf("archive is over the %d byte total limit", maxArchiveBytes)
+			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return files, err
 			}
@@ -425,6 +450,7 @@ func untar(layer v1.Layer, dir string) (int, error) {
 				return files, fmt.Errorf("entry %q wrote %d bytes, header declared %d",
 					header.Name, n, header.Size)
 			}
+			totalBytes += n
 			files++
 		}
 	}

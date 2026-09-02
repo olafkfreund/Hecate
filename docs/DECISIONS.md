@@ -2168,28 +2168,53 @@ directly. That logic still runs, unchanged, but now inside a call to
 re-triaging against the new call shape rather than assuming the old dismissal
 still applies verbatim.
 
-## D65 — `oci-pull` checks both the declared and the delivered size of a tar entry
+## D65 — `oci-pull` bounds a tar entry, and the archive as a whole, on the way in
 
-**Decision:** `untar` (`pkg/passage/steps/oci.go`) refuses a tar entry two
-ways, not one. Before reading any of its body, it compares `header.Size`
-against `maxEntrySize` (64 MiB) and refuses outright if the header alone
-claims too much. It then copies the entry with `io.Copy` — not
-`io.LimitReader` — and, after the copy, compares bytes actually written
-against `header.Size` again, refusing if they disagree.
+**Decision:** `untar` (`pkg/passage/steps/oci.go`) refuses at three points,
+not one:
 
-The declared-size check is the one that matters: it is what closes the actual
-bug (`io.LimitReader(tr, 64<<20)` returned a clean EOF at the cap, not an
-error, so an oversize entry landed on disk truncated and `oci-pull` still
-reported success). The written-bytes check is cheap insurance underneath it —
+- Before reading any of an entry's body, it compares `header.Size` against
+  `maxEntrySize` (64 MiB) and refuses outright if the header alone claims too
+  much.
+- It then copies the entry with `io.Copy` — not `io.LimitReader` — and, after
+  the copy, compares bytes actually written against `header.Size` again,
+  refusing if they disagree.
+- Before writing an entry at all, it checks the running total against
+  `maxArchiveBytes` (512 MiB), and on every header — files and directories
+  alike — it checks a running entry count against `maxArchiveEntries`
+  (10,000). Both are checked, and refuse, before the entry that would tip
+  them over is written.
+
+The per-entry declared-size check is what closes the reported bug:
+`io.LimitReader(tr, 64<<20)` returned a clean EOF at the cap, not an error, so
+an oversize entry landed on disk truncated and `oci-pull` still reported
+success. The written-bytes check is cheap insurance underneath it —
 `archive/tar` already refuses to hand back more than `header.Size` per entry,
 so today it can only fire if that guarantee ever changes or a future edit
 reintroduces a reader that ignores it. Kept anyway: the cost is one integer
 comparison, and it means a regression here fails loudly instead of writing a
 short file that reports as whole.
 
-No cap was added on total entries or total bytes across an archive. Every
-artifact `oci-pull` reads back was produced by this codebase's own
-`oci-push` (`tarball` in the same file), not by an untrusted third party — the
-per-entry limit is the boundary that matters for content this code itself
-produced. Revisit if `oci-pull` is ever pointed at archives from outside
-Hecate's own `oci-push`.
+**The archive-wide caps were added after review caught a wrong premise in an
+earlier draft of this decision**, which argued a total cap wasn't needed
+because "every artifact `oci-pull` reads back was produced by this codebase's
+own `oci-push`." That isn't true, and nothing in the code makes it true:
+`OCIPullConfig` takes an arbitrary `Repo` plus a `Tag` or `Digest`, with no
+allowlist tying it to anything this codebase ever pushed, and its own doc
+comment says a tag can move — so even a repo this project did push to can
+later serve different content. `Run` takes whatever the last layer of the
+fetched image turns out to be, with no media-type, artifact-type, or
+annotation check first. So the content `untar` unpacks is arbitrary,
+semi-trusted third-party content by construction, not merely the output of
+`tarball()` in this same file. A per-entry cap alone bounds nothing about the
+total: a million small entries, or ten thousand entries each just under the
+per-entry cap, both pass it and can still exhaust the disk — which on this
+system is the controller pod's ephemeral storage, shared with everything else
+running there, and this repo's own e2e workflow has already hit DiskPressure
+evictions from exactly that kind of exhaustion.
+
+`maxEntrySize`, `maxArchiveBytes`, and `maxArchiveEntries` are package vars
+rather than consts so tests can lower them and prove the refusal logic with
+small fixtures instead of building real multi-hundred-megabyte or
+multi-thousand-entry archives; the production defaults (64 MiB / 512 MiB /
+10,000) are asserted directly in those tests.
