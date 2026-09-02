@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -94,6 +95,45 @@ func TestIsAmbientCloudRegistry(t *testing.T) {
 		if got := IsAmbientCloudRegistry(host); got != want {
 			t.Errorf("IsAmbientCloudRegistry(%q) = %v, want %v", host, got, want)
 		}
+	}
+}
+
+// public.ecr.aws must resolve to Anonymous by an early return, not by falling
+// through a failed private-ECR GetAuthorizationToken call: that call talks to
+// a different service (ecr-public) than the one this keychain wires up, so
+// reaching it would be a doomed network call under ecrAuthTimeout on every
+// resolve rather than the immediate answer a public registry deserves.
+//
+// This is a same-package test specifically so it can construct ecrKeychain{}
+// directly and catch a regression to "matched by isPrivateECR/isECR but
+// handled as private" even if some future caller never invokes it through
+// ambientKeychain().
+func TestECRKeychainPublicIsAnonymousWithoutAWSCall(t *testing.T) {
+	reg, err := name.NewRegistry(ecrPublicHost)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	auth, err := (ecrKeychain{}).ResolveContext(context.Background(), reg)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if auth != authn.Anonymous {
+		t.Errorf("got %v, want authn.Anonymous", auth)
+	}
+	// A real early return is a map lookup and a string compare — well under a
+	// second. A regression that instead calls LoadDefaultConfig plus
+	// GetAuthorizationToken would take noticeably longer even when it happens
+	// to succeed, and up to ecrAuthTimeout when it doesn't; either way this
+	// catches it where an Anonymous-only assertion could be fooled by an
+	// environment that has no ambient AWS identity, or (as this sandbox does)
+	// happens to have real credentials and would return a token instead.
+	if elapsed > time.Second {
+		t.Errorf("ResolveContext(public.ecr.aws) took %s — looks like it made an AWS call "+
+			"instead of returning early", elapsed)
 	}
 }
 
