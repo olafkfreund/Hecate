@@ -1775,9 +1775,11 @@ Provider sign-in recipes — Okta, Entra, Google, Keycloak — are a separate
 matter, tracked in #52 and deliberately unwritten until somebody has run one
 against a real tenant.
 
+---
+
 ## D56 — Ambient registry credentials are composed keychains, not k8schain
 
-**2026-09-02 · accepted · #50**
+*2026-09-02 — #50*
 
 `pkg/registry`'s own doc comment claimed the auth chain covered "the cloud
 keychains that cover IRSA, Workload Identity and Managed Identity". It didn't:
@@ -1834,3 +1836,108 @@ that a Secret still wins the precedence race, and that resolving credentials
 for a non-cloud registry never touches either SDK. Proving the ambient path
 itself needs a real cluster; `TestRegistryMatrixNeedsAmbientDockerCredentials`
 now says so and skips for the two registries it can no longer honestly check.
+
+---
+
+## D57 — The support matrix reads CI step results, not job results or workflow YAML alone
+
+*2026-09-02 — #8*
+
+Epic #8's exit criterion is that the README's git-host and registry table is
+"generated from passing CI jobs" rather than typed by hand. `cmd/supportmatrix`
+does that, and the first version of it was wrong in a way worth recording.
+
+**A green job is not proof.** `registry-matrix.yml`'s `dockerhub` job succeeds
+whether or not `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` are set: its login step
+notices a missing credential, prints a notice, sets `skip=true`, and exits 0
+rather than failing a fork's build for a secret it can never have. Every
+downstream step then reports `skipped`, which also counts as success for the
+job's overall conclusion. A generator that read job conclusions would call
+Docker Hub "proven" whenever the workflow merely ran — which on this issue's
+own audit (#50) is exactly the false confidence the exit criterion exists to
+rule out. So the generator reads the conclusion of the one step that actually
+pushes and pulls, `git blame`-findable in the workflow as `Push and pull` /
+`E2E — GitHub pull request lifecycle`, and treats anything else in that job as
+noise.
+
+**Static analysis of the workflow YAML is not enough either.** `e2e.yml`'s
+`providers` job is structurally identical to `registry-matrix.yml`'s
+`dockerhub` job — gated on an optional secret, skips cleanly when it is unset —
+and yet #49's own audit found GitHub proven nightly while Docker Hub is not
+proven at all on this repository. The two are distinguishable only by asking
+GitHub whether the gated step actually ran and passed on the most recent run,
+which means the generator calls the Actions API rather than only parsing
+`.github/workflows/*.yml`.
+
+**That costs a network dependency the other generators do not have.**
+`cmd/apishape` and `cmd/stepschema` are pure reflection over the Go types and
+run offline; `cmd/supportmatrix` needs `GITHUB_TOKEN` (or an authenticated
+`gh`) and a route to `api.github.com`, and fails loudly rather than guessing
+when it cannot reach either — a stale or absent signal about what CI proved is
+worse than no table, which is the whole argument #8 opened with. The CI job
+that checks for drift (`ci.yml`'s `generated` job) is given `actions: read` and
+`github.token` for exactly this.
+
+**Four states, not two.** *Proven*, *configured but not yet proven*, *code
+with no CI proof*, and *not implemented* are rendered distinctly, with a legend
+explaining each. Collapsing GitLab (`pkg/provider/gitlab.go` — full
+implementation, no e2e test, see #101) into either "supported" or "not
+supported" would misrepresent it either way; the exit criterion's whole point
+is that a claim of coverage should be checkable against what actually ran.
+
+**"The most recent run" was the wrong run, and PR review caught it before
+merge.** The first version read only the single latest completed run of each
+workflow. `e2e.yml`'s GitHub provider job runs only on schedule or
+`workflow_dispatch`, so an ordinary push run still *lists* it — GitHub's API
+does not omit a job whose `if:` was false, it reports it with
+`conclusion: "skipped"` and an empty `steps` array — and the generator was
+matching that empty-steps entry and erroring that the proving step was
+"missing". On this repository that made `make generate` fail on every push
+run's `make check`, which is most days.
+
+**The fix walks back, and distinguishes three outcomes rather than two.**
+`workflowIndex.findJob` searches the last `runWindow` (20) completed runs on
+main, newest first, for one where the named job's own conclusion is not
+`"skipped"` — i.e. one where it actually ran — and reads the proving step from
+that run. Three cases fall out, and only one of them is allowed to write
+nothing:
+
+- the job ran and the proving step passed → *proven*;
+- the job never ran with a real conclusion anywhere in the window → *not
+  proven*, rendered as such, not an error — a surface nobody has exercised
+  recently is a legitimate table state, which is exactly what the four-state
+  vocabulary exists for;
+- the Actions API call itself fails (network, a bad token, a rate limit) →
+  still a hard error, README.md untouched. That property did not change and
+  must not: "I could not reach the evidence" is not the same claim as "there
+  is no evidence", and only the second one is safe to print.
+
+**Reachable staleness, and the policy call it forced.** Because the table's
+content comes from live CI history rather than only from the tree, it can
+change with no code change at all — the nightly `providers` job flakes, or (in
+principle, though not observed on this repository's actual run cadence)
+enough pushes land between two nightlies to push the last passing run out of
+the window. Either would fail `ci.yml`'s "Generated files are current" job on
+an unrelated PR, with a diff nobody there caused or can fix by editing code.
+
+**Decision: a drift confined to `README.md` warns; it does not fail the
+build.** Blocking somebody's unrelated PR because CI history moved underneath
+them is a worse failure mode than the table being briefly stale — the table
+still self-corrects the next time `make generate` runs, and staleness is
+visible rather than silent. So the "Check for drift" step in `ci.yml` compares
+the drifted file list against `README.md` alone: if that is the *only* file
+that changed, it writes the diff to the job summary and emits a
+`::warning::` annotation, then exits 0. If any other generated file drifted —
+`ui/test/apishape.json`, `pkg/passage/steps/schemas.json`, the CRDs under
+`charts/hecate` — the job still fails exactly as before, because those come
+from code in the repository and drift there really is "you forgot to run
+`make generate`".
+
+**What does not change: a hard error still fails the job.** The "Regenerate"
+step (`make generate`) runs before "Check for drift" and is untouched — if
+`cmd/supportmatrix` cannot reach the Actions API, `make generate` fails there,
+and the job goes red before the drift comparison ever runs. Softening only the
+*comparison* step, and only for a `README.md`-only diff, keeps "I could not
+reach the evidence" a hard failure while "there is a stale but honest
+evidence-based claim" is a visible warning. Collapsing those two into one
+lenient path would have undone the property D57 exists to protect.
