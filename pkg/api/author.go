@@ -266,11 +266,11 @@ func (s *Server) resolveAuthorCredentials(
 	if githubapp.HasAppKeys(secret.Data) {
 		creds, err := githubapp.FromSecret(secret.Data, string(secret.Data["baseURL"]))
 		if err != nil {
-			return nil, "", fmt.Errorf("Secret %s/%s: %w", namespace, name, err)
+			return nil, "", fmt.Errorf("secret %s/%s: %w", namespace, name, err)
 		}
 		src, err := githubapp.SourceFor(creds)
 		if err != nil {
-			return nil, "", fmt.Errorf("Secret %s/%s: %w", namespace, name, err)
+			return nil, "", fmt.Errorf("secret %s/%s: %w", namespace, name, err)
 		}
 		token, err := src.Token(ctx)
 		if err != nil {
@@ -284,7 +284,7 @@ func (s *Server) resolveAuthorCredentials(
 			return hgit.TokenAuth(v), v, nil
 		}
 	}
-	return nil, "", fmt.Errorf("Secret %s has no token, password or GitHub App key", name)
+	return nil, "", fmt.Errorf("secret %s has no token, password or GitHub App key", name)
 }
 
 // toSteps turns the browser's step list into the type Registry.Validate and
@@ -347,21 +347,54 @@ func gitPublish(ctx context.Context, req publishRequest) (base string, err error
 		base = head.Name().Short()
 	}
 
+	if filepath.IsAbs(req.Path) {
+		return "", fmt.Errorf("path %q must be relative to the repository", req.Path)
+	}
 	full := filepath.Join(dir, filepath.FromSlash(req.Path))
 	// A `path` of "../../etc" would otherwise write outside the checkout, the
 	// same guard the Passage steps' checkoutPath applies.
 	if rel, err := filepath.Rel(dir, full); err != nil || strings.HasPrefix(rel, "..") {
 		return "", fmt.Errorf("path %q escapes the repository", req.Path)
 	}
+	// filepath.Rel is purely lexical — it has no idea a path component might
+	// be a symlink. That is a real gap here specifically, because `repo` and
+	// `path` come from the same HTTP caller: a repository can be cloned with
+	// a symlink already committed into it (say `apps -> /etc`), and
+	// `dir/apps/passage.yaml` would clear the lexical check above while the
+	// filesystem resolves it somewhere else entirely. Confirm the *resolved*
+	// parent directory is still inside the checkout before creating anything.
+	realParent, err := realAncestor(filepath.Dir(full))
+	if err != nil {
+		return "", fmt.Errorf("path %q: %w", req.Path, err)
+	}
+	realDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "", fmt.Errorf("resolving the checkout: %w", err)
+	}
+	if realParent != realDir && !strings.HasPrefix(realParent, realDir+string(filepath.Separator)) {
+		return "", fmt.Errorf("path %q escapes the repository", req.Path)
+	}
 	// A Passage manifest is its own file (D58): writing it wholesale is
 	// correct, but only because nothing else is expected to live there. A
 	// Path that already holds something — a reused name, or a typo landing on
 	// an existing Gate's manifest — must not be silently destroyed.
-	if _, err := os.Stat(full); err == nil {
+	//
+	// Lstat, not Stat, and checked before the exists/Overwrite decision: a
+	// symlink left at Path by the same commit that could plant one in a
+	// parent directory is never "the file we committed" to replace, only a
+	// way to write through it to wherever it points — refused outright, with
+	// no Overwrite escape hatch for it. There is no TOCTOU window worth
+	// closing with O_NOFOLLOW here: this checkout is a fresh temp clone this
+	// request alone can see, so nothing else can swap the symlink in between
+	// this check and the write below.
+	switch info, err := os.Lstat(full); {
+	case err == nil && info.Mode()&os.ModeSymlink != 0:
+		return "", fmt.Errorf("path %q is a symlink — refusing to write through it", req.Path)
+	case err == nil:
 		if !req.Overwrite {
 			return "", &pathExistsError{Path: req.Path}
 		}
-	} else if !os.IsNotExist(err) {
+	case !os.IsNotExist(err):
 		return "", fmt.Errorf("checking %s: %w", req.Path, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
@@ -393,6 +426,28 @@ func gitPublish(ctx context.Context, req publishRequest) (base string, err error
 	}
 
 	return base, nil
+}
+
+// realAncestor resolves the deepest existing ancestor of dir to its
+// symlink-free path. filepath.EvalSymlinks fails on a path that does not
+// exist yet — true of most of a freshly authored Passage's parent
+// directories — so this walks up until it finds one that does, the same way
+// a shell resolving a not-yet-created path would.
+func realAncestor(dir string) (string, error) {
+	for {
+		resolved, err := filepath.EvalSymlinks(dir)
+		if err == nil {
+			return resolved, nil
+		}
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("no existing ancestor of %s", dir)
+		}
+		dir = parent
+	}
 }
 
 // slug turns a file path into a branch-safe name, so the default head branch

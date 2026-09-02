@@ -325,6 +325,110 @@ func TestGitPublishAllowsANewPath(t *testing.T) {
 	}
 }
 
+// TestGitPublishRefusesTraversal is the lexical case filepath.Rel already
+// caught before this change — confirmed still refused.
+func TestGitPublishRefusesTraversal(t *testing.T) {
+	origin := originAuthorRepo(t, map[string]string{"demo/pipeline.yaml": "kind: Gate\n"})
+
+	_, err := gitPublish(context.Background(), publishRequest{
+		CloneURL: origin,
+		Head:     "hecate/author-test",
+		Path:     "../../etc/passwd",
+		Content:  []byte("x"),
+	})
+	if err == nil {
+		t.Fatal("expected a refusal — ../../etc/passwd escapes the checkout")
+	}
+}
+
+// TestGitPublishRefusesAnAbsolutePath is the other lexical case: an absolute
+// Path is never "relative to the repository", so it is refused outright
+// rather than silently rebased under the checkout root.
+func TestGitPublishRefusesAnAbsolutePath(t *testing.T) {
+	origin := originAuthorRepo(t, map[string]string{"demo/pipeline.yaml": "kind: Gate\n"})
+
+	_, err := gitPublish(context.Background(), publishRequest{
+		CloneURL: origin,
+		Head:     "hecate/author-test",
+		Path:     "/etc/passwd",
+		Content:  []byte("x"),
+	})
+	if err == nil {
+		t.Fatal("expected a refusal — an absolute path is never relative to the repository")
+	}
+}
+
+// escapeTarget is a symlink target relative enough to reach outside no
+// matter how deeply nested gitPublish's own scratch clone happens to be —
+// deliberately more ".." components than any real checkout is nested.
+//
+// Not an absolute path: go-git's own worktree checkout (helper/chroot)
+// rewrites an *absolute* symlink target to live under the checkout root
+// before creating it — its own, unrelated defence against exactly this class
+// of escape — so a fixture using one would pass without ever exercising the
+// guard this test is for. A relative target is passed straight through
+// untouched, and the OS resolves it exactly as written, which is the shape
+// that actually needs Hecate's own check.
+func escapeTarget(outside string) string {
+	return strings.Repeat("../", 12) + strings.TrimPrefix(filepath.ToSlash(outside), "/")
+}
+
+// TestGitPublishRefusesASymlinkEscape is the case filepath.Rel cannot catch,
+// because it is purely lexical: a symlink committed into the checkout — which
+// the same HTTP caller controls, via `repo` — can point a path component
+// outside the checkout entirely. `apps -> ../../../…/outside` here stands in
+// for a fleet repo carrying `apps -> ../../../../etc`. Path
+// "apps/passage.yaml" passes the lexical check (it contains no "..") and only
+// the filesystem resolution reveals the escape.
+func TestGitPublishRefusesASymlinkEscape(t *testing.T) {
+	outside := t.TempDir()
+	origin := originAuthorRepoWithSymlink(t, "apps", escapeTarget(outside))
+
+	_, err := gitPublish(context.Background(), publishRequest{
+		CloneURL: origin,
+		Head:     "hecate/author-test",
+		Path:     "apps/passage.yaml",
+		Content:  []byte("apiVersion: hecate.dev/v1alpha1\nkind: Passage\n"),
+	})
+	if err == nil {
+		t.Fatal("expected a refusal — apps is a symlink out of the checkout")
+	}
+	if _, statErr := os.Stat(filepath.Join(outside, "passage.yaml")); !os.IsNotExist(statErr) {
+		t.Fatalf("the write escaped the checkout: %s exists", filepath.Join(outside, "passage.yaml"))
+	}
+}
+
+// TestGitPublishRefusesAnExistingSymlink is the other half: a symlink
+// planted *at* Path itself, rather than in a parent directory — refusing it
+// outright (not folded into the exists/Overwrite decision) is what stops a
+// write from going through it to wherever it points.
+func TestGitPublishRefusesAnExistingSymlink(t *testing.T) {
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "target.yaml"), []byte("kind: Gate\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := escapeTarget(filepath.Join(outside, "target.yaml"))
+	origin := originAuthorRepoWithSymlink(t, "passage.yaml", target)
+
+	_, err := gitPublish(context.Background(), publishRequest{
+		CloneURL:  origin,
+		Head:      "hecate/author-test",
+		Path:      "passage.yaml",
+		Content:   []byte("apiVersion: hecate.dev/v1alpha1\nkind: Passage\n"),
+		Overwrite: true, // even asking to overwrite must not follow the symlink
+	})
+	if err == nil {
+		t.Fatal("expected a refusal — passage.yaml is itself a symlink")
+	}
+	got, readErr := os.ReadFile(filepath.Join(outside, "target.yaml"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(got) != "kind: Gate\n" {
+		t.Fatalf("the symlink's target was overwritten: %s", got)
+	}
+}
+
 // originAuthorRepo creates a bare repository seeded with the given files, the
 // same file://-free technique pkg/passage/steps/git_test.go uses so nothing
 // here touches a real remote.
@@ -346,6 +450,44 @@ func originAuthorRepo(t *testing.T, files map[string]string) string {
 		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
+	}
+	tree, err := repo.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.AddWithOptions(&git.AddOptions{All: true}); err != nil {
+		t.Fatal(err)
+	}
+	sig := &object.Signature{Name: "seed", Email: "seed@example.com"}
+	if _, err := tree.Commit("initial", &git.CommitOptions{Author: sig, Committer: sig}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git.PlainClone(origin, true, &git.CloneOptions{URL: seed}); err != nil {
+		t.Fatal(err)
+	}
+	return origin
+}
+
+// originAuthorRepoWithSymlink is originAuthorRepo, but the seed also commits
+// one symlink named linkName pointing at target. go-git tracks a symlink as
+// an ordinary blob (git mode 120000) and recreates it as a real symlink on
+// checkout, the same as any other git client would — this is what lets a
+// pull-request author plant one on purpose.
+func originAuthorRepoWithSymlink(t *testing.T, linkName, target string) string {
+	t.Helper()
+	dir := t.TempDir()
+	origin := filepath.Join(dir, "origin.git")
+	seed := filepath.Join(dir, "seed")
+
+	repo, err := git.PlainInit(seed, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(seed, "demo-pipeline.yaml"), []byte("kind: Gate\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(seed, linkName)); err != nil {
+		t.Fatal(err)
 	}
 	tree, err := repo.Worktree()
 	if err != nil {
