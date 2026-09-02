@@ -17,6 +17,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
@@ -36,9 +37,21 @@ type composedStep struct {
 	With json.RawMessage `json:"with,omitempty"`
 }
 
-// authorPassageRequest is a Passage's step list plus where to open a pull
+// authorPassageRequest is a whole Passage manifest plus where to open a pull
 // request for it.
 type authorPassageRequest struct {
+	// Name is the Passage's metadata.name. Applying two authored Passages with
+	// the same name would collide, so this has no default — the author names
+	// it, the same as writing the YAML by hand would require.
+	Name string `json:"name"`
+	// Gate is the Gate this Passage crosses. api.gates() already lists every
+	// Gate the caller can see, for a form to populate a picker from rather
+	// than asking someone to type an identifier by hand.
+	Gate string `json:"gate"`
+	// Bundle is the Bundle this Passage moves. api.bundles() lists it the same
+	// way Gate does.
+	Bundle string `json:"bundle"`
+	// Steps is the ordered step list, exactly as PassageSpec.Steps.
 	Steps []composedStep `json:"steps"`
 
 	// Repo is the repository's clone URL. Not derived: a Gate's git-clone step
@@ -47,9 +60,13 @@ type authorPassageRequest struct {
 	// Flux ownership is not reliably present either (D58).
 	Repo string `json:"repo"`
 	// Path is the file this pull request writes, relative to the repository
-	// root. Replaced wholesale with the rendered steps (D58) — this does not
-	// merge into an existing manifest.
+	// root — a whole Passage manifest, its own file. Refused when it already
+	// exists in the base branch unless Overwrite is set (D58).
 	Path string `json:"path"`
+	// Overwrite allows replacing a file that already exists at Path. Off by
+	// default: a wrong or reused Path would otherwise silently destroy
+	// whatever was already committed there.
+	Overwrite bool `json:"overwrite,omitempty"`
 	// Base is the branch to open the pull request against. Empty uses the
 	// repository's default branch.
 	Base string `json:"base,omitempty"`
@@ -72,6 +89,16 @@ type authorPassageRequest struct {
 	// an API token — the same resolution git-pull-request and git-push use, an
 	// App key over a static one (#118).
 	CredentialsRef string `json:"credentialsRef"`
+}
+
+// pathExistsError refuses to overwrite a file that already exists on the
+// target branch — see D58.
+type pathExistsError struct{ Path string }
+
+func (e *pathExistsError) Error() string {
+	return fmt.Sprintf(
+		"%s already exists on the target branch — refusing to overwrite it; pass overwrite:true if that is intended",
+		e.Path)
 }
 
 // stepProblemsError refuses to open a pull request for a step list that would
@@ -97,13 +124,13 @@ func (e *stepProblemsError) dto() []map[string]any {
 	return out
 }
 
-// authorPassage renders a composed step list to YAML, commits it to a new
-// branch of the named repository, and opens a pull request through
-// pkg/provider.
+// authorPassage renders a whole Passage manifest, commits it to a new branch
+// of the named repository, and opens a pull request through pkg/provider.
 //
 // This never writes to the cluster — no Create, Apply or Update on any Hecate
 // CRD. The cluster stays git's (hecate#172, and see D58/D59 for why the
-// target is an explicit repo/path rather than derived, and why the YAML is
+// target is an explicit repo/path rather than derived, why the manifest is
+// its own file written wholesale rather than merged, and why the YAML is
 // rendered here rather than trusted from the browser).
 func (s *Server) authorPassage(ctx context.Context, subject Subject, r *http.Request) (any, error) {
 	namespace := r.PathValue("namespace")
@@ -111,6 +138,15 @@ func (s *Server) authorPassage(ctx context.Context, subject Subject, r *http.Req
 	var req authorPassageRequest
 	if err := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(&req); err != nil {
 		return nil, &BadRequest{Reason: "the request body is not the expected JSON: " + err.Error()}
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		return nil, &BadRequest{Reason: "name is required — it becomes the Passage's metadata.name"}
+	}
+	if strings.TrimSpace(req.Gate) == "" {
+		return nil, &BadRequest{Reason: "gate is required"}
+	}
+	if strings.TrimSpace(req.Bundle) == "" {
+		return nil, &BadRequest{Reason: "bundle is required"}
 	}
 	if len(req.Steps) == 0 {
 		return nil, &BadRequest{Reason: "steps is required — there is nothing to author"}
@@ -135,7 +171,12 @@ func (s *Server) authorPassage(ctx context.Context, subject Subject, r *http.Req
 		}
 	}
 
-	rendered, err := renderSteps(steps)
+	manifest := &v1alpha1.Passage{
+		TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "Passage"},
+		ObjectMeta: metav1.ObjectMeta{Name: req.Name, Namespace: namespace},
+		Spec:       v1alpha1.PassageSpec{Gate: req.Gate, Bundle: req.Bundle, Steps: steps},
+	}
+	rendered, err := yaml.Marshal(manifest)
 	if err != nil {
 		return nil, fmt.Errorf("rendering YAML: %w", err)
 	}
@@ -164,7 +205,8 @@ func (s *Server) authorPassage(ctx context.Context, subject Subject, r *http.Req
 		publish = gitPublish
 	}
 	base, err := publish(ctx, publishRequest{
-		CloneURL: req.Repo, Base: req.Base, Head: head, Path: req.Path, Content: rendered, Auth: gitAuth,
+		CloneURL: req.Repo, Base: req.Base, Head: head, Path: req.Path, Content: rendered,
+		Auth: gitAuth, Overwrite: req.Overwrite,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("committing %s: %w", req.Path, err)
@@ -260,15 +302,6 @@ func toSteps(in []composedStep) []v1alpha1.Step {
 	return out
 }
 
-// renderSteps is the `steps:` block of a Gate's `spec.passage`, rendered
-// server-side from the exact type Validate checked (D59) — the same output
-// shape stage 1's `stepsYAML` produces, but the copy that ends up in git.
-func renderSteps(steps []v1alpha1.Step) ([]byte, error) {
-	return yaml.Marshal(struct {
-		Steps []v1alpha1.Step `json:"steps"`
-	}{Steps: steps})
-}
-
 // publishRequest is what gitPublish needs to commit one file to a new branch.
 type publishRequest struct {
 	CloneURL string
@@ -277,6 +310,9 @@ type publishRequest struct {
 	Path     string
 	Content  []byte
 	Auth     transport.AuthMethod
+	// Overwrite allows replacing a file that already exists at Path. Off by
+	// default — see pathExistsError and D58.
+	Overwrite bool
 }
 
 // gitPublish clones the repository, writes and commits one file, and pushes
@@ -316,6 +352,17 @@ func gitPublish(ctx context.Context, req publishRequest) (base string, err error
 	// same guard the Passage steps' checkoutPath applies.
 	if rel, err := filepath.Rel(dir, full); err != nil || strings.HasPrefix(rel, "..") {
 		return "", fmt.Errorf("path %q escapes the repository", req.Path)
+	}
+	// A Passage manifest is its own file (D58): writing it wholesale is
+	// correct, but only because nothing else is expected to live there. A
+	// Path that already holds something — a reused name, or a typo landing on
+	// an existing Gate's manifest — must not be silently destroyed.
+	if _, err := os.Stat(full); err == nil {
+		if !req.Overwrite {
+			return "", &pathExistsError{Path: req.Path}
+		}
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("checking %s: %w", req.Path, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		return "", fmt.Errorf("creating %s: %w", filepath.Dir(req.Path), err)

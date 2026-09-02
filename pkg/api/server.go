@@ -471,6 +471,7 @@ func writeOpsError(w http.ResponseWriter, err error) {
 	var badRequest *BadRequest
 	var forbidden *Forbidden
 	var problems *stepProblemsError
+	var exists *pathExistsError
 	switch {
 	case errors.As(err, &problems):
 		// Structured, not just a message: the form that sent this needs to
@@ -490,6 +491,12 @@ func writeOpsError(w http.ResponseWriter, err error) {
 		// this case a refusal is reported as a server fault, which sends
 		// someone debugging Hecate when the answer is "you may not do that".
 		writeError(w, http.StatusForbidden, forbidden.Error())
+	case errors.As(err, &exists):
+		// 409, the same as ops.IsRefused below: the request was well-formed,
+		// and what refused it is the state of the target repository, not the
+		// input. Retrying with overwrite:true — a different request — is the
+		// right response, which is what 409 says.
+		writeError(w, http.StatusConflict, exists.Error())
 	case ops.IsNotFound(err):
 		writeError(w, http.StatusNotFound, err.Error())
 	case ops.IsRefused(err):

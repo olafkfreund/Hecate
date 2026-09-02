@@ -3,13 +3,20 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/yaml"
 
+	"github.com/olafkfreund/hecate/api/v1alpha1"
 	"github.com/olafkfreund/hecate/pkg/passage"
 	"github.com/olafkfreund/hecate/pkg/passage/steps"
 	"github.com/olafkfreund/hecate/pkg/provider"
@@ -101,8 +108,8 @@ func authorServer(t *testing.T, rbac grants, host *fakeAuthorHost) (*Server, *[]
 const validSteps = `[{"uses":"git-commit","with":{"message":"promote"}}]`
 
 func validBody() string {
-	return `{"steps":` + validSteps + `,"repo":"https://github.com/acme/fleet.git",` +
-		`"path":"demo/pipeline.yaml","credentialsRef":"forge"}`
+	return `{"name":"p1","gate":"staging","bundle":"b1","steps":` + validSteps +
+		`,"repo":"https://github.com/acme/fleet.git","path":"demo/pipeline.yaml","credentialsRef":"forge"}`
 }
 
 // TestAuthorPassageRequiresAuthorization is the auth mutation-check: a caller
@@ -158,8 +165,8 @@ func TestAuthorPassageRefusesInvalidSteps(t *testing.T) {
 	host := &fakeAuthorHost{}
 	s, published := authorServer(t, grants{"author@example.com": {"create gates": true}}, host)
 
-	body := `{"steps":[{"uses":"git-commit","with":{}}],"repo":"https://github.com/acme/fleet.git",` +
-		`"path":"demo/pipeline.yaml","credentialsRef":"forge"}`
+	body := `{"name":"p1","gate":"staging","bundle":"b1","steps":[{"uses":"git-commit","with":{}}],` +
+		`"repo":"https://github.com/acme/fleet.git","path":"demo/pipeline.yaml","credentialsRef":"forge"}`
 	rec := call(t, s, "t", http.MethodPost, authorPath, body)
 
 	if rec.Code != http.StatusBadRequest {
@@ -233,10 +240,128 @@ func TestAuthorPassageOpensAPullRequest(t *testing.T) {
 	if pub.CloneURL != "https://github.com/acme/fleet.git" || pub.Path != "demo/pipeline.yaml" {
 		t.Errorf("published %+v, want the request's repo and path", pub)
 	}
-	if !strings.Contains(string(pub.Content), "uses: git-commit") ||
-		!strings.Contains(string(pub.Content), "message: promote") {
-		t.Errorf("rendered YAML = %q, missing the composed step", pub.Content)
+
+	// The round trip: what gets committed must be a whole, applyable Passage —
+	// not a fragment. Unmarshalling it back into v1alpha1.Passage and checking
+	// gate/bundle/steps survive is the point; a bare `steps:` block (what this
+	// endpoint used to write) would fail this by decoding to an empty Spec.
+	var manifest v1alpha1.Passage
+	if err := yaml.Unmarshal(pub.Content, &manifest); err != nil {
+		t.Fatalf("committed content does not decode as a Passage: %v\n%s", err, pub.Content)
 	}
+	if manifest.Kind != "Passage" || manifest.APIVersion != v1alpha1.GroupVersion.String() {
+		t.Errorf("TypeMeta = %s/%s, want a Passage the cluster can apply", manifest.APIVersion, manifest.Kind)
+	}
+	if manifest.Name != "p1" || manifest.Namespace != "acme" {
+		t.Errorf("metadata = %s/%s, want p1 in acme", manifest.Namespace, manifest.Name)
+	}
+	if manifest.Spec.Gate != "staging" || manifest.Spec.Bundle != "b1" {
+		t.Errorf("spec.gate/bundle = %s/%s, want staging/b1", manifest.Spec.Gate, manifest.Spec.Bundle)
+	}
+	if len(manifest.Spec.Steps) != 1 || manifest.Spec.Steps[0].Uses != "git-commit" {
+		t.Fatalf("spec.steps = %+v, want the composed git-commit step", manifest.Spec.Steps)
+	}
+	var with struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(manifest.Spec.Steps[0].With.Raw, &with); err != nil || with.Message != "promote" {
+		t.Errorf("step With = %s, want message: promote to survive", manifest.Spec.Steps[0].With.Raw)
+	}
+}
+
+// TestGitPublishRefusesAnExistingPath is the second mutation-checked guard: a
+// Path that already holds something on the target branch must never be
+// silently overwritten (D58). This exercises the real gitPublish against a
+// local bare repository — no fake, since the fake `publish` seam used
+// elsewhere in this file stands in for exactly the logic under test here.
+func TestGitPublishRefusesAnExistingPath(t *testing.T) {
+	origin := originAuthorRepo(t, map[string]string{"demo/pipeline.yaml": "kind: Gate\n"})
+
+	_, err := gitPublish(context.Background(), publishRequest{
+		CloneURL: origin,
+		Head:     "hecate/author-test",
+		Path:     "demo/pipeline.yaml",
+		Content:  []byte("apiVersion: hecate.dev/v1alpha1\nkind: Passage\n"),
+	})
+
+	var exists *pathExistsError
+	if !errors.As(err, &exists) {
+		t.Fatalf("got %v, want a pathExistsError — demo/pipeline.yaml already exists", err)
+	}
+}
+
+// TestGitPublishOverwriteReplacesAnExistingPath is the escape hatch: setting
+// Overwrite is what turns the refusal above into a normal commit.
+func TestGitPublishOverwriteReplacesAnExistingPath(t *testing.T) {
+	origin := originAuthorRepo(t, map[string]string{"demo/pipeline.yaml": "kind: Gate\n"})
+
+	base, err := gitPublish(context.Background(), publishRequest{
+		CloneURL:  origin,
+		Head:      "hecate/author-test",
+		Path:      "demo/pipeline.yaml",
+		Content:   []byte("apiVersion: hecate.dev/v1alpha1\nkind: Passage\n"),
+		Overwrite: true,
+	})
+	if err != nil {
+		t.Fatalf("Overwrite:true should have let this through: %v", err)
+	}
+	if base == "" {
+		t.Error("expected the base branch to be reported")
+	}
+}
+
+// TestGitPublishAllowsANewPath is the control: a Path that does not exist yet
+// must never be refused.
+func TestGitPublishAllowsANewPath(t *testing.T) {
+	origin := originAuthorRepo(t, map[string]string{"demo/pipeline.yaml": "kind: Gate\n"})
+
+	if _, err := gitPublish(context.Background(), publishRequest{
+		CloneURL: origin,
+		Head:     "hecate/author-test",
+		Path:     "demo/new-passage.yaml",
+		Content:  []byte("apiVersion: hecate.dev/v1alpha1\nkind: Passage\n"),
+	}); err != nil {
+		t.Fatalf("a new path must not be refused: %v", err)
+	}
+}
+
+// originAuthorRepo creates a bare repository seeded with the given files, the
+// same file://-free technique pkg/passage/steps/git_test.go uses so nothing
+// here touches a real remote.
+func originAuthorRepo(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	origin := filepath.Join(dir, "origin.git")
+	seed := filepath.Join(dir, "seed")
+
+	repo, err := git.PlainInit(seed, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range files {
+		full := filepath.Join(seed, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tree, err := repo.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.AddWithOptions(&git.AddOptions{All: true}); err != nil {
+		t.Fatal(err)
+	}
+	sig := &object.Signature{Name: "seed", Email: "seed@example.com"}
+	if _, err := tree.Commit("initial", &git.CommitOptions{Author: sig, Committer: sig}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git.PlainClone(origin, true, &git.CloneOptions{URL: seed}); err != nil {
+		t.Fatal(err)
+	}
+	return origin
 }
 
 // TestAuthorPassageValidatesTheRequest is table-driven over the fields that
@@ -247,12 +372,24 @@ func TestAuthorPassageValidatesTheRequest(t *testing.T) {
 		name string
 		body string
 	}{
-		{"no steps", `{"repo":"https://github.com/acme/fleet.git","path":"a.yaml","credentialsRef":"forge"}`},
-		{"empty steps", `{"steps":[],"repo":"https://github.com/acme/fleet.git","path":"a.yaml","credentialsRef":"forge"}`},
-		{"no repo", `{"steps":` + validSteps + `,"path":"a.yaml","credentialsRef":"forge"}`},
-		{"no path", `{"steps":` + validSteps + `,"repo":"https://github.com/acme/fleet.git","credentialsRef":"forge"}`},
-		{"no credentialsRef", `{"steps":` + validSteps + `,"repo":"https://github.com/acme/fleet.git","path":"a.yaml"}`},
-		{"unroutable repo", `{"steps":` + validSteps + `,"repo":"not a url","path":"a.yaml","credentialsRef":"forge"}`},
+		{"no name", `{"gate":"staging","bundle":"b1","steps":` + validSteps +
+			`,"repo":"https://github.com/acme/fleet.git","path":"a.yaml","credentialsRef":"forge"}`},
+		{"no gate", `{"name":"p1","bundle":"b1","steps":` + validSteps +
+			`,"repo":"https://github.com/acme/fleet.git","path":"a.yaml","credentialsRef":"forge"}`},
+		{"no bundle", `{"name":"p1","gate":"staging","steps":` + validSteps +
+			`,"repo":"https://github.com/acme/fleet.git","path":"a.yaml","credentialsRef":"forge"}`},
+		{"no steps", `{"name":"p1","gate":"staging","bundle":"b1","repo":"https://github.com/acme/fleet.git",` +
+			`"path":"a.yaml","credentialsRef":"forge"}`},
+		{"empty steps", `{"name":"p1","gate":"staging","bundle":"b1","steps":[],` +
+			`"repo":"https://github.com/acme/fleet.git","path":"a.yaml","credentialsRef":"forge"}`},
+		{"no repo", `{"name":"p1","gate":"staging","bundle":"b1","steps":` + validSteps +
+			`,"path":"a.yaml","credentialsRef":"forge"}`},
+		{"no path", `{"name":"p1","gate":"staging","bundle":"b1","steps":` + validSteps +
+			`,"repo":"https://github.com/acme/fleet.git","credentialsRef":"forge"}`},
+		{"no credentialsRef", `{"name":"p1","gate":"staging","bundle":"b1","steps":` + validSteps +
+			`,"repo":"https://github.com/acme/fleet.git","path":"a.yaml"}`},
+		{"unroutable repo", `{"name":"p1","gate":"staging","bundle":"b1","steps":` + validSteps +
+			`,"repo":"not a url","path":"a.yaml","credentialsRef":"forge"}`},
 	}
 
 	for _, tc := range cases {

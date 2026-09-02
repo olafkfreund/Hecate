@@ -118,6 +118,45 @@ export interface Passage {
 }
 
 /**
+ * AuthorPassageRequest is a whole Passage plus where to open a pull request
+ * for it (hecate#172 stage 2, D58). `steps` is the same `ComposedStep[]`
+ * shape `stepsYAML` (ui/lib/yaml.ts) renders for the live preview — the
+ * server renders the copy that actually reaches git, from the identical
+ * `v1alpha1.Step` type (D59).
+ */
+export interface AuthorPassageRequest {
+  name: string;
+  gate: string;
+  bundle: string;
+  steps: { uses: string; as?: string; with?: Record<string, unknown> }[];
+
+  repo: string;
+  path: string;
+  /** Refuse by default when `path` already exists on the target branch — set
+   *  this only to deliberately replace it. */
+  overwrite?: boolean;
+  base?: string;
+  head?: string;
+
+  provider?: string;
+  baseURL?: string;
+  title?: string;
+  body?: string;
+  labels?: string[];
+
+  credentialsRef: string;
+}
+
+/** AuthoredPullRequest is what opening one returns. */
+export interface AuthoredPullRequest {
+  number: number;
+  url: string;
+  state: string;
+  branch: string;
+  repo: string;
+}
+
+/**
  * Beacon is a source Hecate watches, and the thing that emits Bundles.
  *
  * `spec.watch` is kept as the discriminated union the CRD defines rather than
@@ -566,6 +605,18 @@ export const api = {
    */
   approve: (ns: string, bundle: string, gate: string) =>
     post<unknown>(`${base(ns)}/bundles/${encodeURIComponent(bundle)}/approve`, { gate }),
+
+  /**
+   * authorPassage renders a whole Passage manifest, commits it to a new
+   * branch of `repo`, and opens a pull request through `pkg/provider`
+   * (hecate#172 stage 2).
+   *
+   * Never applies anything: the manifest exists only in the pull request
+   * until a human merges it, and Flux picks it up from there — see the
+   * `/passages/new` page and docs/DECISIONS.md D58.
+   */
+  authorPassage: (ns: string, req: AuthorPassageRequest) =>
+    post<AuthoredPullRequest>(`${base(ns)}/passages/author`, req),
 };
 
 /**

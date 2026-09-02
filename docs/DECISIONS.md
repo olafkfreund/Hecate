@@ -1982,15 +1982,36 @@ convention (an annotation on the Gate naming its own source, say) turns out to
 hold across enough of a fleet to be worth trusting — but that is evidence to
 gather from use, not a guess to ship on day one.
 
-**The file is replaced wholesale, not merged into an existing manifest.**
-Parsing an arbitrary YAML file well enough to update one Gate's `spec.passage`
-in place while preserving everything else an operator wrote around it is a
-second YAML engine with edge cases stage 1's hand-rolled emitter was
-deliberately built to avoid. Scope item 3 asks for "render to YAML, commit to
-a branch, open a merge request" — not "patch an existing manifest" — so the
-endpoint writes the rendered `steps:` block as the whole content of `path`.
-Authoring into an existing Gate file is real future work, not silently
-assumed here.
+**The artifact is a whole, applyable Passage — `apiVersion`, `kind`,
+`metadata.name`, `spec.gate`, `spec.bundle` and `spec.steps` — not a `steps:`
+fragment.** A bare `steps:` block, which an earlier version of this endpoint
+wrote, is not something `kubectl apply` or a Flux `Kustomization` does
+anything with: it names no Gate, no Bundle and no resource kind, so the pull
+request it opened had no diff a reviewer could actually merge into a running
+system. `PassageSpec` (`api/v1alpha1/passage.go`) already carries exactly the
+three fields a Passage needs beyond its steps, and the e2e suite
+(`test/e2e/incluster_test.go`) hand-writes the same shape — so the endpoint
+renders that type, not a second one invented for this form.
+
+**Given that, `path` names the whole Passage's own file, and writing it
+wholesale is simply correct rather than a compromise.** A `steps:` fragment
+meant for pasting into an existing Gate would have made "replace the whole
+file" the wrong operation — it would discard everything else an operator
+wrote around the fragment. A complete Passage manifest has no "everything
+else": the file is either this Passage or it is not, so writing it in full is
+what committing it means. What that changes is where the danger sits — not in
+overwriting *part* of a file, but in overwriting a *different* file entirely
+because a path was mistyped or reused. This repository's own demo has three
+Gates living at `demo/pipeline.yaml`; committing a Passage there by accident
+would destroy all three. So the endpoint **refuses to write to a `path` that
+already exists on the target branch**, and says so in the error, unless the
+request sets `overwrite: true`. The default has to be "refuse": a UI that
+silently replaces whatever it finds is worse than one that makes the author
+type an unusual flag to mean it.
+
+Merging into an existing Gate's `spec.passage` — the fragment idea this
+decision started from — is real future work for a different endpoint, not
+silently assumed here.
 
 ## D59 — The pull request's YAML is rendered server-side, from the same type validation reads
 
@@ -2033,4 +2054,8 @@ disagree about what a step *is* — only whether its `with:` block is correct,
 which is what `Validate` exists to answer. A second, YAML-specific struct
 would reopen exactly the drift D57 and the commit-status schema bug (#171)
 were both about: two lists describing the same thing, changed in one place at
-a time.
+a time. D58 pushes this further than it first sounds: the endpoint renders
+`v1alpha1.Passage` in full — `TypeMeta`, `ObjectMeta`, `Spec.Steps` included —
+not only its `[]v1alpha1.Step`, so the type the API server would validate on
+`kubectl apply` and the type this endpoint marshals are the identical Go
+value, not two structs kept in sync by hand.
