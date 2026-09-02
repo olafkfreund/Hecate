@@ -183,7 +183,7 @@ func ghGet(url string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GET %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body := make([]byte, 0, 4096)
 	buf := make([]byte, 4096)
 	for {
