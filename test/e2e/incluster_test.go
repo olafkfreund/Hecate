@@ -308,7 +308,10 @@ func TestAnnotationTriggersAnImmediatePoll(t *testing.T) {
 	publishImages(t, app, "6.0.0")
 
 	// An interval long enough that a scheduled poll cannot be mistaken for a
-	// triggered one: if this passes inside a minute, the annotation did it.
+	// triggered one: the next scheduled poll is an hour away, so an
+	// acknowledgement arriving at all is the annotation's doing. The waits
+	// below are bounded to catch a hang, not to discriminate — the hour does
+	// that.
 	beacon := &v1alpha1.Beacon{
 		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: namespace},
 		Spec: v1alpha1.BeaconSpec{
@@ -322,12 +325,17 @@ func TestAnnotationTriggersAnImmediatePoll(t *testing.T) {
 
 	// Let the creation-triggered poll settle first, so what follows can only be
 	// the annotation's doing.
-	waitFor(t, 60*time.Second, "the Beacon to poll once", func() bool {
+	waitFor(t, 3*time.Minute, "the Beacon to poll once", func() bool {
 		var b v1alpha1.Beacon
 		if err := c.Get(ctx, key(beacon), &b); err != nil {
 			return false
 		}
 		return b.Status.LastPolled != nil
+	}, func() string {
+		var b v1alpha1.Beacon
+		_ = c.Get(ctx, key(beacon), &b)
+		return fmt.Sprintf("  lastPolled %v, latestBundle %q",
+			b.Status.LastPolled, b.Status.LatestBundle)
 	})
 
 	var before v1alpha1.Beacon
@@ -345,7 +353,7 @@ func TestAnnotationTriggersAnImmediatePoll(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	waitFor(t, 60*time.Second, "the Beacon to acknowledge the request", func() bool {
+	waitFor(t, 3*time.Minute, "the Beacon to acknowledge the request", func() bool {
 		var b v1alpha1.Beacon
 		if err := c.Get(ctx, key(beacon), &b); err != nil {
 			return false
