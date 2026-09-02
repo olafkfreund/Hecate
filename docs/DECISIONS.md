@@ -1774,3 +1774,51 @@ answer should probably still be "reuse the kubeconfig's OIDC token" rather than
 Provider sign-in recipes — Okta, Entra, Google, Keycloak — are a separate
 matter, tracked in #52 and deliberately unwritten until somebody has run one
 against a real tenant.
+
+---
+
+## D56 — The support matrix reads CI step results, not job results or workflow YAML alone
+
+*2026-09-02 — #8*
+
+Epic #8's exit criterion is that the README's git-host and registry table is
+"generated from passing CI jobs" rather than typed by hand. `cmd/supportmatrix`
+does that, and the first version of it was wrong in a way worth recording.
+
+**A green job is not proof.** `registry-matrix.yml`'s `dockerhub` job succeeds
+whether or not `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` are set: its login step
+notices a missing credential, prints a notice, sets `skip=true`, and exits 0
+rather than failing a fork's build for a secret it can never have. Every
+downstream step then reports `skipped`, which also counts as success for the
+job's overall conclusion. A generator that read job conclusions would call
+Docker Hub "proven" whenever the workflow merely ran — which on this issue's
+own audit (#50) is exactly the false confidence the exit criterion exists to
+rule out. So the generator reads the conclusion of the one step that actually
+pushes and pulls, `git blame`-findable in the workflow as `Push and pull` /
+`E2E — GitHub pull request lifecycle`, and treats anything else in that job as
+noise.
+
+**Static analysis of the workflow YAML is not enough either.** `e2e.yml`'s
+`providers` job is structurally identical to `registry-matrix.yml`'s
+`dockerhub` job — gated on an optional secret, skips cleanly when it is unset —
+and yet #49's own audit found GitHub proven nightly while Docker Hub is not
+proven at all on this repository. The two are distinguishable only by asking
+GitHub whether the gated step actually ran and passed on the most recent run,
+which means the generator calls the Actions API rather than only parsing
+`.github/workflows/*.yml`.
+
+**That costs a network dependency the other generators do not have.**
+`cmd/apishape` and `cmd/stepschema` are pure reflection over the Go types and
+run offline; `cmd/supportmatrix` needs `GITHUB_TOKEN` (or an authenticated
+`gh`) and a route to `api.github.com`, and fails loudly rather than guessing
+when it cannot reach either — a stale or absent signal about what CI proved is
+worse than no table, which is the whole argument #8 opened with. The CI job
+that checks for drift (`ci.yml`'s `generated` job) is given `actions: read` and
+`github.token` for exactly this.
+
+**Four states, not two.** *Proven*, *configured but not yet proven*, *code
+with no CI proof*, and *not implemented* are rendered distinctly, with a legend
+explaining each. Collapsing GitLab (`pkg/provider/gitlab.go` — full
+implementation, no e2e test, see #101) into either "supported" or "not
+supported" would misrepresent it either way; the exit criterion's whole point
+is that a claim of coverage should be checkable against what actually ran.

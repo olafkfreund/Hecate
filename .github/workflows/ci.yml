@@ -99,6 +99,11 @@ jobs:
   generated:
     name: Generated files are current
     runs-on: ubuntu-latest
+    # cmd/supportmatrix reads this run's actions history to tell a proven
+    # provider or registry from a merely configured one (#8, D56).
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v6
       - uses: cachix/install-nix-action@v31
@@ -111,6 +116,8 @@ jobs:
       # its own version into the CRD annotation, so the check fails for everyone
       # whose local toolchain differs from CI's. The flake is the one pin.
       - name: Regenerate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: nix develop --command make generate
 
       - name: Check for drift
