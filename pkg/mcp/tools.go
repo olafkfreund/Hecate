@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/olafkfreund/hecate/pkg/ops"
@@ -159,22 +160,24 @@ func ReadTools(o *ops.Ops, defaultNamespace string) []Tool {
 			// Published because this is the tool a model reasons over, and the
 			// blocker kinds are the part worth being explicit about: they are a
 			// closed set, so a client can branch on them rather than match prose.
-			OutputSchema: schema(`{
+			//
+			// The enums are built from ops.AllStates and ops.AllBlockerKinds
+			// rather than hand-typed here a second time — a hand-typed copy is
+			// exactly how this schema drifted from ChangeHeld, added to
+			// pkg/ops/explain.go by D49 without ever reaching this file (D64).
+			OutputSchema: schema(fmt.Sprintf(`{
 				"type": "object",
 				"properties": {
 					"gate": {"type": "string"},
 					"namespace": {"type": "string"},
-					"state": {"type": "string", "enum": ["Crossing", "Ready", "Blocked", "Idle", "Failed"]},
+					"state": {"type": "string", "enum": [%s]},
 					"summary": {"type": "string"},
 					"blockers": {
 						"type": "array",
 						"items": {
 							"type": "object",
 							"properties": {
-								"kind": {"type": "string", "enum": [
-									"Suspended", "InvalidSteps", "NoPassageTemplate", "NoBundles",
-									"AwaitingApproval", "UpstreamNotCleared", "WindowClosed",
-									"PassageFailed", "StepWaiting", "Unhealthy", "AwaitingRequest"]},
+								"kind": {"type": "string", "enum": [%s]},
 								"detail": {"type": "string"},
 								"fix": {"type": "string"}
 							},
@@ -194,7 +197,7 @@ func ReadTools(o *ops.Ops, defaultNamespace string) []Tool {
 					"health": {"type": "string"}
 				},
 				"required": ["gate", "namespace", "state", "summary"]
-			}`),
+			}`, enumJSON(ops.AllStates), enumJSON(ops.AllBlockerKinds))),
 			Handler: func(ctx context.Context, raw json.RawMessage) (any, string, error) {
 				args, err := decodeArgs(raw)
 				if err != nil {
@@ -237,6 +240,17 @@ func renderExplanation(ex *ops.Explanation) string {
 // schema keeps the tool definitions readable by letting them hold JSON Schema
 // as JSON. Invalid schema is a programming error and panics at startup rather
 // than being served to a client that will reject the whole tool.
+// enumJSON renders a canonical list (ops.AllStates, ops.AllBlockerKinds) as
+// the comma-separated quoted values a JSON Schema "enum" wants, so those lists
+// stay the single source instead of a copy typed into the schema string.
+func enumJSON[T ~string](vals []T) string {
+	parts := make([]string, len(vals))
+	for i, v := range vals {
+		parts[i] = strconv.Quote(string(v))
+	}
+	return strings.Join(parts, ", ")
+}
+
 func schema(s string) json.RawMessage {
 	var check any
 	if err := json.Unmarshal([]byte(s), &check); err != nil {
