@@ -100,7 +100,7 @@ jobs:
     name: Generated files are current
     runs-on: ubuntu-latest
     # cmd/supportmatrix reads this run's actions history to tell a proven
-    # provider or registry from a merely configured one (#8, D56).
+    # provider or registry from a merely configured one (#8, D57).
     permissions:
       contents: read
       actions: read

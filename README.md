@@ -429,7 +429,7 @@ controller warns at startup if the cluster serves an API version it does not exp
 ### Git hosts and registries
 
 Generated from the most recent CI run on `main` by `go run ./cmd/supportmatrix` — see
-[D56](docs/DECISIONS.md) for why this reads step results rather than job results, and
+[D57](docs/DECISIONS.md) for why this reads step results rather than job results, and
 [#8](https://github.com/olafkfreund/Hecate/issues/8) for the audit that found the table
 below worth building.
 

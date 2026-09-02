@@ -130,7 +130,7 @@ generate: ## Regenerate deepcopy, CRDs and RBAC from the API and controller mark
 	go run ./cmd/stepschema > pkg/passage/steps/schemas.json
 	@# README's git-host/registry table (#8). Unlike the generators above,
 	@# this one needs the network: it reads the most recent CI run on main to
-	@# tell a proven provider from a merely configured one. See D56.
+	@# tell a proven provider from a merely configured one. See D57.
 	go run ./cmd/supportmatrix
 
 build: ## Build the controller and the CLI

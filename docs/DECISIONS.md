@@ -1777,7 +1777,7 @@ against a real tenant.
 
 ---
 
-## D56 — The support matrix reads CI step results, not job results or workflow YAML alone
+## D57 — The support matrix reads CI step results, not job results or workflow YAML alone
 
 *2026-09-02 — #8*
 

@@ -308,6 +308,12 @@ func render() (string, error) {
 var markerBlock = regexp.MustCompile(`(?s)` + regexp.QuoteMeta(startMarker) + `.*` + regexp.QuoteMeta(endMarker))
 
 func main() {
+	// render() completes every Actions API call before returning anything.
+	// README.md is read and rewritten only once it has succeeded, so a
+	// network failure, a rate limit, or a missing token leaves the file
+	// untouched rather than rewriting it with a guess — the same principle
+	// the table itself exists to enforce. Do not reorder this so any part
+	// of the file write happens before every request above has succeeded.
 	table, err := render()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "supportmatrix:", err)
