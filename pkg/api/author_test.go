@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -322,6 +323,52 @@ func TestGitPublishAllowsANewPath(t *testing.T) {
 		Content:  []byte("apiVersion: hecate.dev/v1alpha1\nkind: Passage\n"),
 	}); err != nil {
 		t.Fatalf("a new path must not be refused: %v", err)
+	}
+}
+
+// TestGitPublishWritesANestedNewPath is the pitfall case the containment
+// rewrite (realAncestor's resolved-ancestor-plus-remainder) exists for: Path
+// is two directories deep and *neither* directory exists yet, so
+// realAncestor's resolved ancestor is the checkout root itself, several
+// levels above the file. A version that dropped the not-yet-created
+// "apps/dev" remainder and joined only the basename onto that root would
+// return no error at all — it would just silently write "passage.yaml" at
+// the repository root instead of "apps/dev/passage.yaml". So this checks the
+// actual location, not only that gitPublish was happy: it clones the branch
+// gitPublish pushed and reads the file back from the exact requested path.
+func TestGitPublishWritesANestedNewPath(t *testing.T) {
+	origin := originAuthorRepo(t, map[string]string{"demo/pipeline.yaml": "kind: Gate\n"})
+	content := []byte("apiVersion: hecate.dev/v1alpha1\nkind: Passage\n")
+
+	if _, err := gitPublish(context.Background(), publishRequest{
+		CloneURL: origin,
+		Head:     "hecate/author-nested",
+		Path:     "apps/dev/passage.yaml",
+		Content:  content,
+	}); err != nil {
+		t.Fatalf("a new, two-level-deep path must not be refused: %v", err)
+	}
+
+	verify := t.TempDir()
+	if _, err := git.PlainClone(verify, false, &git.CloneOptions{
+		URL:           origin,
+		ReferenceName: plumbing.NewBranchReferenceName("hecate/author-nested"),
+		SingleBranch:  true,
+	}); err != nil {
+		t.Fatalf("cloning the pushed branch to verify: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(verify, "apps", "dev", "passage.yaml"))
+	if err != nil {
+		t.Fatalf("the file did not land at apps/dev/passage.yaml (git staged the wrong path): %v", err)
+	}
+	if string(got) != string(content) {
+		t.Errorf("content at apps/dev/passage.yaml = %q, want %q", got, content)
+	}
+	// The regression this guards: a rewrite that discarded the remainder
+	// would place the file here instead.
+	if _, err := os.Stat(filepath.Join(verify, "passage.yaml")); !os.IsNotExist(err) {
+		t.Error("the file landed at the repository root instead of the requested nested path")
 	}
 }
 

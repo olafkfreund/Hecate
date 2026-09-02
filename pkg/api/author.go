@@ -361,9 +361,16 @@ func gitPublish(ctx context.Context, req publishRequest) (base string, err error
 	// `path` come from the same HTTP caller: a repository can be cloned with
 	// a symlink already committed into it (say `apps -> /etc`), and
 	// `dir/apps/passage.yaml` would clear the lexical check above while the
-	// filesystem resolves it somewhere else entirely. Confirm the *resolved*
-	// parent directory is still inside the checkout before creating anything.
-	realParent, err := realAncestor(filepath.Dir(full))
+	// filesystem resolves it somewhere else entirely.
+	//
+	// realAncestor resolves the deepest *existing* ancestor of the parent
+	// directory and hands back what it walked past to get there (most of a
+	// freshly authored Passage's parent directories do not exist yet). `safe`
+	// is then built from that resolved ancestor plus that remainder — not
+	// from `full` again — so the value handed to Lstat/MkdirAll/WriteFile
+	// below is the exact one just checked for containment, not a second,
+	// unchecked copy of the same tainted string.
+	realParent, remainder, err := realAncestor(filepath.Dir(full))
 	if err != nil {
 		return "", fmt.Errorf("path %q: %w", req.Path, err)
 	}
@@ -374,6 +381,8 @@ func gitPublish(ctx context.Context, req publishRequest) (base string, err error
 	if realParent != realDir && !strings.HasPrefix(realParent, realDir+string(filepath.Separator)) {
 		return "", fmt.Errorf("path %q escapes the repository", req.Path)
 	}
+	safe := filepath.Join(realParent, remainder, filepath.Base(full))
+
 	// A Passage manifest is its own file (D58): writing it wholesale is
 	// correct, but only because nothing else is expected to live there. A
 	// Path that already holds something — a reused name, or a typo landing on
@@ -387,7 +396,7 @@ func gitPublish(ctx context.Context, req publishRequest) (base string, err error
 	// closing with O_NOFOLLOW here: this checkout is a fresh temp clone this
 	// request alone can see, so nothing else can swap the symlink in between
 	// this check and the write below.
-	switch info, err := os.Lstat(full); {
+	switch info, err := os.Lstat(safe); {
 	case err == nil && info.Mode()&os.ModeSymlink != 0:
 		return "", fmt.Errorf("path %q is a symlink — refusing to write through it", req.Path)
 	case err == nil:
@@ -397,10 +406,10 @@ func gitPublish(ctx context.Context, req publishRequest) (base string, err error
 	case !os.IsNotExist(err):
 		return "", fmt.Errorf("checking %s: %w", req.Path, err)
 	}
-	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(safe), 0o755); err != nil {
 		return "", fmt.Errorf("creating %s: %w", filepath.Dir(req.Path), err)
 	}
-	if err := os.WriteFile(full, req.Content, 0o644); err != nil {
+	if err := os.WriteFile(safe, req.Content, 0o644); err != nil {
 		return "", fmt.Errorf("writing %s: %w", req.Path, err)
 	}
 
@@ -429,23 +438,31 @@ func gitPublish(ctx context.Context, req publishRequest) (base string, err error
 }
 
 // realAncestor resolves the deepest existing ancestor of dir to its
-// symlink-free path. filepath.EvalSymlinks fails on a path that does not
-// exist yet — true of most of a freshly authored Passage's parent
-// directories — so this walks up until it finds one that does, the same way
-// a shell resolving a not-yet-created path would.
-func realAncestor(dir string) (string, error) {
+// symlink-free path, plus the not-yet-created remainder between that
+// ancestor and dir. filepath.EvalSymlinks fails on a path that does not exist
+// yet — true of most of a freshly authored Passage's parent directories — so
+// this walks up until it finds one that does, the same way a shell resolving
+// a not-yet-created path would, and carries what it walked past back down:
+// dropping the remainder and joining only the basename onto the resolved
+// ancestor would silently relocate a nested path (`apps/dev/passage.yaml`) up
+// to the ancestor it did find (`passage.yaml` at the checkout root).
+func realAncestor(dir string) (resolved, remainder string, err error) {
+	var walked []string
 	for {
-		resolved, err := filepath.EvalSymlinks(dir)
+		r, err := filepath.EvalSymlinks(dir)
 		if err == nil {
-			return resolved, nil
+			return r, filepath.Join(walked...), nil
 		}
 		if !os.IsNotExist(err) {
-			return "", err
+			return "", "", err
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", fmt.Errorf("no existing ancestor of %s", dir)
+			return "", "", fmt.Errorf("no existing ancestor of %s", dir)
 		}
+		// Prepended, not appended: walked accumulates outside-in as the walk
+		// climbs, so it has to end up in the order the path actually reads.
+		walked = append([]string{filepath.Base(dir)}, walked...)
 		dir = parent
 	}
 }
