@@ -120,27 +120,42 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: nix develop --command make generate
 
+      # cmd/supportmatrix (#8) reads live CI run history on main rather than
+      # only the tree, so README.md's support-matrix table can drift with no
+      # code change on this branch at all — a nightly job's result changed, or
+      # aged out of the run window it searches. Nobody opening an unrelated PR
+      # caused that or can fix it by editing code, so a drift confined to
+      # README.md warns rather than fails the build (D57). A hard error from
+      # the generator itself already failed the "Regenerate" step above,
+      # before this one even runs — "could not check" is never treated as
+      # "checked, fine". Drift in any other generated file (apishape.json,
+      # schemas.json, the CRDs) is still a real "you forgot to run make
+      # generate" and fails exactly as before.
       - name: Check for drift
         run: |
-          if ! git diff --quiet; then
-            echo "Generated files are out of date. Run 'nix develop --command make generate' and commit:"
-            git diff
-            # cmd/supportmatrix (#8) reads live CI run history on main rather than
-            # only the tree, so README.md's support-matrix block can drift with no
-            # code change on this branch at all — a nightly job's result changed,
-            # or aged out of the run window it searches. When README.md is the
-            # only file that moved, say so plainly rather than leaving whoever
-            # is looking at an unrelated PR to work that out from a diff.
-            if [ "$(git diff --name-only)" = "README.md" ]; then
-              echo
-              echo "Note: README.md is the only file that changed. If the diff is inside the"
-              echo "<!-- support-matrix:start/end --> block, this is not necessarily caused by"
-              echo "your change — that table reflects the most recent relevant CI run on main,"
-              echo "and can shift with no code change (see D57). Re-run"
-              echo "'go run ./cmd/supportmatrix' and commit the refreshed table."
-            fi
-            exit 1
+          if git diff --quiet; then
+            exit 0
           fi
+          other="$(git diff --name-only | grep -v '^README\.md$' || true)"
+          if [ -z "$other" ]; then
+            {
+              echo "### README.md is out of date"
+              echo
+              echo "Only the generated support-matrix table drifted — not a code problem."
+              echo "It reflects the most recent relevant CI run on main and can shift with"
+              echo "no code change on this branch (see D57), so it does not fail the build."
+              echo "Re-run \`go run ./cmd/supportmatrix\` and commit when convenient."
+              echo
+              echo '```diff'
+              git diff -- README.md
+              echo '```'
+            } | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "::warning::README.md's generated support-matrix table is out of date (see the job summary). Run 'go run ./cmd/supportmatrix' and commit."
+            exit 0
+          fi
+          echo "Generated files are out of date. Run 'nix develop --command make generate' and commit:"
+          git diff
+          exit 1
 
   build:
     name: Build image

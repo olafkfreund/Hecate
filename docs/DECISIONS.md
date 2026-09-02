@@ -1912,13 +1912,32 @@ nothing:
   must not: "I could not reach the evidence" is not the same claim as "there
   is no evidence", and only the second one is safe to print.
 
-**Reachable staleness, not fixed here.** Because the table's content comes
-from live CI history rather than only from the tree, it can change with no
-code change at all — the nightly `providers` job flakes, or (in principle,
-though not observed on this repository's actual run cadence) enough pushes
-land between two nightlies to push the last passing run out of the window.
-Either would fail `ci.yml`'s "Generated files are current" job on an unrelated
-PR, with a diff nobody there caused or can fix by editing code. That is a real
-gap in the CI wiring, not in the generator's honesty, and is deliberately left
-for a human policy call — re-run on drift, treat this job as non-blocking, or
-something else — rather than decided here.
+**Reachable staleness, and the policy call it forced.** Because the table's
+content comes from live CI history rather than only from the tree, it can
+change with no code change at all — the nightly `providers` job flakes, or (in
+principle, though not observed on this repository's actual run cadence)
+enough pushes land between two nightlies to push the last passing run out of
+the window. Either would fail `ci.yml`'s "Generated files are current" job on
+an unrelated PR, with a diff nobody there caused or can fix by editing code.
+
+**Decision: a drift confined to `README.md` warns; it does not fail the
+build.** Blocking somebody's unrelated PR because CI history moved underneath
+them is a worse failure mode than the table being briefly stale — the table
+still self-corrects the next time `make generate` runs, and staleness is
+visible rather than silent. So the "Check for drift" step in `ci.yml` compares
+the drifted file list against `README.md` alone: if that is the *only* file
+that changed, it writes the diff to the job summary and emits a
+`::warning::` annotation, then exits 0. If any other generated file drifted —
+`ui/test/apishape.json`, `pkg/passage/steps/schemas.json`, the CRDs under
+`charts/hecate` — the job still fails exactly as before, because those come
+from code in the repository and drift there really is "you forgot to run
+`make generate`".
+
+**What does not change: a hard error still fails the job.** The "Regenerate"
+step (`make generate`) runs before "Check for drift" and is untouched — if
+`cmd/supportmatrix` cannot reach the Actions API, `make generate` fails there,
+and the job goes red before the drift comparison ever runs. Softening only the
+*comparison* step, and only for a `README.md`-only diff, keeps "I could not
+reach the evidence" a hard failure while "there is a stale but honest
+evidence-based claim" is a visible warning. Collapsing those two into one
+lenient path would have undone the property D57 exists to protect.
