@@ -26,6 +26,7 @@ import (
 	"github.com/olafkfreund/hecate/pkg/githubapp"
 	"github.com/olafkfreund/hecate/pkg/passage"
 	"github.com/olafkfreund/hecate/pkg/provider"
+	"github.com/olafkfreund/hecate/pkg/safepath"
 )
 
 // composedStep is one row of the browser's step list — the same shape as
@@ -347,41 +348,18 @@ func gitPublish(ctx context.Context, req publishRequest) (base string, err error
 		base = head.Name().Short()
 	}
 
-	if filepath.IsAbs(req.Path) {
-		return "", fmt.Errorf("path %q must be relative to the repository", req.Path)
-	}
-	full := filepath.Join(dir, filepath.FromSlash(req.Path))
-	// A `path` of "../../etc" would otherwise write outside the checkout, the
-	// same guard the Passage steps' checkoutPath applies.
-	if rel, err := filepath.Rel(dir, full); err != nil || strings.HasPrefix(rel, "..") {
-		return "", fmt.Errorf("path %q escapes the repository", req.Path)
-	}
-	// filepath.Rel is purely lexical — it has no idea a path component might
-	// be a symlink. That is a real gap here specifically, because `repo` and
-	// `path` come from the same HTTP caller: a repository can be cloned with
-	// a symlink already committed into it (say `apps -> /etc`), and
-	// `dir/apps/passage.yaml` would clear the lexical check above while the
-	// filesystem resolves it somewhere else entirely.
-	//
-	// realAncestor resolves the deepest *existing* ancestor of the parent
-	// directory and hands back what it walked past to get there (most of a
-	// freshly authored Passage's parent directories do not exist yet). `safe`
-	// is then built from that resolved ancestor plus that remainder — not
-	// from `full` again — so the value handed to Lstat/MkdirAll/WriteFile
-	// below is the exact one just checked for containment, not a second,
-	// unchecked copy of the same tainted string.
-	realParent, remainder, err := realAncestor(filepath.Dir(full))
+	// safepath.Join does the containment work, shared with the Passage steps'
+	// checkoutPath: `repo` and `path` come from the same HTTP caller here, so
+	// a repository can be cloned with a symlink already committed into it
+	// (say `apps -> /etc`), and a lexical check alone would clear
+	// `dir/apps/passage.yaml` while the filesystem resolves it elsewhere
+	// entirely. Join returns the path actually proven contained, so that is
+	// what Lstat/MkdirAll/WriteFile below use — not a second, unchecked join
+	// of the same tainted string.
+	safe, err := safepath.Join(dir, req.Path)
 	if err != nil {
 		return "", fmt.Errorf("path %q: %w", req.Path, err)
 	}
-	realDir, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		return "", fmt.Errorf("resolving the checkout: %w", err)
-	}
-	if realParent != realDir && !strings.HasPrefix(realParent, realDir+string(filepath.Separator)) {
-		return "", fmt.Errorf("path %q escapes the repository", req.Path)
-	}
-	safe := filepath.Join(realParent, remainder, filepath.Base(full))
 
 	// A Passage manifest is its own file (D58): writing it wholesale is
 	// correct, but only because nothing else is expected to live there. A
@@ -435,36 +413,6 @@ func gitPublish(ctx context.Context, req publishRequest) (base string, err error
 	}
 
 	return base, nil
-}
-
-// realAncestor resolves the deepest existing ancestor of dir to its
-// symlink-free path, plus the not-yet-created remainder between that
-// ancestor and dir. filepath.EvalSymlinks fails on a path that does not exist
-// yet — true of most of a freshly authored Passage's parent directories — so
-// this walks up until it finds one that does, the same way a shell resolving
-// a not-yet-created path would, and carries what it walked past back down:
-// dropping the remainder and joining only the basename onto the resolved
-// ancestor would silently relocate a nested path (`apps/dev/passage.yaml`) up
-// to the ancestor it did find (`passage.yaml` at the checkout root).
-func realAncestor(dir string) (resolved, remainder string, err error) {
-	var walked []string
-	for {
-		r, err := filepath.EvalSymlinks(dir)
-		if err == nil {
-			return r, filepath.Join(walked...), nil
-		}
-		if !os.IsNotExist(err) {
-			return "", "", err
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", "", fmt.Errorf("no existing ancestor of %s", dir)
-		}
-		// Prepended, not appended: walked accumulates outside-in as the walk
-		// climbs, so it has to end up in the order the path actually reads.
-		walked = append([]string{filepath.Base(dir)}, walked...)
-		dir = parent
-	}
 }
 
 // slug turns a file path into a branch-safe name, so the default head branch
