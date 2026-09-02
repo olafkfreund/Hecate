@@ -157,6 +157,20 @@ export interface AuthoredPullRequest {
 }
 
 /**
+ * StepProblem is one thing wrong with a step list, in the shape a form can
+ * attach to the offending row: which step (`index`, `uses`), and why
+ * (`message`). Mirrors `passage.StepProblem` (`pkg/passage/step.go`) as
+ * `/passages/validate` and `/passages/author` both send it — the same
+ * `Registry.Validate` runs behind both, so the browser and the admission
+ * path refuse the same things for the same reasons (hecate#172 scope item 4).
+ */
+export interface StepProblem {
+  index: number;
+  uses?: string;
+  message: string;
+}
+
+/**
  * Beacon is a source Hecate watches, and the thing that emits Bundles.
  *
  * `spec.watch` is kept as the discriminated union the CRD defines rather than
@@ -617,6 +631,19 @@ export const api = {
    */
   authorPassage: (ns: string, req: AuthorPassageRequest) =>
     post<AuthoredPullRequest>(`${base(ns)}/passages/author`, req),
+
+  /**
+   * validatePassage reports what is wrong with a step list, using the same
+   * `Registry.Validate` `authorPassage` refuses on — this endpoint never
+   * refuses the request itself (always 200): it is feedback for a form still
+   * being edited, not a gate (hecate#172 scope item 4).
+   *
+   * Not namespaced: Validate reads no cluster state, only the controller's
+   * own step catalogue, so the answer is the same everywhere — see the
+   * handler's own comment (`pkg/api/validate.go`).
+   */
+  validatePassage: (steps: AuthorPassageRequest["steps"]) =>
+    post<{ problems: StepProblem[] }>("/api/v1alpha1/passages/validate", { steps }),
 };
 
 /**
