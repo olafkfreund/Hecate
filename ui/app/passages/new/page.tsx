@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { ArrowDown, ArrowUp, GitPullRequest, Plus, Trash2 } from "lucide-react";
 import {
   api,
@@ -8,6 +8,7 @@ import {
   type AuthoredPullRequest,
   type Bundle,
   type Gate,
+  type StepProblem,
   type StepSchema,
 } from "@/lib/api";
 import { Panel, useApi } from "@/components/loader";
@@ -91,6 +92,46 @@ function usePersistedField(key: string): [string, (v: string) => void] {
   return [value, set];
 }
 
+/**
+ * useValidation asks `/passages/validate` what is wrong with the composed
+ * step list, so the browser refuses the same things authorPassage will
+ * (hecate#172 scope item 4) — before the click that opens a pull request,
+ * not only after it.
+ *
+ * Debounced 500ms after the last edit, not on every keystroke: a step's
+ * `with:` block is typed field by field, and validating each character would
+ * mean a request per keystroke for no benefit — the answer to "is this
+ * step valid yet" does not change usefully faster than someone can pause.
+ */
+function useValidation(steps: ComposedStep[]): StepProblem[] {
+  const [problems, setProblems] = useState<StepProblem[]>([]);
+  const key = JSON.stringify(steps);
+
+  useEffect(() => {
+    if (steps.length === 0) return;
+    let live = true;
+    const timer = setTimeout(() => {
+      api.validatePassage(steps).then(
+        (res) => live && setProblems(res.problems),
+        // Best-effort: a validate call that fails (offline, a 5xx) must never
+        // block editing or hide the submit button — authorPassage still runs
+        // the real check server-side either way.
+        () => live && setProblems([]),
+      );
+    }, 500);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  // An empty step list has nothing to report, computed rather than set from
+  // the effect above so clearing the list clears its problems on the same
+  // render — no stale row-level messages left over from a step just removed.
+  return steps.length === 0 ? [] : problems;
+}
+
 function Composer({
   catalogue,
   gates,
@@ -139,6 +180,7 @@ function Composer({
 
   const composed = steps.map((s) => ({ uses: s.uses, as: s.as, with: s.with }));
   const yaml = stepsYAML(composed);
+  const problems = useValidation(composed);
 
   // The Gate a Passage crosses decides which namespace it lives in — Hecate
   // has no separate namespace picker on this page, the same way promoting
@@ -311,6 +353,17 @@ function Composer({
                   value={step.with ?? {}}
                   onChange={(v) => update(step.id, { with: v })}
                 />
+                {problems
+                  .filter((p) => p.index === i)
+                  .map((p, j) => (
+                    <p
+                      key={j}
+                      role="alert"
+                      className="mt-2 text-xs text-[var(--destructive)]"
+                    >
+                      {p.message}
+                    </p>
+                  ))}
               </li>
             ))}
           </ol>
