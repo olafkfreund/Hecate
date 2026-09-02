@@ -114,8 +114,8 @@ func validBody() string {
 }
 
 // TestAuthorPassageRequiresAuthorization is the auth mutation-check: a caller
-// who does not hold "create gates" must be refused, and neither the git side
-// nor the provider must ever be touched for them.
+// who does not hold "create gates/author" must be refused, and neither the git
+// side nor the provider must ever be touched for them.
 func TestAuthorPassageRequiresAuthorization(t *testing.T) {
 	host := &fakeAuthorHost{}
 	s, published := authorServer(t, grants{"author@example.com": {"list gates": true}}, host)
@@ -140,7 +140,7 @@ func TestAuthorPassageChecksTheRightPermission(t *testing.T) {
 	host := &fakeAuthorHost{}
 	s, log := newServer(t,
 		map[string]string{"t": "author@example.com"},
-		grants{"author@example.com": {"create gates": true}},
+		grants{"author@example.com": {"create gates/author": true}},
 		forgeSecret(),
 	)
 	s.Steps = realRegistry(t)
@@ -152,11 +152,42 @@ func TestAuthorPassageChecksTheRightPermission(t *testing.T) {
 		t.Fatalf("got %d, want 200: %s", rec.Code, rec.Body.String())
 	}
 
-	last := log.last()
-	if last.ResourceAttributes.Resource != "gates" || last.ResourceAttributes.Verb != "create" ||
-		last.ResourceAttributes.Group != "hecate.dev" {
+	attrs := log.last().ResourceAttributes
+	if attrs.Resource != "gates" || attrs.Verb != "create" || attrs.Group != "hecate.dev" {
 		t.Fatalf("authorised %s %s.%s, want create gates.hecate.dev",
-			last.ResourceAttributes.Verb, last.ResourceAttributes.Resource, last.ResourceAttributes.Group)
+			attrs.Verb, attrs.Resource, attrs.Group)
+	}
+	// The subresource is the whole point, and it has to arrive in the
+	// SubjectAccessReview itself rather than only in the Action: a review that
+	// carried an empty Subresource would authorise against `gates` — a live
+	// create on this cluster — while the code still read as if it did not.
+	if attrs.Subresource != "author" {
+		t.Fatalf("access review subresource = %q, want author — an empty one authorises "+
+			"a real `kubectl create gate`, which is the right this endpoint must not need",
+			attrs.Subresource)
+	}
+}
+
+// TestAuthorPassageDoesNotAcceptCreateGates is the other half of the same
+// claim, from the caller's side: holding the real write on Gates is not how
+// you reach this endpoint, and holding this endpoint's right is not how you
+// reach the real write. See D66.
+func TestAuthorPassageDoesNotAcceptCreateGates(t *testing.T) {
+	host := &fakeAuthorHost{}
+	// Everything an author needs except the subresource — this subject may
+	// create Gates on the cluster outright.
+	s, published := authorServer(t, grants{"author@example.com": {
+		"list gates": true, "create gates": true,
+	}}, host)
+
+	rec := call(t, s, "t", http.MethodPost, authorPath, validBody())
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("got %d, want 403 — `create gates` is a cluster write, not the right "+
+			"to open a pull request: %s", rec.Code, rec.Body.String())
+	}
+	if len(host.opened) != 0 || len(*published) != 0 {
+		t.Error("a refused caller must never reach git or the provider")
 	}
 }
 
@@ -164,7 +195,7 @@ func TestAuthorPassageChecksTheRightPermission(t *testing.T) {
 // step list that would not admit must never reach git or the provider.
 func TestAuthorPassageRefusesInvalidSteps(t *testing.T) {
 	host := &fakeAuthorHost{}
-	s, published := authorServer(t, grants{"author@example.com": {"create gates": true}}, host)
+	s, published := authorServer(t, grants{"author@example.com": {"create gates/author": true}}, host)
 
 	body := `{"name":"p1","gate":"staging","bundle":"b1","steps":[{"uses":"git-commit","with":{}}],` +
 		`"repo":"https://github.com/acme/fleet.git","path":"demo/pipeline.yaml","credentialsRef":"forge"}`
@@ -199,7 +230,7 @@ func TestAuthorPassageRefusesInvalidSteps(t *testing.T) {
 // rendered, committed and opened as a pull request with the right target.
 func TestAuthorPassageOpensAPullRequest(t *testing.T) {
 	host := &fakeAuthorHost{}
-	s, published := authorServer(t, grants{"author@example.com": {"create gates": true}}, host)
+	s, published := authorServer(t, grants{"author@example.com": {"create gates/author": true}}, host)
 
 	rec := call(t, s, "t", http.MethodPost, authorPath, validBody())
 	if rec.Code != http.StatusOK {
@@ -584,7 +615,7 @@ func TestAuthorPassageValidatesTheRequest(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			host := &fakeAuthorHost{}
-			s, published := authorServer(t, grants{"author@example.com": {"create gates": true}}, host)
+			s, published := authorServer(t, grants{"author@example.com": {"create gates/author": true}}, host)
 
 			rec := call(t, s, "t", http.MethodPost, authorPath, tc.body)
 			if rec.Code != http.StatusBadRequest {

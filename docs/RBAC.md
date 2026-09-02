@@ -12,7 +12,7 @@ eligibility rules on top — a Passage that the rules would refuse is still a
 Passage somebody with `create passages` can write by hand — so the rules are a
 workflow, and RBAC is the security boundary.
 
-## The four roles
+## The six roles
 
 Installed with `--set userRoles.create=true`, as ClusterRoles you bind where you
 need them.
@@ -23,7 +23,18 @@ need them.
 | `hecate-promoter` | viewer, plus `create`/`update` on `passages` | asking a Gate to cross a Bundle, and aborting one |
 | `hecate-approver` | viewer, plus `update` on `bundles/status` | signing off a Bundle for a Gate |
 | `hecate-poker` | `update` on `beacons`, and nothing else | a CI job telling a Beacon to look now |
-| `hecate-author` | viewer, plus `create` on `gates` | opening a pull request that proposes a Gate's step list (#172) — grants no write to this cluster at all; the write lands in a fleet repository, for a human to review |
+| `hecate-flux-operator` | `get`/`list`/`patch` on the Flux kinds a Gate can watch — Kustomizations, HelmReleases and the source kinds | suspending, resuming and reconciling what a Gate depends on. **A bigger right than promoting**: a suspension stops every future deploy of a resource and is state git will not restore, so it outlives whoever did it |
+| `hecate-author` | viewer, plus `create` on `gates/author` | opening a pull request that proposes a Gate's step list (#172) — the write lands in a fleet repository, for a human to review |
+
+The last two are deliberately unbound by default, and neither is implied by
+`hecate-promoter`.
+
+`gates/author` is a **virtual subresource**: no API object answers to it, so
+the grant authorises Hecate's authoring endpoint and nothing else. It is not
+`create gates`, which would be a live write to this cluster — a subject holding
+that could `kubectl create -f gate.yaml` and skip the review the feature exists
+for, and a hand-written Gate names the evidence server it trusts. See
+[D66](DECISIONS.md).
 
 Verified against a real API server rather than asserted — bind each role to a
 service account and ask:
@@ -33,14 +44,23 @@ $ kubectl auth can-i create passages.hecate.dev --as system:serviceaccount:ns:pr
 yes
 $ kubectl auth can-i update bundles.hecate.dev --subresource=status --as system:serviceaccount:ns:promoter
 no
+$ kubectl auth can-i create gates.hecate.dev --subresource=author --as system:serviceaccount:ns:author
+yes
+$ kubectl auth can-i create gates.hecate.dev --as system:serviceaccount:ns:author
+no
 ```
 
-| | promote | approve | poll | read | abort |
-|---|---|---|---|---|---|
-| viewer | no | no | no | **yes** | no |
-| promoter | **yes** | no | no | **yes** | **yes** |
-| approver | no | **yes** | no | **yes** | no |
-| poker | no | no | **yes** | no | no |
+That last pair is the whole of D66: an author may ask Hecate to open a pull
+request, and may not create a Gate.
+
+| | read | promote | abort | approve | poll | operate flux | author |
+|---|---|---|---|---|---|---|---|
+| viewer | **yes** | no | no | no | no | no | no |
+| promoter | **yes** | **yes** | **yes** | no | no | no | no |
+| approver | **yes** | no | no | **yes** | no | no | no |
+| poker | no | no | no | no | **yes** | no | no |
+| flux-operator | no | no | no | no | no | **yes** | no |
+| author | **yes** | no | no | no | no | no | **yes** |
 
 Note the query: `--subresource=status` is required. `kubectl auth can-i update
 bundles.hecate.dev/status` answers `no` for everyone, including a subject that
@@ -64,6 +84,21 @@ webhook credential lives in CI, which is a place credentials leak from; one that
 could also read every Gate in the namespace is worth stealing. It grants a
 single verb on a single resource and carries no read rules at all, because the
 poll endpoint answers with its own request token and needs no listing to work.
+
+`hecate-flux-operator` is separate because it is *larger*, not smaller. Its
+rules are on Flux's own resources rather than Hecate's, because that is what is
+actually written: someone who may already patch Kustomizations has this right
+without Hecate's help, and someone who may not should not gain it by holding a
+Hecate role. The check follows the same rule at request time — the API
+authorises against the group and resource the Gate's watch actually resolves
+to, not against a fixed `patch kustomizations`, so a Gate watching a
+`HelmRelease` needs `patch helmreleases`. Hecate patches with its own
+ServiceAccount, so this check is the only one that happens.
+
+A cluster where every promoter could silently stop reconciliation is not a safe
+default, so the role is unbound and the UI explains the refusal rather than
+hiding the buttons — a control that vanishes teaches nobody that the permission
+exists.
 
 ## How this relates to Fides segregation of duties
 

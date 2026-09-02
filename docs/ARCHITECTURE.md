@@ -121,9 +121,15 @@ promote out of an environment that is currently on fire.
 
 ## The rendezvous
 
-**Hecate never talks to Flux.** A Passage writes rendered state into git or OCI; Flux
-syncs it; `flux-wait` reads Flux's own resource status to learn whether the write took
-effect.
+**No deployed state reaches Flux except through git.** A Passage writes rendered state
+into git or OCI; Flux syncs it; `flux-wait` reads Flux's own resource status to learn
+whether the write took effect.
+
+Two things Hecate writes do land directly on a Flux object, and neither carries
+content: `flux-reconcile` sets the doorbell annotation ([D26](DECISIONS.md)), and an
+operator can suspend, resume or reconcile a watched resource from the UI
+([D66](DECISIONS.md)). Both change when or whether Flux acts; what it applies still
+only ever comes from git.
 
 That single rule buys three things: Flux stays authoritative, Hecate is removable
 (uninstall it and working manifests remain in git), and the boundary is a data format

@@ -54,7 +54,13 @@ speculative until someone asks. Adding a resource later is easy. Removing one is
 **2026-08-10 · accepted**
 
 A Passage writes to git or OCI. Flux syncs. Hecate reads Flux resource status back.
-There is no direct call in either direction.
+No *deployed state* travels in either direction except through git.
+
+**Amended.** "There is no direct call in either direction" was the original wording
+and it is no longer true: Hecate patches Flux objects in two narrow places — the
+reconcile doorbell (D26) and the operator's suspend/resume (D66). Neither carries
+content, so what Flux applies still comes only from git, which is what the rest of
+this entry rests on. The absolute is the part that had to go.
 
 **Why.** Flux stays authoritative. Hecate stays removable — uninstall it and working
 manifests remain in git. And the integration boundary is a data format rather than an
@@ -593,8 +599,16 @@ locally, and that is what `flux-wait` must then wait for.
 ## D26 — The one write against Flux is a doorbell
 
 **Decision:** `flux-reconcile` sets `reconcile.fluxcd.io/requestedAt` on a Flux
-resource. That annotation is the only thing Hecate ever writes to a Flux object,
-and Hecate's ClusterRole carries `patch` on the Flux groups and nothing else.
+resource. That annotation is the only thing a *Passage* ever writes to a Flux
+object, and Hecate's ClusterRole carries `patch` on the Flux groups and nothing
+else.
+
+**Amended by D66.** This entry said "the only thing Hecate ever writes to a Flux
+object", full stop. #163 added an operator's suspend/resume, which writes
+`spec.suspend` and fails the admissibility test below outright — skipping a
+suspend certainly changes the outcome. Read the rule below as governing what a
+*promotion* may do, which is what it was written about; D66 covers the operator
+remedy and why it is a different question.
 
 This does not contradict "Hecate never talks to Flux" (D3), because the
 annotation changes nothing about *what* Flux will do — only *when*. The commit
@@ -2215,3 +2229,97 @@ The UI's `ui/lib/api.ts` hand-mirrors `pkg/gate.Code` as `WaitingKind` already
 explicitly documented in that file as able to drift, generation being a
 follow-up. Out of scope here — flagged for whoever picks that up, since
 `AllBlockerKinds`/`AllStates` now make a generated union cheap.
+---
+
+## D66 — An operator may suspend Flux; a promotion may not, and neither may author a live Gate
+
+*2026-09-02 — #163, #172*
+
+Two authorisation checks named something other than what they wrote. Both are
+fixed here, and the documents that repeated the wrong names are corrected with
+them.
+
+### Suspend is a write against Flux, and D26's rule does not cover it
+
+D26 admitted exactly one write against a Flux object — the reconcile doorbell —
+on a rule it stated plainly: *if skipping it changed the outcome, Hecate would
+be driving the cluster instead of writing to git.* Suspend (#163) fails that
+test. Skipping a suspend absolutely changes the outcome; that is the point of
+it. It is cluster state git will not restore, and it outlives whoever set it.
+
+**The feature stays.** The rule D26 wrote is about *promotions*: a crossing must
+not smuggle desired state past git, because then git stops being authoritative
+and Hecate stops being removable. An operator stopping reconciliation is not a
+promotion. It is a remedy, applied by a person to a resource that is already
+misbehaving, at a moment when the alternative is `kubectl patch` from someone's
+laptop and no record at all. Surfacing it costs the absolute claim and buys the
+one thing a laptop cannot: it happens in a place with an identity, a permission
+check and a UI that says who did it.
+
+What keeps it admissible instead of the D26 rule:
+
+- **Namespace-locked**, and only over resources the Gate already watches
+  (`resourceOfGate`) — never a free-form reference, so a caller who may write in
+  one namespace cannot reach another by asking.
+- **Fixed patch payloads**: `spec.suspend`, or the reconcile annotation. Nothing
+  the caller supplies is ever merged into a Flux object.
+- **Its own permission**, `hecate-flux-operator`, unbound by default and not
+  implied by `hecate-promoter`, because it is the bigger right of the two.
+- **Remote clusters excluded**: a resource behind a `clusterRef` is not
+  operable, because suspending something with a credential that might be stale
+  is the operation most likely to leave nobody able to un-suspend it.
+
+**Take the honest smaller claim.** "Hecate never writes to Flux" was better
+marketing and false. What is true, and is what the design actually rests on, is
+that nothing about *what* Flux applies ever reaches it except through git.
+README, `docs/ARCHITECTURE.md`, D3 and D26 now say that instead.
+
+### The check names the resolved kind, not `kustomizations`
+
+`ActionOperateFlux` was a constant: `patch kustomizations.kustomize.toolkit
+.fluxcd.io`, whatever was actually written. What is written is whichever kind
+the Gate's watch resolves to, and `FluxResource.APIVersion` is a documented
+free-form override — the escape hatch for kinds we have not enumerated. Hecate
+then patches with its own ServiceAccount, so the API server never gets a second
+look. A caller holding only `patch kustomizations` could suspend a
+`HelmRelease`, a different API group, through Hecate.
+
+It is now a function of the resolved GVK, so the group and resource authorised
+are the group and resource patched. That moves authorisation into the handler
+for these two routes: the Action is not knowable until the Gate has been read,
+so `guard()` — which takes a constant — cannot express it. `Ops.FluxTarget`
+resolves once and the operation takes the resolved reference, so nothing can be
+checked against one kind and written to another.
+
+Mitigations kept the severity low throughout — namespace-locked, limited to what
+the Gate watches, fixed payloads. This is about the check being able to be read
+honestly, which is what makes the mitigations checkable in the first place.
+
+### Authoring is `create gates/author`, a subresource nothing answers to
+
+`ActionAuthorPassage` was `create gates` (D58, #172 stage 2), reasoning that a
+merged pull request is what creating a Gate's `spec.passage` would be. The
+reasoning holds; the encoding did not. Kubernetes RBAC has no way to say "this
+grant only proxies an HTTP endpoint", so `hecate-author` — a role whose comment
+promised it "never writes to this cluster" — let its holder
+`kubectl create -f gate.yaml` directly, skipping the human review the whole
+feature exists for. A Gate names the Fides evidence server it trusts, so a
+hand-created one can point at an attacker's and every subsequent crossing is
+gated on evidence they control.
+
+`gates/author` is a virtual subresource: no API object answers to it, so
+`create` on it authorises Hecate's authoring endpoint and nothing else. The
+`SubjectAccessReview` carries `Subresource: "author"` — the same mechanism
+`bundles/status` has always used for approvals, which is the reason to prefer it
+over inventing a resource. The right stays a *create* on gates, which is what it
+morally is, and stops doubling as a live one.
+
+Verify it on a real cluster, both ways round:
+
+```console
+$ kubectl auth can-i create gates.hecate.dev --subresource=author \
+    --as system:serviceaccount:ns:author
+yes
+$ kubectl auth can-i create gates.hecate.dev --as system:serviceaccount:ns:author
+no
+```
