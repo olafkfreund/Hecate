@@ -60,6 +60,24 @@ function tsShape(): Record<string, string[]> {
   return out;
 }
 
+/**
+ * Interfaces with no Go entry to check against, and why each one is exempt.
+ *
+ * An explicit, named list rather than "skip whatever apishape doesn't map":
+ * that silent skip is what let AuthorPassageRequest, AuthoredPullRequest,
+ * StepProblem, Grant and six inline `post<{...}>` response types sit outside
+ * the check for as long as they did (D62) — nobody was told they were
+ * uncovered, because "unmapped" and "exempt" looked identical. Adding an
+ * interface here must be a deliberate decision, not the default outcome of
+ * forgetting to add it to cmd/apishape's map.
+ */
+const exempt = new Set([
+  // Generated from invopop/jsonschema (pkg/passage/steps/schema.go), not
+  // reflected off a Hecate struct — there is no Go type whose field names
+  // this could be checked against; the JSON Schema shape is the contract.
+  "StepSchema",
+]);
+
 describe("the browser's copy of the API types", () => {
   const shapes = tsShape();
 
@@ -68,9 +86,6 @@ describe("the browser's copy of the API types", () => {
 
     for (const [name, fields] of Object.entries(shapes)) {
       const go = goShape[name];
-      // Not every interface mirrors a Go type — Grant and WaitingKind are the
-      // browser's own. An unmapped name is skipped rather than failed, and the
-      // test below is what stops that skip becoming a hole.
       if (!go) continue;
       for (const f of fields) {
         if (!go.includes(f)) {
@@ -82,10 +97,21 @@ describe("the browser's copy of the API types", () => {
     expect(wrong, wrong.join("\n")).toEqual([]);
   });
 
-  it("still covers the types it is supposed to", () => {
-    // Without this, deleting an entry from cmd/apishape's map would make the
-    // check above pass by checking nothing — the failure mode of every
-    // allowlist, and the one that looks like success.
+  it("maps every interface to a Go type, or names it exempt", () => {
+    // The floor this replaced (mapped.length >= 28) only ever grew — deleting
+    // an entry from cmd/apishape's map, or adding a new interface and
+    // forgetting to map it, both silently passed as long as the count stayed
+    // above the floor. This instead names every interface that is unmapped,
+    // so a newly unmapped one fails loudly instead of being absorbed.
+    const unmapped = Object.keys(shapes).filter((n) => !goShape[n] && !exempt.has(n));
+    expect(unmapped, `no Go entry in cmd/apishape's mirrored map: ${unmapped.join(", ")}`).toEqual([]);
+
+    // And the reverse of the exemption list: an entry named exempt that has
+    // since gained a Go mapping should be checked, not quietly skipped
+    // forever.
+    const stale = [...exempt].filter((n) => goShape[n]);
+    expect(stale, `exempt but now mapped in cmd/apishape — remove from exempt: ${stale.join(", ")}`).toEqual([]);
+
     const mapped = Object.keys(shapes).filter((n) => goShape[n]);
     expect(mapped.length).toBeGreaterThanOrEqual(28);
   });

@@ -14,6 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/olafkfreund/hecate/api/v1alpha1"
+	"github.com/olafkfreund/hecate/pkg/ops"
 )
 
 // ClusterLabel marks a Secret as holding a remote cluster's kubeconfig.
@@ -47,6 +48,23 @@ var bindableRoles = map[string]struct{}{
 	"hecate-approver":      {},
 	"hecate-flux-operator": {},
 	"hecate-author":        {},
+}
+
+// GrantResult is what binding a role, or finding it already bound, returns.
+type GrantResult struct {
+	Binding string `json:"binding"`
+	Created bool   `json:"created"`
+}
+
+// Grant is one person (or group) holding one Hecate role — the wire shape
+// listBindings sends, and the browser's `Grant` type mirrors, not the
+// browser's own invention (D62).
+type Grant struct {
+	Binding   string `json:"binding"`
+	Role      string `json:"role"`
+	Kind      string `json:"kind"`
+	Subject   string `json:"subject"`
+	GrantedBy string `json:"grantedBy,omitempty"`
 }
 
 // bindRoleRequest is "let this person do this".
@@ -125,13 +143,47 @@ func (s *Server) bindRole(ctx context.Context, subject Subject, r *http.Request)
 
 	if err := s.Ops.Client.Create(ctx, binding); err != nil {
 		if apierrors.IsAlreadyExists(err) {
-			// Idempotent: the grant already exists and says the same thing, so
-			// reporting a conflict would be reporting success as a failure.
-			return map[string]any{"binding": name, "created": false}, nil
+			// Idempotent only when the existing binding says the same thing.
+			// bindingName maps every non-[a-z0-9-] rune to '-' and truncates at
+			// 253 characters, so two different subjects — alice@x.com and
+			// alice-x-com, or two long subjects sharing a prefix — can produce
+			// the same name. Reporting {created:false} without checking would
+			// tell the second caller their grant exists when their subject was
+			// never bound.
+			existing := &rbacv1.ClusterRoleBinding{}
+			if getErr := s.Ops.Client.Get(ctx, client.ObjectKey{Name: name}, existing); getErr != nil {
+				return nil, fmt.Errorf("reading the existing ClusterRoleBinding: %w", getErr)
+			}
+			if bindingMatches(existing, binding) {
+				return &GrantResult{Binding: name, Created: false}, nil
+			}
+			return nil, &ops.RefusedError{
+				Action: "bind role",
+				Reason: fmt.Sprintf("a ClusterRoleBinding named %s already exists for a different subject or role — "+
+					"this is a name collision (bindingName is a sanitized, truncated encoding, not a unique key), not the same grant", name),
+			}
 		}
 		return nil, fmt.Errorf("creating the ClusterRoleBinding: %w", err)
 	}
-	return map[string]any{"binding": name, "created": true}, nil
+	return &GrantResult{Binding: name, Created: true}, nil
+}
+
+// bindingMatches reports whether an existing ClusterRoleBinding grants the
+// same role to the same subject as the one bindRole was about to create —
+// the only case in which reporting {created:false} is honest.
+func bindingMatches(existing, wanted *rbacv1.ClusterRoleBinding) bool {
+	if existing.RoleRef != wanted.RoleRef {
+		return false
+	}
+	if len(existing.Subjects) != len(wanted.Subjects) {
+		return false
+	}
+	for i := range wanted.Subjects {
+		if existing.Subjects[i] != wanted.Subjects[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // listBindings shows who currently holds a Hecate role.
@@ -145,14 +197,7 @@ func (s *Server) listBindings(ctx context.Context, subject Subject, _ *http.Requ
 		return nil, fmt.Errorf("listing ClusterRoleBindings: %w", err)
 	}
 
-	type grant struct {
-		Binding   string `json:"binding"`
-		Role      string `json:"role"`
-		Kind      string `json:"kind"`
-		Subject   string `json:"subject"`
-		GrantedBy string `json:"grantedBy,omitempty"`
-	}
-	out := []grant{}
+	out := []Grant{}
 	for i := range all.Items {
 		b := &all.Items[i]
 		if _, ok := bindableRoles[b.RoleRef.Name]; !ok {
@@ -162,7 +207,7 @@ func (s *Server) listBindings(ctx context.Context, subject Subject, _ *http.Requ
 			continue
 		}
 		for _, sub := range b.Subjects {
-			out = append(out, grant{
+			out = append(out, Grant{
 				Binding:   b.Name,
 				Role:      b.RoleRef.Name,
 				Kind:      sub.Kind,
@@ -172,6 +217,12 @@ func (s *Server) listBindings(ctx context.Context, subject Subject, _ *http.Requ
 		}
 	}
 	return map[string]any{"grants": out}, nil
+}
+
+// ConnectClusterResult is what storing a cluster's credentials returns.
+type ConnectClusterResult struct {
+	Secret  string `json:"secret"`
+	Created bool   `json:"created"`
 }
 
 // connectClusterRequest carries a kubeconfig for a cluster a Gate will watch.
@@ -241,12 +292,18 @@ func (s *Server) connectCluster(ctx context.Context, subject Subject, r *http.Re
 		if err := s.Ops.Client.Update(ctx, existing); err != nil {
 			return nil, fmt.Errorf("updating the Secret: %w", err)
 		}
-		return map[string]any{"secret": namespace + "/" + req.Name, "created": false}, nil
+		return &ConnectClusterResult{Secret: namespace + "/" + req.Name, Created: false}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("creating the Secret: %w", err)
 	}
-	return map[string]any{"secret": namespace + "/" + req.Name, "created": true}, nil
+	return &ConnectClusterResult{Secret: namespace + "/" + req.Name, Created: true}, nil
+}
+
+// SetEvidenceResult is what pointing a Gate at an evidence server returns.
+type SetEvidenceResult struct {
+	Gate string `json:"gate"`
+	Note string `json:"note"`
 }
 
 // evidenceRequest changes which Fides a Gate trusts.
@@ -294,9 +351,9 @@ func (s *Server) setEvidence(ctx context.Context, subject Subject, r *http.Reque
 	if err := s.Ops.Client.Update(ctx, gate); err != nil {
 		return nil, fmt.Errorf("updating Gate %s: %w", name, err)
 	}
-	return map[string]any{
-		"gate": namespace + "/" + name,
-		"note": "applied to the cluster. If this Gate is reconciled from git, Flux will restore the committed value on its next sync — change it there to make it stick.",
+	return &SetEvidenceResult{
+		Gate: namespace + "/" + name,
+		Note: "applied to the cluster. If this Gate is reconciled from git, Flux will restore the committed value on its next sync — change it there to make it stick.",
 	}, nil
 }
 

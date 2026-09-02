@@ -84,6 +84,36 @@ func TestBindingARoleIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestBindingARoleRefusesACollidingSubject is the mutation check for D62's
+// bindRole fix: bindingName maps every non-[a-z0-9-] rune to '-', so
+// "alice@x.com" and "alice-x-com" produce the identical ClusterRoleBinding
+// name. Before the fix, IsAlreadyExists alone made the second caller's grant
+// report {created:false} — told their subject was already bound when it had
+// never been granted anything.
+func TestBindingARoleRefusesACollidingSubject(t *testing.T) {
+	s, _ := newServer(t,
+		map[string]string{"t": "admin@example.com"},
+		grants{"admin@example.com": {"create clusterrolebindings": true}},
+	)
+
+	first := `{"subject":"alice@x.com","kind":"User","role":"hecate-approver"}`
+	if rec := call(t, s, "t", http.MethodPost, rbacGrants, first); rec.Code != http.StatusOK {
+		t.Fatalf("first grant: got %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+
+	// A different subject that sanitizes to the same ClusterRoleBinding name.
+	colliding := `{"subject":"alice-x-com","kind":"User","role":"hecate-approver"}`
+	rec := call(t, s, "t", http.MethodPost, rbacGrants, colliding)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("colliding grant: got %d, want 409 — alice-x-com was never bound, "+
+			"reporting it as already granted would be a false idempotent success: %s",
+			rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), `"created":false`) {
+		t.Errorf("a name collision was reported as idempotent success: %s", rec.Body.String())
+	}
+}
+
 func TestConnectingAClusterChecksSecretRights(t *testing.T) {
 	// A kubeconfig is the keys to another cluster. Someone who may promote is
 	// not thereby someone who may add one.

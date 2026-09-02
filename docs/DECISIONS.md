@@ -2184,6 +2184,98 @@ still applies verbatim.
 
 ---
 
+## D62 — Settings shares `visibleNamespaces`; `bindRole` verifies before it calls a collision idempotent
+
+**Decision, part one:** `settings` (`pkg/api/settings.go`) no longer runs its
+own copy of "skip a namespace this caller may not read". It calls
+`visibleNamespaces` — the helper `listNamespaces` and `overview` already
+share (`pkg/api/server.go`) — instead of looping over every namespace and
+`continue`-ing past *any* `Authorize` error.
+
+The two copies disagreed. `visibleNamespaces` distinguishes a `*Forbidden`
+(skip the namespace) from any other error (fail the request), and says why:
+"silently dropping namespaces because the API server is unwell would present
+as 'my namespace vanished'." Settings' copy, fifteen lines away, treated both
+the same — an API-server blip made a team's Fides evidence targets and
+connected clusters disappear behind a `200 OK`, with nothing in the response
+to say a namespace had been dropped rather than genuinely being unreadable.
+
+This is the same drift D57 and D61 are both about: a second implementation
+of the same rule eventually disagrees with the first, invisibly, until an
+audit or an incident finds the gap one call site at a time. The fix is not a
+second `errors.As` in `settings.go` — that is still two copies, just two
+*correct* copies today. It is deleting settings' copy and calling the
+existing one. No new package: both callers are methods on `*Server` in
+`pkg/api`, so an unexported method already reaches both without needing a
+home of its own the way `safepath.Join` did for two packages that could not
+import each other.
+
+**Decision, part two:** `bindRole` (`pkg/api/writes.go`) no longer treats
+`apierrors.IsAlreadyExists` alone as proof the grant is idempotent. On that
+error it now `Get`s the existing `ClusterRoleBinding` and compares `RoleRef`
+and `Subjects` (`bindingMatches`) before reporting `{created:false}`; a name
+that exists for a *different* subject or role now fails with `ops.RefusedError`
+(409), not a false success.
+
+`bindingName` maps every rune outside `[a-z0-9-]` to `-` and truncates at 253
+characters, so `alice@x.com` and `alice-x-com` produce the identical
+ClusterRoleBinding name, and two long subjects sharing a prefix can too. The
+old comment — "the grant already exists **and says the same thing**, so
+reporting a conflict would be reporting success as a failure" — asserted the
+bold part and never checked it. A colliding caller was told their grant
+existed when their subject had never been bound, in a flow whose entire
+purpose is an auditable record of who was granted what.
+
+The genuinely idempotent case — the same subject granted the same role twice
+— still reports `{created:false}`; that half of the old comment was correct
+and stays true. What changed is that "idempotent" is now something the
+handler verifies rather than assumes from one error code.
+
+**Verification:** `TestSettingsFailsOnAnUnwellNamespaceRatherThanDroppingIt`
+(`pkg/api/settings_test.go`) makes the `SubjectAccessReview` for one
+namespace fail with a plain error rather than a `Forbidden`, and asserts the
+whole request now returns 500 instead of 200 with that namespace quietly
+missing. `TestBindingARoleRefusesACollidingSubject` (`pkg/api/writes_test.go`)
+binds `alice@x.com`, then asks to bind `alice-x-com` to the same role — same
+sanitized name, different subject — and asserts 409, not `{created:false}`.
+Reverting either fix by hand and re-running its test reproduces the original
+bug: settings answers 200 with the broken namespace silently absent, and the
+colliding grant answers 200 with `created:false`.
+
+**Decision, part three:** `cmd/apishape`'s `mirrored` map (D62 continues
+the surface `why_stuck` mapped in D64, ordered here before it since it was
+assigned the earlier number) now covers the authoring surface it was blind
+to. `authorPassageRequest` is exported as `AuthorPassageRequest` — apishape
+cannot reference an unexported type at all, which is why it was outside the
+map rather than merely unmapped. `authorPassage`'s pull-request response and
+`stepProblemsError.dto()` were `map[string]any` built by hand; both are now
+real exported structs, `AuthoredPullRequest` and `StepProblem`, with the
+identical field set and `omitempty` behaviour as the map they replace, so the
+wire format did not move underneath the browser. `listBindings`'s anonymous
+`grant` struct is now the exported `Grant` — the test comment calling it "the
+browser's own" was wrong; it is a wire shape, and is now checked as one. Six
+more handlers (`bindRole`, `connectCluster`, `setEvidence`, `suspendFlux`,
+`reconcileFlux`, `pollBeacon`, `abort`) that built their JSON response as an
+inline `post<{...}>` type on the browser side and a `map[string]any` literal
+on the Go side now share a named struct on each end (`GrantResult`,
+`ConnectClusterResult`, `SetEvidenceResult`, `SuspendFluxResult`,
+`RequestedAt`, `AbortResult`) — `pollBeacon` and `reconcileFlux` share
+`RequestedAt` rather than each declaring their own copy of the identical
+`{requestedAt}` shape.
+
+`ui/test/apishape.test.ts`'s `mapped.length >= 28` floor is replaced with an
+explicit unmapped-interface list (empty, or the test fails and names them)
+and a named `exempt` set holding the one interface that genuinely cannot be
+checked this way — `StepSchema`, generated from `invopop/jsonschema` rather
+than reflected off a Hecate struct. A floor only ever grows; it could not
+notice a newly unmapped interface as long as the count stayed above 28,
+which is exactly how six response types and three authoring types went
+unchecked. Renaming a field in `AuthoredPullRequest` and re-running the test
+reproduces the failure this exists to catch: `go test`/`vitest` now fails
+loudly on an unmapped or drifted interface instead of silently passing.
+
+---
+
 ## D64 — `why_stuck`'s published enums are built from `pkg/ops`, not hand-typed
 
 **Decision:** `pkg/mcp/tools.go`'s `why_stuck` `outputSchema` builds its
