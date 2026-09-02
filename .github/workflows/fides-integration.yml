@@ -55,8 +55,21 @@ jobs:
           docker run -d --name fides-db --network fides-ci \
             -e POSTGRES_PASSWORD=p -e POSTGRES_USER=fides -e POSTGRES_DB=fides \
             postgres:16
+          # Three consecutive successes, not one. The postgres image runs an
+          # init phase that starts the server on a unix socket, then stops it
+          # and starts it again for real — so a single pg_isready can pass
+          # against a server that is about to go away, break out of this loop,
+          # and leave the check below failing under `set -e` two seconds after
+          # the container started. Requiring the answer to hold makes the
+          # transient window fail the check rather than satisfy it.
+          ready=0
           for _ in $(seq 60); do
-            docker exec fides-db pg_isready -q -U fides && break
+            if docker exec fides-db pg_isready -q -U fides; then
+              ready=$((ready + 1))
+              if [ "$ready" -ge 3 ]; then break; fi
+            else
+              ready=0
+            fi
             sleep 1
           done
           docker exec fides-db pg_isready -U fides
