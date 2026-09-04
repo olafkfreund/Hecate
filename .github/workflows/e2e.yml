@@ -207,3 +207,18 @@ jobs:
         env:
           HECATE_E2E_GITHUB_TOKEN: ${{ secrets.E2E_GITHUB_TOKEN }}
         run: go test -tags e2e -count=1 -timeout 10m -v ./test/provider/...
+
+      # Authoring lives in pkg/api because the two seams it must not fake --
+      # `publish` and `providers` -- are unexported, and they are unexported so
+      # that production wiring cannot reach past them (hecate#172).
+      #
+      # Deliberately unfiltered rather than `-run TestAuthorPassage...`: the
+      # crossing job above needs a whole guard step because selecting e2e tests
+      # by name let one be added that never ran. Running the package has no
+      # name to drift -- it also re-runs pkg/api's unit tests, which take
+      # seconds and are no worse for being run twice.
+      - name: E2E — authoring a Passage into a real pull request
+        if: steps.token.outputs.have == 'yes'
+        env:
+          HECATE_E2E_GITHUB_TOKEN: ${{ secrets.E2E_GITHUB_TOKEN }}
+        run: go test -tags e2e -count=1 -timeout 10m -v ./pkg/api/
