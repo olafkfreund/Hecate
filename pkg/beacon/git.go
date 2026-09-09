@@ -2,6 +2,7 @@ package beacon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -180,6 +181,11 @@ func (r *Resolver) newestTouching(
 
 	for range historyLimit {
 		touched, err := changedFiles(commit)
+		if errors.Is(err, errShallowBoundary) {
+			// The window is exhausted. What this commit changed is unknowable
+			// without its parent, so it is not evidence of anything.
+			break
+		}
 		if err != nil {
 			return "", "", err
 		}
@@ -204,6 +210,22 @@ func (r *Resolver) newestTouching(
 		historyLimit, w.Repo, strings.Join(w.Paths, ", "))}
 }
 
+// errShallowBoundary reports that a commit's first parent is not in the clone,
+// so its diff cannot be computed.
+//
+// Distinct from a root commit, and conflating the two was a bug. A root commit
+// genuinely changed everything in it; the oldest commit of a *shallow* clone
+// records a parent that was simply not fetched. Reading the second as the first
+// made the boundary commit look like it had changed its entire tree, so a path
+// filter matched there and `newestTouching` returned a commit that had not
+// touched the watched paths at all.
+//
+// The consequence was worse than one wrong answer: the boundary slides forward
+// with every push, so a Beacon watching a path nobody had touched inside the
+// window emitted a *new* Bundle on every unrelated commit — the promotions
+// `paths` exists to prevent, on the repositories it exists to serve.
+var errShallowBoundary = errors.New("first parent is outside the shallow clone")
+
 // changedFiles lists what a commit changed, against its first parent. A root
 // commit changed everything in it.
 func changedFiles(commit *object.Commit) ([]string, error) {
@@ -215,10 +237,12 @@ func changedFiles(commit *object.Commit) ([]string, error) {
 	var parentTree *object.Tree
 	if commit.NumParents() > 0 {
 		parent, err := commit.Parent(0)
-		if err == nil {
-			if parentTree, err = parent.Tree(); err != nil {
-				return nil, fmt.Errorf("reading the tree of %s: %w", parent.Hash, err)
-			}
+		if err != nil {
+			// Recorded a parent but does not have it: the shallow boundary.
+			return nil, fmt.Errorf("%s: %w", commit.Hash, errShallowBoundary)
+		}
+		if parentTree, err = parent.Tree(); err != nil {
+			return nil, fmt.Errorf("reading the tree of %s: %w", parent.Hash, err)
 		}
 	}
 	if parentTree == nil {

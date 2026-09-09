@@ -2518,3 +2518,40 @@ across both for the same reason: `pkg/verify` proves a stale phase is not a
 verdict, and `pkg/gate` proves the Gate hands over the crossing's own entry time
 rather than the freshly-stamped local occupant — which would date every crossing
 to now, put no verdict ever after it, and hang a verifying Gate for ever.
+
+## D68 — A shallow clone's oldest commit is a boundary, not a root commit
+
+**Decision:** `changedFiles` (`pkg/beacon/git.go`) distinguishes a commit with no
+parent from one whose parent was never fetched. The first changed everything in
+it; the second's diff is unknowable, and `newestTouching` treats it as the end
+of the window rather than as a match.
+
+**The bug this fixes.** A path filter walks back from the head to the newest
+commit that touched the watched paths, over a shallow clone bounded by
+`historyLimit`. The oldest commit in that clone records a parent hash it does
+not have, so `commit.Parent(0)` fails. The failure was swallowed, `parentTree`
+stayed nil, and the nil case is the one that means *root commit* — so the
+boundary commit was reported as having changed its entire tree. Any path filter
+matches everything, so the walk stopped there and pinned a commit that had
+touched none of the watched paths.
+
+**The severity is the sliding, not the single wrong answer.** The boundary moves
+forward with every push. A Beacon watching a path nobody has touched inside the
+window therefore resolved to a *different* commit on each poll, emitted a new
+Bundle each time, and promoted a service on the strength of commits to an
+unrelated directory — precisely the monorepo behaviour `paths` exists to
+prevent, on the repositories it exists to serve. Measured on a 231-commit
+repository: the filter resolved to a commit whose subject was `docs churn`.
+
+**Nothing beyond the window is evidence, and saying so was always the promise.**
+`historyLimit`'s own comment states the intent — *"a path nobody has touched in
+500 commits resolves to nothing and says so"* — and `ErrNoMatch` is documented
+as a normal outcome rather than a failure. The walk-back of D52 is unchanged
+inside the window: a Beacon whose head is unrelated still finds the last commit
+that was related. What is restored is the edge.
+
+**Why it was invisible.** The two cases are indistinguishable from inside
+`changedFiles` unless the parent error is kept, and every existing path-filter
+test used a repository smaller than the window, where no boundary exists. The
+regression test builds one larger than `historyLimit`, which costs half a second
+and is the only size at which the code path runs at all.
