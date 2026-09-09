@@ -347,3 +347,62 @@ func TestGitRefusesNeitherBranchNorTags(t *testing.T) {
 		t.Errorf("error = %v", err)
 	}
 }
+
+// A path filter must not invent a match at the edge of the shallow clone.
+//
+// The oldest commit of a shallow clone records a parent that was never
+// fetched. Read as a root commit it appears to have changed its entire tree,
+// so any path filter matches there and the walk stops on a commit that touched
+// nothing it was looking for.
+//
+// The severity is in what happens next rather than in the single wrong answer:
+// the boundary slides forward with every push, so the resolved SHA changes on
+// each poll and the Beacon emits a new Bundle for every unrelated commit —
+// which is the monorepo behaviour `paths` exists to prevent. Nothing beyond
+// the window is evidence, and saying so is the documented promise of
+// historyLimit.
+func TestAPathFilterDoesNotMatchAtTheShallowBoundary(t *testing.T) {
+	g := newTestGitRepo(t)
+	// The watched path exists and was last touched before the window opens.
+	g.Commit("seed", "apps/checkout/deploy.yaml", "docs/readme.md")
+	for range historyLimit + 30 {
+		g.Commit("docs churn", "docs/readme.md")
+	}
+	g.Branch("main")
+
+	got, err := (&Resolver{}).Resolve(context.Background(), "acme", v1alpha1.WatchSource{
+		Git: &v1alpha1.GitWatch{Repo: g.Dir, Branch: "main", Paths: []string{"apps/checkout"}},
+	})
+	var noMatch *ErrNoMatch
+	if !errors.As(err, &noMatch) {
+		t.Fatalf("resolved to %+v (err %v), want nothing: no commit in the window touched "+
+			"apps/checkout, and the boundary commit is not evidence that one did", got, err)
+	}
+	if !strings.Contains(noMatch.Reason, "apps/checkout") {
+		t.Errorf("reason %q does not name the paths that found nothing", noMatch.Reason)
+	}
+}
+
+// The other direction, so the fix cannot be satisfied by never matching: a
+// commit inside the window still resolves, and the walk-back still walks back
+// (D52) rather than refusing because the head is unrelated.
+func TestAPathFilterStillWalksBackInsideTheWindow(t *testing.T) {
+	g := newTestGitRepo(t)
+	g.Commit("seed", "docs/readme.md")
+	want := g.Commit("the one that matters", "apps/checkout/deploy.yaml")
+	for range 20 {
+		g.Commit("docs churn", "docs/readme.md")
+	}
+	g.Branch("main")
+
+	got, err := resolveGitWatch(t, v1alpha1.GitWatch{
+		Repo: g.Dir, Branch: "main", Paths: []string{"apps/checkout"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SHA != want.String() {
+		t.Errorf("sha = %s, want %s — the newest commit that touched the watched path",
+			got.SHA, want)
+	}
+}
