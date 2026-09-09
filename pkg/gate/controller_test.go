@@ -1168,3 +1168,80 @@ func TestTheVerifierIsToldWhenThisCrossingEnteredTheGate(t *testing.T) {
 		}
 	}
 }
+
+// Losing sight of a Gate is not the same as it getting better.
+//
+// The Health type draws the distinction itself — "I cannot see it" is
+// different from "I can see it and it is broken" — and time-to-restore has to
+// respect it. Publishing a restore time on Degraded -> Unknown ends an outage
+// that may still be running, and starts a second one when the Gate becomes
+// visible again: one outage reported as two short ones, understating the
+// number exactly when observability is worst.
+func TestAGateGoingUnknownHasNotRecovered(t *testing.T) {
+	metrics.GateDegraded.Reset()
+
+	g := gateAdmitting("production", admits("podinfo"))
+	r, c, _ := newReconciler(t, g)
+
+	now := base
+	r.Now = func() time.Time { return now }
+	swing := &swingingChecker{status: v1alpha1.HealthDegraded}
+	reg := health.NewRegistry()
+	reg.MustRegister(swing)
+	r.Health = reg
+	g.Spec.Watch = []v1alpha1.HealthCheck{{Uses: "flux"}}
+	if err := c.Update(context.Background(), g); err != nil {
+		t.Fatal(err)
+	}
+
+	reconcileGate(t, r, "production")
+
+	// The checks stop answering. The Gate is no more fixed than it was.
+	now = base.Add(30 * time.Minute)
+	swing.status = v1alpha1.HealthUnknown
+	reconcileGate(t, r, "production")
+
+	if count, sum := degradedObservations(t); count != 0 {
+		t.Errorf("going Unknown published %d restore time(s) totalling %.0fs — "+
+			"a Gate nobody can see has not recovered", count, sum)
+	}
+}
+
+// The other direction, so the rule cannot be satisfied by never recording:
+// Unknown is excluded, and every state that is actually an observation of a
+// working Gate still ends the outage.
+func TestRecoveryIsStillRecordedForObservableStates(t *testing.T) {
+	for _, status := range []v1alpha1.Health{
+		v1alpha1.HealthHealthy, v1alpha1.HealthProgressing, v1alpha1.HealthNotApplicable,
+	} {
+		t.Run(string(status), func(t *testing.T) {
+			metrics.GateDegraded.Reset()
+
+			g := gateAdmitting("production", admits("podinfo"))
+			r, c, _ := newReconciler(t, g)
+
+			now := base
+			r.Now = func() time.Time { return now }
+			swing := &swingingChecker{status: v1alpha1.HealthDegraded}
+			reg := health.NewRegistry()
+			reg.MustRegister(swing)
+			r.Health = reg
+			g.Spec.Watch = []v1alpha1.HealthCheck{{Uses: "flux"}}
+			if err := c.Update(context.Background(), g); err != nil {
+				t.Fatal(err)
+			}
+
+			reconcileGate(t, r, "production")
+
+			now = base.Add(30 * time.Minute)
+			swing.status = status
+			reconcileGate(t, r, "production")
+
+			count, sum := degradedObservations(t)
+			if count != 1 || sum != 1800 {
+				t.Errorf("recovery to %s recorded %d observation(s) totalling %.0fs, want 1 of 1800",
+					status, count, sum)
+			}
+		})
+	}
+}
