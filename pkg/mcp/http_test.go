@@ -270,3 +270,110 @@ func TestHTTPRefusesAMalformedOriginAtConstruction(t *testing.T) {
 		t.Fatal("a bare host was accepted as an origin")
 	}
 }
+
+func preflight(t *testing.T, h http.Handler, origin string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodOptions, "/", nil)
+	if origin != "" {
+		req.Header.Set("Origin", origin)
+	}
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	req.Header.Set("Access-Control-Request-Headers", "content-type")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+// Without this the allowlist could refuse an origin but never admit one.
+//
+// A browser sends a preflight before any cross-origin POST of
+// application/json, and an unanswered one is a 405 with no CORS headers — so
+// the browser blocks the request that follows and every browser client fails,
+// allowlisted or not. The existing tests asserted the header on the *response*
+// to a POST that a real browser would never have been allowed to send.
+func TestHTTPAnswersThePreflightForAConfiguredOrigin(t *testing.T) {
+	h := httpServer(t, HTTPOptions{
+		AllowUnauthenticated: true,
+		AllowedOrigins:       []string{"http://localhost:3000"},
+	})
+
+	rec := preflight(t, h, "http://localhost:3000")
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("preflight returned %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:3000" {
+		t.Errorf("Allow-Origin = %q", got)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Methods"); !strings.Contains(got, "POST") {
+		t.Errorf("Allow-Methods = %q, and POST is the only method this server takes", got)
+	}
+	// Content-Type is what makes the request preflight in the first place;
+	// Authorization is how the transport is authenticated.
+	for _, want := range []string{"Content-Type", "Authorization", ProtocolVersionHeader} {
+		if got := rec.Header().Get("Access-Control-Allow-Headers"); !strings.Contains(got, want) {
+			t.Errorf("Allow-Headers %q does not permit %s", got, want)
+		}
+	}
+	// Cookies must not cross origins: a bearer token is attached deliberately
+	// by a client, an ambient session is attached by the browser to whatever
+	// page the user happens to be visiting.
+	if got := rec.Header().Get("Access-Control-Allow-Credentials"); got != "" {
+		t.Errorf("Allow-Credentials = %q, which would let a page spend an ambient session", got)
+	}
+}
+
+// The preflight must not become a hole in the check it exists to serve.
+func TestHTTPRefusesThePreflightForAnUnknownOrigin(t *testing.T) {
+	h := httpServer(t, HTTPOptions{
+		AllowUnauthenticated: true,
+		AllowedOrigins:       []string{"http://localhost:3000"},
+	})
+
+	for _, origin := range []string{"https://evil.example", ""} {
+		rec := preflight(t, h, origin)
+		if rec.Code == http.StatusNoContent {
+			t.Errorf("preflight from origin %q was answered as allowed", origin)
+		}
+		if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+			t.Errorf("origin %q was told it is allowed: %q", origin, got)
+		}
+	}
+}
+
+// A browser attaches no credentials to a preflight, so requiring them would
+// refuse every legitimate client — the allowlist is the check that applies
+// here, and it still does.
+func TestHTTPDoesNotAuthenticateThePreflight(t *testing.T) {
+	h := httpServer(t, HTTPOptions{
+		Authenticate:   func(*http.Request) error { return errors.New("no token") },
+		AllowedOrigins: []string{"http://localhost:3000"},
+	})
+
+	if rec := preflight(t, h, "http://localhost:3000"); rec.Code != http.StatusNoContent {
+		t.Errorf("preflight returned %d; a browser cannot authenticate one", rec.Code)
+	}
+	// And the request it precedes is still authenticated.
+	rec := post(t, h, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
+		map[string]string{"Origin": "http://localhost:3000"})
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("the POST after the preflight returned %d, want 401", rec.Code)
+	}
+}
+
+// The echoed version is unreadable from a browser unless it is exposed:
+// script sees only the handful of headers CORS exposes by default.
+func TestHTTPExposesTheProtocolVersionToABrowser(t *testing.T) {
+	h := httpServer(t, HTTPOptions{
+		AllowUnauthenticated: true,
+		AllowedOrigins:       []string{"http://localhost:3000"},
+	})
+
+	rec := post(t, h, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, map[string]string{
+		"Origin": "http://localhost:3000", ProtocolVersionHeader: "2025-06-18",
+	})
+
+	if got := rec.Header().Get("Access-Control-Expose-Headers"); !strings.Contains(got, ProtocolVersionHeader) {
+		t.Errorf("Expose-Headers = %q, so the echoed version cannot be read", got)
+	}
+}

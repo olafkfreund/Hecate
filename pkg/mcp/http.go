@@ -75,6 +75,36 @@ func (s *Server) Handler(opts HTTPOptions) (http.Handler, error) {
 	mux.HandleFunc("POST /", func(w http.ResponseWriter, r *http.Request) {
 		s.serveHTTP(w, r, opts, origins)
 	})
+	// A browser sends this before any cross-origin POST of application/json,
+	// and the mux would otherwise answer 405 with no CORS headers — so the
+	// browser blocks the request that follows and the allowlist can refuse an
+	// origin but never admit one. Preflight is deliberately not authenticated:
+	// a browser does not attach credentials to it, so requiring them would
+	// refuse every legitimate client. The allowlist still applies, which is the
+	// check that matters here.
+	mux.HandleFunc("OPTIONS /", func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin == "" || !origins[strings.ToLower(origin)] {
+			w.Header().Set("Allow", "POST")
+			writeRPCError(w, http.StatusForbidden, nil, codeInvalidRequest,
+				"origin "+origin+" is not allowed to reach this server")
+			return
+		}
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Vary", "Origin")
+		w.Header().Set("Access-Control-Allow-Methods", "POST")
+		// Authorization because the transport authenticates with a bearer
+		// token, and the protocol header because a client following the HTTP
+		// specification sends it on every request.
+		w.Header().Set("Access-Control-Allow-Headers",
+			"Content-Type, Authorization, "+ProtocolVersionHeader)
+		w.Header().Set("Access-Control-Max-Age", "600")
+		// Access-Control-Allow-Credentials is deliberately absent. A bearer
+		// token is attached by the client, so nothing needs cookies to cross
+		// origins — and allowing them would let a page the user is merely
+		// visiting spend an ambient session against a write API.
+		w.WriteHeader(http.StatusNoContent)
+	})
 	// Answered explicitly rather than left to the mux's 405, so a client that
 	// tries the GET stream some servers offer learns why rather than guessing.
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, _ *http.Request) {
@@ -97,6 +127,10 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request, opts HTTPOpti
 		}
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Vary", "Origin")
+		// Without this the echoed version is invisible to a browser client:
+		// script can only read the handful of headers CORS exposes by default,
+		// and this one is not among them.
+		w.Header().Set("Access-Control-Expose-Headers", ProtocolVersionHeader)
 	}
 
 	if opts.Authenticate != nil {

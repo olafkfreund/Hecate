@@ -2589,3 +2589,39 @@ rare.
 **The regression test has both halves,** because "never record anything" would
 also pass the first: one holds that Unknown records nothing, and one holds that
 Healthy, Progressing and NotApplicable each still record the full 1800 seconds.
+
+## D70 — The Origin allowlist answers the preflight, or it can only ever refuse
+
+**Decision:** the MCP HTTP transport handles `OPTIONS`, answering a CORS
+preflight for an allowlisted origin and refusing every other. The preflight is
+not authenticated; the allowlist still applies to it.
+
+**The bug this fixes.** A browser sends a preflight before any cross-origin
+`POST` of `application/json`. Only `POST /` and `GET /` were registered, so the
+mux answered `OPTIONS` with 405 and no CORS headers, and the browser blocked the
+request that would have followed. `AllowedOrigins` could therefore *refuse* an
+origin but never *admit* one: no browser could reach the transport, allowlisted
+or not, and `--allowed-origins` was a flag whose successful path did not exist.
+
+**Why the tests said otherwise.** `TestHTTPAllowsAConfiguredOrigin` asserted the
+`Access-Control-Allow-Origin` header on the response to a POST — a POST that a
+real browser would never have been permitted to send. The assertion was true and
+the capability was absent, because `httptest` will happily make a request a
+browser refuses to. The regression tests exercise the preflight itself.
+
+**Preflight is deliberately unauthenticated.** A browser attaches no credentials
+to it, so requiring them would refuse every legitimate client while protecting
+nothing: the preflight reveals only which methods and headers are permitted. The
+check that matters at that point is the origin, and it is the one applied. The
+POST that follows is authenticated exactly as before, and a test holds both
+halves.
+
+**`Access-Control-Allow-Credentials` is deliberately absent.** This transport
+authenticates with a bearer token, which a client attaches on purpose. Allowing
+credentials would let a page the user merely visited spend an ambient session
+against tools that promote and abort — which is the attack the Origin check
+exists for, readmitted through the response to it.
+
+`Access-Control-Expose-Headers` now names `MCP-Protocol-Version`, because script
+in a browser can otherwise read only the handful of headers CORS exposes by
+default, and the echoed version was one of the ones it could not.
