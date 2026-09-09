@@ -2470,3 +2470,51 @@ yes
 $ kubectl auth can-i create gates.hecate.dev --as system:serviceaccount:ns:author
 no
 ```
+
+## D67 — A verifier's verdict is dated against the crossing it is judging
+
+**Decision:** `pkg/verify` reads Flagger's `Canary.status.phase` *and*
+`status.lastTransitionTime`, and a terminal phase counts as a verdict only if
+Flagger reached it strictly after the crossing entered the Gate. The `Verifier`
+interface takes that time as a `since` argument, and the Gate passes
+`status.current.enteredAt`.
+
+**The bug this fixes.** A Canary keeps its phase after its analysis ends. One
+that succeeded for the *previous* crossing still reads `Succeeded` until Flagger
+notices the new pod spec, which takes an analysis interval — and a Gate
+reconciles the moment its Passage finishes, which is inside that window. Reading
+the phase alone therefore cleared the new Bundle on the strength of the old
+canary's verdict, and `cleared` is what downstream Gates admit on. The Bundle
+reached production having had no analysis run against it at all.
+
+It is the exact failure the package already guarded `Initialized` against —
+*"treating it as such would clear a Bundle on the strength of a canary that never
+ran"* — in the phase that occurs far more often, and it is invisible afterwards
+because the canary does eventually go green. What is lost is not the deployment
+but the evidence: a promotion that was never verified is indistinguishable from
+one that was.
+
+**Why a timestamp rather than a spec hash.** Flagger's `lastAppliedSpec` and
+`lastPromotedSpec` identify *what* was analysed, which sounds stronger, but
+Hecate has nothing to compare them to: it pushes a git commit and never sees the
+pod spec Flux renders from it. The question actually being asked is narrower —
+*has Flagger looked since we deployed?* — and a transition time answers exactly
+that without Hecate having to model the rendering.
+
+**Strictly after, and undated is stale.** Kubernetes timestamps are
+second-resolution, so a Canary transitioning in the same second the crossing was
+recorded is reachable rather than theoretical; an analysis takes at least one
+interval, so a phase set in that second was set for something else. A verdict
+with no readable timestamp is treated the same way. Both choices err towards
+waiting, because the other direction is the bug above, and Flagger writes
+`lastTransitionTime` unconditionally — so the refusal costs nothing until that
+stops being true, at which point the reason says precisely what is missing.
+
+**Why no test caught it.** `pkg/verify`'s tests exercise one `Verify` call in
+isolation; `pkg/gate`'s use a stub verifier returning a fixed result. Neither
+suite can express "two crossings, one Canary", so the defect sat in the gap
+between two files that each looked complete. The regression tests are split
+across both for the same reason: `pkg/verify` proves a stale phase is not a
+verdict, and `pkg/gate` proves the Gate hands over the crossing's own entry time
+rather than the freshly-stamped local occupant — which would date every crossing
+to now, put no verdict ever after it, and hang a verifying Gate for ever.

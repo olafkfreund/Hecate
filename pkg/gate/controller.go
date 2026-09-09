@@ -309,7 +309,7 @@ func blockedReason(gateName string, b *v1alpha1.Bundle) string {
 // All of them must pass, and the first that has not is what the Gate reports:
 // a Gate that verified against three things and mentioned one is a Gate whose
 // operator fixes one problem at a time and is surprised twice.
-func (r *Reconciler) verify(ctx context.Context, gate *v1alpha1.Gate) (bool, string, error) {
+func (r *Reconciler) verify(ctx context.Context, gate *v1alpha1.Gate, since time.Time) (bool, string, error) {
 	for _, v := range gate.Spec.Verify {
 		verifier, ok := r.verifiers()[v.Uses]
 		if !ok {
@@ -321,7 +321,7 @@ func (r *Reconciler) verify(ctx context.Context, gate *v1alpha1.Gate) (bool, str
 		if v.With != nil {
 			raw = v.With.Raw
 		}
-		res, err := verifier.Verify(ctx, gate.Namespace, raw)
+		res, err := verifier.Verify(ctx, gate.Namespace, raw, since)
 		if err != nil {
 			return false, "", err
 		}
@@ -528,7 +528,11 @@ func (r *Reconciler) recordOutcome(ctx context.Context, gate *v1alpha1.Gate, pas
 	// strength of a canary that is still running — or one that rolled back,
 	// which leaves a perfectly healthy Deployment serving the previous
 	// version. That divergence is the whole reason verification is not health.
-	verified, unverified, err := r.verify(ctx, gate)
+	// A verdict counts only if the verifier reached it after this crossing
+	// entered the Gate. Read from `status.current` rather than the local
+	// occupant above: on later reconciles that one is re-stamped with the
+	// current time, and no verdict is ever after now.
+	verified, unverified, err := r.verify(ctx, gate, gate.Status.Current.EnteredAt.Time)
 	if err != nil {
 		return "", fmt.Errorf("verifying the crossing of %s: %w", bundle.Name, err)
 	}
@@ -784,5 +788,5 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 // what it deployed is running. See pkg/verify.
 type Verifier interface {
 	Name() string
-	Verify(ctx context.Context, namespace string, config []byte) (verify.Result, error)
+	Verify(ctx context.Context, namespace string, config []byte, since time.Time) (verify.Result, error)
 }

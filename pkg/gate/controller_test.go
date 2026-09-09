@@ -922,7 +922,7 @@ type stubVerifier struct {
 }
 
 func (s stubVerifier) Name() string { return "flagger" }
-func (s stubVerifier) Verify(context.Context, string, []byte) (verify.Result, error) {
+func (s stubVerifier) Verify(context.Context, string, []byte, time.Time) (verify.Result, error) {
 	return s.result, s.err
 }
 
@@ -1107,5 +1107,64 @@ func TestAVerdictThatArrivesLateStillClears(t *testing.T) {
 	}
 	if n := len(final.Status.Cleared); n != 1 {
 		t.Errorf("cleared = %d entries, want 1", n)
+	}
+}
+
+// recordingVerifier remembers every crossing time it was handed, so the Gate's
+// half of the staleness contract can be checked: passing the wrong `since`
+// makes pkg/verify's dating either useless or permanently blocking, and the
+// stub above cannot tell the difference because it ignores the argument.
+type recordingVerifier struct {
+	result verify.Result
+	since  []time.Time
+}
+
+func (v *recordingVerifier) Name() string { return "flagger" }
+
+func (v *recordingVerifier) Verify(_ context.Context, _ string, _ []byte, since time.Time) (verify.Result, error) {
+	v.since = append(v.since, since)
+	return v.result, nil
+}
+
+// A verifier is asked about *this* crossing, and the answer to "when did it
+// start" must not move.
+//
+// The trap is that `recordOutcome` builds a fresh occupant stamped with the
+// current time on every reconcile, and only writes it on the first. Handing the
+// verifier that local value would date every crossing to now, no verdict is
+// ever after now, and a Gate with verification would wait for ever. Reading
+// `status.current` instead is what makes it the crossing's own entry time.
+func TestTheVerifierIsToldWhenThisCrossingEnteredTheGate(t *testing.T) {
+	g := verifyingGate("staging", admits("podinfo"))
+	b := bundle("b1", "podinfo", 0)
+	r, c, _ := newReconciler(t, g, &b)
+
+	// Still analysing, so the Gate asks again on the next reconcile.
+	v := &recordingVerifier{result: verify.Result{Reason: "Canary podinfo is Progressing"}}
+	r.Verifiers = map[string]Verifier{"flagger": v}
+
+	reconcileGate(t, r, "staging")
+	p := listPassages(t, c)[0]
+	p.Status.Phase = v1alpha1.PassageSucceeded
+	if err := c.Status().Update(context.Background(), &p); err != nil {
+		t.Fatal(err)
+	}
+	reconcileGate(t, r, "staging")
+
+	entered := getGate(t, c, "staging").Status.Current.EnteredAt.Time
+
+	// Time passes, as it does while a canary is analysing.
+	r.Now = func() time.Time { return base.Add(10 * time.Minute) }
+	reconcileGate(t, r, "staging")
+
+	if len(v.since) < 2 {
+		t.Fatalf("the verifier was asked %d time(s); it must be re-asked while the canary runs", len(v.since))
+	}
+	for i, since := range v.since {
+		if !since.Equal(entered) {
+			t.Errorf("ask %d was told the crossing started at %s, want status.current.enteredAt %s — "+
+				"a `since` that tracks the clock is one no verdict can ever be after",
+				i, since, entered)
+		}
 	}
 }
