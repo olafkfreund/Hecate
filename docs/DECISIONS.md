@@ -2555,3 +2555,37 @@ that was related. What is restored is the edge.
 test used a repository smaller than the window, where no boundary exists. The
 regression test builds one larger than `historyLimit`, which costs half a second
 and is the only size at which the code path runs at all.
+
+## D69 — Losing sight of a Gate is not the same as it recovering
+
+**Decision:** `announceHealth` publishes a time-to-restore observation when a
+Gate leaves Degraded for a state that is an *observation* — Healthy,
+Progressing or NotApplicable — and not when it leaves Degraded for Unknown.
+
+**The bug this fixes.** The guard was `was == HealthDegraded`, so any exit from
+Degraded ended the outage, Unknown included. `Health`'s own documentation draws
+the distinction the metric was ignoring: *"HealthUnknown means we could not
+tell. Distinct from Degraded on purpose: 'I cannot see it' is different from 'I
+can see it and it is broken'."* The same function already agreed — it emits a
+**Warning** event for a Gate going Unknown — and then recorded that same
+transition as a recovery.
+
+The damage is to the shape of the number, not to one sample. A Degraded Gate
+whose checks stop answering published a restore time for an outage that was
+very possibly still running; when it became visible again and was still broken,
+a *second* outage began. One long outage is reported as two short ones, and the
+error is largest exactly when observability is worst — which is when the metric
+is most likely to be looked at.
+
+**The cost, stated rather than hidden.** `Since` records when the status last
+changed, so the move to Unknown discards the Degraded start. An outage that ends
+while Hecate is blind therefore goes uncounted rather than being counted
+approximately. That under-counts, which is the honest direction for a number D43
+already calls an approximation; inventing a restore time is not. Recovering the
+true duration would mean carrying an outage start separately from `Since`, which
+is a second timestamp to keep correct across restarts for a case that is already
+rare.
+
+**The regression test has both halves,** because "never record anything" would
+also pass the first: one holds that Unknown records nothing, and one holds that
+Healthy, Progressing and NotApplicable each still record the full 1800 seconds.

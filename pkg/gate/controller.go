@@ -597,12 +597,25 @@ func (r *Reconciler) announceHealth(gate *v1alpha1.Gate, previous *v1alpha1.Heal
 	if now == was || now == "" {
 		return
 	}
-	// A Gate leaving Degraded ends the only outage Hecate can see. The start
-	// comes from the previous report rather than from process memory, so it is
-	// still right after a restart or a leader-election handover — which is
-	// exactly when an outage is most likely to have begun under a different
-	// process (D43).
-	if was == v1alpha1.HealthDegraded && previous.Since != nil {
+	// A Gate leaving Degraded for a state we can actually see ends the only
+	// outage Hecate can measure. The start comes from the previous report
+	// rather than from process memory, so it is still right after a restart or
+	// a leader-election handover — which is exactly when an outage is most
+	// likely to have begun under a different process (D43).
+	//
+	// Unknown is excluded, and the distinction is the one the type itself
+	// draws: "I cannot see it" is not "I can see it and it is fixed". A Gate
+	// going Degraded -> Unknown has not recovered, it has stopped being
+	// observable — and publishing a restore time there ends an outage that may
+	// still be running, then starts a second one when it becomes visible
+	// again. One outage would be reported as two short ones, understating the
+	// number exactly when observability is worst.
+	//
+	// An outage that ends while Hecate is blind therefore goes uncounted, since
+	// `Since` resets on the move to Unknown and the Degraded start is gone.
+	// That under-counts, which is the honest direction for a number D43 already
+	// calls an approximation; fabricating a restore time is not.
+	if was == v1alpha1.HealthDegraded && now != v1alpha1.HealthUnknown && previous.Since != nil {
 		metrics.RecordGateRecovered(gate.Namespace, gate.Name,
 			r.now().Sub(previous.Since.Time).Seconds())
 	}
