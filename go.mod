@@ -10,7 +10,7 @@ require (
 	github.com/coreos/go-oidc/v3 v3.20.0
 	github.com/expr-lang/expr v1.17.8
 	github.com/go-git/go-git/v5 v5.19.2
-	github.com/go-jose/go-jose/v4 v4.1.4
+	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/go-logr/logr v1.4.4
 	github.com/google/go-containerregistry v0.21.9
 	github.com/invopop/jsonschema v0.14.0
